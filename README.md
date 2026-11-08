@@ -20,3 +20,11 @@
 <hr>
 
 ![MOTHER](assets/mother.png)
+
+<p align="center">
+  A personal context layer for your AI companion, across harnesses.
+</p>
+
+<p align="center">
+  <a href="docs/setup.md">Make it yours</a>
+</p>

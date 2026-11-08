@@ -19,10 +19,15 @@ struct Client {
 }
 impl Client {
     fn connect(config: &Path) -> Self {
+        Self::connect_with_model_dir(config, &config.parent().unwrap().join("missing-model"))
+    }
+    fn connect_with_model_dir(config: &Path, model_dir: &Path) -> Self {
         let mut child = Command::new(env!("CARGO_BIN_EXE_mother"))
             .arg("mcp")
             .arg("--config")
             .arg(config)
+            .env("MOTHER_MODEL_DIR", model_dir)
+            .current_dir(config.parent().unwrap())
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
             .stderr(Stdio::null())
@@ -109,6 +114,7 @@ struct Fixture {
 impl Fixture {
     fn new() -> Self {
         let dir = TempDir::new().unwrap();
+        std::fs::write(dir.path().join("SOUL.md"), "Synthetic MCP persona").unwrap();
         let initialized = cli(dir.path(), &["init"]);
         for client in ["harness-a", "harness-b"] {
             cli(
@@ -314,6 +320,17 @@ fn malformed_tool_arguments_fail_without_mutating_records() {
     for (name, arguments) in [
         ("mother_search_context", json!({})),
         ("mother_search_context", json!({"query":"   "})),
+        (
+            "mother_search_context",
+            json!({"query":"tea", "mode":"remote"}),
+        ),
+        ("mother_search_context", json!({"query":"tea", "mode":null})),
+        ("mother_search_context", json!({"query":"tea", "limit":0})),
+        ("mother_search_context", json!({"query":"tea", "limit":101})),
+        (
+            "mother_search_context",
+            json!({"query":"tea", "kind":"unknown"}),
+        ),
         ("mother_get_context", json!({"unknown":true})),
         (
             "mother_get_record",
@@ -359,4 +376,131 @@ fn search_uses_javascript_whitespace_semantics() {
         "JavaScript trims BOM but keeps U+0085 literal"
     );
     assert_eq!(bom["records"][0]["id"], saved["record"]["id"]);
+}
+
+#[test]
+fn semantic_search_reports_literal_fallback_without_a_model() {
+    let f = Fixture::new();
+    let mut client = Client::connect(&f.a_config);
+    let record = client.call(
+        "mother_write_record",
+        f.request(memory("Tea with identifier ZX-731")),
+    );
+    let result = client.call(
+        "mother_search_context",
+        json!({"query":"ZX-731", "mode":"hybrid"}),
+    );
+    assert_eq!(result["search"]["requestedMode"], "hybrid");
+    assert_eq!(result["search"]["effectiveMode"], "literal");
+    assert_eq!(result["search"]["semanticUsed"], false);
+    assert_eq!(result["search"]["reason"], "model_unavailable");
+    assert_eq!(result["records"][0]["id"], record["record"]["id"]);
+    let literal = client.call(
+        "mother_search_context",
+        json!({"query":"ZX-731", "mode":"literal"}),
+    );
+    assert_eq!(literal["search"]["effectiveMode"], "literal");
+    assert_eq!(literal["records"], result["records"]);
+    let invalid = client.result(
+        "mother_search_context",
+        json!({"query":"ZX-731", "mode":"remote"}),
+    );
+    assert_eq!(invalid["isError"], true);
+}
+
+#[test]
+fn search_respects_kind_limits_and_connected_revocation_in_every_mode() {
+    let f = Fixture::new();
+    let mut client = Client::connect(&f.a_config);
+    client.call("mother_write_record", f.request(memory("Tea ZX-731")));
+    client.call("mother_write_record", f.request(memory("More tea ZX-731")));
+    let task = client.call(
+        "mother_write_record",
+        f.request(json!({"kind":"task", "title":"Tea task", "content":"ZX-731", "status":"todo"})),
+    );
+    let result = client.call(
+        "mother_search_context",
+        json!({"query":"ZX-731", "kind":"task", "limit":1}),
+    );
+    assert_eq!(result["records"].as_array().unwrap().len(), 1);
+    assert_eq!(result["records"][0]["id"], task["record"]["id"]);
+    let memories = client.call(
+        "mother_search_context",
+        json!({"query":"ZX-731", "kind":"memory", "limit":1}),
+    );
+    assert_eq!(memories["records"].as_array().unwrap().len(), 1);
+    assert_eq!(memories["omitted"], 1);
+    cli(f.dir.path(), &["revoke", "harness-a"]);
+    for mode in ["hybrid", "semantic", "literal"] {
+        let result = client.result(
+            "mother_search_context",
+            json!({"query":"ZX-731", "mode":mode}),
+        );
+        assert_eq!(result["isError"], true, "{mode}: {result}");
+        assert_eq!(
+            result["structuredContent"]["error"]["code"], "UNAUTHORIZED",
+            "{mode}: {result}"
+        );
+    }
+}
+
+#[test]
+fn invalid_model_directory_does_not_block_mcp_reads_writes_or_search() {
+    let f = Fixture::new();
+    let relative_model = Path::new("relative-model");
+    let mut client = Client::connect_with_model_dir(&f.a_config, relative_model);
+    let initial = client.call("mother_get_context", json!({}));
+    assert_eq!(initial["workspace"]["id"], f.workspace["id"]);
+    let saved = client.call("mother_write_record", f.request(memory("Tea ZX-731")));
+    let read = client.call("mother_get_record", json!({"id":saved["record"]["id"]}));
+    assert_eq!(read, saved["record"]);
+    for mode in ["literal", "hybrid", "semantic"] {
+        let found = client.call(
+            "mother_search_context",
+            json!({"query":"ZX-731", "mode":mode}),
+        );
+        assert_eq!(found["records"][0]["id"], saved["record"]["id"]);
+        assert_eq!(found["search"]["requestedMode"], mode);
+        assert_eq!(found["search"]["effectiveMode"], "literal");
+        assert_eq!(found["search"]["semanticUsed"], false);
+        if mode != "literal" {
+            assert_eq!(found["search"]["reason"], "model_unavailable");
+        }
+    }
+    assert!(!f.a_config.parent().unwrap().join(relative_model).exists());
+}
+
+#[test]
+#[ignore = "requires MOTHER_TEST_MODEL_DIR; exercises actual learned embeddings over stdio in release mode"]
+fn real_model_semantic_mcp_search_survives_process_restart() {
+    let model = PathBuf::from(
+        std::env::var_os("MOTHER_TEST_MODEL_DIR").expect("set the verified model directory"),
+    );
+    let f = Fixture::new();
+    let mut c = Client::connect_with_model_dir(&f.a_config, &model);
+    let wanted = c.call(
+        "mother_write_record",
+        f.request(memory(
+            "I avoid meat and fish and choose plant based meals.",
+        )),
+    );
+    c.call(
+        "mother_write_record",
+        f.request(memory("The garden needs fresh soil and regular watering.")),
+    );
+    let result = c.call(
+        "mother_search_context",
+        json!({"query":"What can I cook for a vegetarian dinner?"}),
+    );
+    assert_eq!(result["search"]["semanticUsed"], true);
+    assert_eq!(result["records"][0]["id"], wanted["record"]["id"]);
+    drop(c);
+    let mut c = Client::connect_with_model_dir(&f.a_config, &model);
+    let result = c.call(
+        "mother_search_context",
+        json!({"query":"What can I cook for a vegetarian dinner?"}),
+    );
+    assert_eq!(result["search"]["semanticUsed"], true);
+    assert_eq!(result["search"]["newlyIndexedRecords"], 0);
+    assert_eq!(result["records"][0]["id"], wanted["record"]["id"]);
 }

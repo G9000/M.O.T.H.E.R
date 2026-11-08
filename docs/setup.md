@@ -1,6 +1,6 @@
 # Using your workspace
 
-M.O.T.H.E.R is a standalone Rust executable with its own SQLite store. Bun and Node are not required at runtime. AnimaOS is not required. The checked-in files contain the program and personality seed; private records and client credentials stay in your user data directory.
+M.O.T.H.E.R is a standalone Rust executable with its own SQLite store. Bun and Node are not required at runtime. AnimaOS is not required. The checked-in files contain the program and an editable persona example; private records and client credentials stay in your user data directory.
 
 ## Build or upgrade
 
@@ -24,17 +24,19 @@ Replace the previous Bun launch command in the chosen harness with that generate
 
 ## Initialize a new workspace
 
-Only for a new instance:
+Only for a new instance, create your own UTF-8 persona file (you can customize [the neutral example](../examples/SOUL.md)), then select it explicitly:
 
 ```powershell
-mother init
+mother init --soul "C:\private\SOUL.md"
 ```
+
+Alternatively, place your own `SOUL.md` beside the intended database and run `mother init`. With `--db`, the default file is beside that selected database. The current working directory is never searched automatically. An explicit `--soul` path may be absolute or relative to the directory where you run the command. Missing, unreadable, blank, invalid UTF-8 or oversized files fail before creating a database; the executable contains no fallback persona.
 
 The command prints the database path and stable workspace identity. It refuses to overwrite an existing database. On Windows the default is `%LOCALAPPDATA%\MOTHER\context.sqlite`, outside OneDrive and the checkout. On other platforms it is `~/.mother/context.sqlite`. Set an absolute `MOTHER_HOME` before initialization to select another local private directory, or pass `--db` explicitly.
 
 Use a local disk. Do not place the live SQLite database on a network share or sync its live files through a cloud folder. Use a portable export for transfer.
 
-`SOUL.md` in the current directory seeds the personality at initialization; if absent, the executable uses its embedded seed. The stored snapshot and its SHA-256 digest are returned to every client and included in exports. Editing the repository file changes future new workspaces; it does not silently rewrite an existing personality.
+`SOUL.md` is owned by the workspace user. Initialization imports the chosen text (at most 32,000 UTF-16 units) and stores its SHA-256 digest. Runtime context reads and exports use this stored snapshot, so switching harnesses or restoring elsewhere does not depend on the original file path. Editing the source file afterward does not reload it automatically; persona editing for an existing workspace is not exposed in this release. Existing workspaces retain their saved persona through upgrades, even if the original file is absent. The repository root `SOUL.md` is the maintainer's personal file, not a compiled default; it is used only if explicitly selected with `--soul`.
 
 ## Give each harness its own connection
 
@@ -62,6 +64,10 @@ All clients must point to the same database path. Each launches its own lightwei
 
 For another harness, enter the generated command and arguments in its supported MCP configuration and use [the session instructions](../adapters/session.md). A host without local MCP stdio needs an additional adapter. No claim is made that every harness supports these settings. The local server is not a remote ChatGPT web endpoint; that needs a separate authenticated deployment.
 
+## Local semantic retrieval
+
+Install the optional local model with `mother model install`. Search uses hybrid retrieval by default and falls back explicitly to literal matching when the model or cache is unavailable. `mother search` and `mother index` expose the same retrieval layer through the CLI. See [local semantic search](semantic-search.md) for setup, bounds and offline behavior. The six-tool MCP interface and canonical v1 record store remain compatible.
+
 ## Check a connection
 
 ```powershell
@@ -81,7 +87,7 @@ For your first real handoff, use synthetic material: save a tea preference and a
 | Tool | Purpose | Required scope |
 | --- | --- | --- |
 | mother_get_context | Workspace, persona, previews, unsettled work | read |
-| mother_search_context | Literal text search with explicit omissions | read |
+| mother_search_context | Local hybrid, semantic or literal search with explicit coverage | read |
 | mother_get_record | Full current record, including retracted records | read |
 | mother_get_receipt | This client's committed operation outcome | read |
 | mother_write_record | Create or revise a typed record | matching kind:write |

@@ -42,7 +42,7 @@
   },
   {
     "name": "mother_search_context",
-    "description": "Search literal title/content text. Results are bounded previews; omitted counts are explicit. Retracted and superseded records are excluded.",
+    "description": "Search title/content locally with hybrid (default), semantic, or literal retrieval. Hybrid puts exact substring matches first. Missing or unavailable local models produce explicit literal fallback. Results are bounded previews with coverage metadata; resolve full records before relying on details. Retracted, superseded and cancelled records are excluded. Search never downloads a model or sends text remotely.",
     "inputSchema": {
       "type": "object",
       "properties": {
@@ -50,6 +50,15 @@
           "type": "string",
           "minLength": 1,
           "maxLength": 200
+        },
+        "mode": {
+          "type": "string",
+          "enum": [
+            "hybrid",
+            "semantic",
+            "literal"
+          ],
+          "default": "hybrid"
         },
         "kind": {
           "type": "string",
