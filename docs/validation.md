@@ -1,28 +1,29 @@
-# Validation — 9 November 2026
+# Validation — Rust v0.2.0, 9 November 2026
 
-Environment: Windows, Bun 1.4.2, TypeScript 5.9.3, MCP TypeScript SDK 1.32.2, Zod 4.6.7. Dependency versions are locked in bun.lock.
+Environment: Windows, rustc/cargo 1.93.0, rmcp 3.9.0, rusqlite 0.41.1 with bundled SQLite. Exact dependency versions are in Cargo.lock.
 
-## Passed
+## Native checks
 
-- `bun test`: 21 tests, 107 assertions, no failures.
-- `bun run typecheck`: passed.
-- Real stdio MCP clients in separate subprocesses: same workspace, attributed memory/task/checkpoint writes, correction, task completion and restart persistence.
-- Two-process revision race: exactly one success and one structured CONFLICT. Both restarted clients retrieve the winning revision and matching receipt.
-- Two-process duplicate-operation race: one record, identical receipts.
-- Read-only denial, wrong-token denial and revocation enforced on an already connected client.
-- Export/restore after the original database is removed: initialized persona, record IDs/revisions, embedded text artifact and unknown action outcome survive. Old grants fail, new generation rejects stale writes.
-- Malformed exports, duplicate IDs, missing references, altered persona digest and existing destinations are rejected.
-- Process exit during restore import: destination cannot open as a valid empty workspace.
-- Clock rollback: corrected records remain readable/exportable.
-- Record-capacity boundary: new writes fail before commit, current records remain exportable, guarded updates within capacity still work.
-- CLI initialization, grants, connection output, context inspection, export, restore and revocation; invalid flags/names fail without unwanted initialization.
-- Git ignore checks cover private JSON configs/exports, SQLite and sidecars, environment files, and private/export folders.
-- README and original artwork unchanged.
+- `cargo test --locked`: 28 tests passed, zero failures. The process-crash helper is included in the count.
+- `cargo clippy --locked --all-targets --all-features -- -D warnings`: passed.
+- `cargo build --release --locked`: passed; standalone Windows executable built.
+- `cargo fmt --all -- --check`: passed.
+- `cargo doc --no-deps --locked`: passed.
 
-An empty personal instance was initialized outside the checkout, with a private Codex client config. Its generated connection entry was parsed and used to start a real MCP client: six tools were discovered and context retrieval returned zero personal records. No personal history was imported. Live identifiers and credentials are not recorded here.
+The native suite maps every original test and exercises database persistence, corrections, retractions, grants/revocation, bounded context, references, safe retries, two-process revision/duplicate-operation races, interrupted restore, clock rollback, portable capacity, exclusive file creation and owner CLI workflows. Extra coverage handles numeric normalization, Unicode search, UUID validation and malformed tool inputs.
 
-## Limits of this evidence
+## Cross-runtime evidence
 
-These are local protocol and CLI tests, not a conversation in an installed Codex, Claude, ChatGPT or AnimaOS host. No live host configuration was modified. Remote HTTP/OAuth deployment, web ChatGPT integration, cross-machine synchronization, full transcript ingestion and a personal pilot are not implemented or tested. External action execution is outside this server.
+Before removal, the TypeScript baseline at 6f6e0cc passed all 21 tests. Its original three MCP tests then passed against the Rust server through the official TypeScript SDK. No raw transcript or live personal context was used.
 
-The first release has a bounded portable format and refuses writes at its admission limit. Retractions retain historical receipts. The setup guide documents capacity, incomplete-restore recovery, credential reprovisioning, local filesystem trust and unencrypted private exports.
+The synthetic v1 SQL fixture preserves the exact original grant hash, workspace identity, records and operation receipts. Rust opened it without migration and replayed all seven original requests, including a request whose record had subsequently been corrected. In a separate differential check, TypeScript replayed a Rust-created operation and both runtimes produced semantically equal exports. The fixture is retained for native regression testing.
+
+## Existing private instance
+
+A private SQLite recovery backup and client/launcher copies were made outside Git before installation. The tested Rust release executable was installed in the existing private M.O.T.H.E.R data folder. A real stdio client used the existing credential file to initialize MCP, list all six tools and retrieve context. A credential-free continuity export was also saved privately.
+
+Logical hashes over every row of metadata, clients, records and operations, plus user_version, were identical before and after the read-only checks. The client JSON file's hash was unchanged. The prepared Codex connection entry now launches the Rust executable. No workspace or grant was recreated and no personal facts were imported.
+
+## Limits
+
+This proves local protocol and storage compatibility. It does not prove a conversation in a live Codex/Claude/AnimaOS host. No existing M.O.T.H.E.R entry was present in the inspected Codex configuration, and no live harness settings were changed. Remote HTTP/OAuth deployment, web ChatGPT integration, cross-machine synchronization and full transcript ingestion remain unsupported. MCP metadata/Unicode edge differences are documented in PORTING.md.
