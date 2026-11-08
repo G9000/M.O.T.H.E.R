@@ -4,7 +4,7 @@ M.O.T.H.E.R is one person's workspace and companion, independent of AnimaOS. The
 
 ## First usable release
 
-A Bun/TypeScript program uses SQLite as the single canonical store, outside the checkout. Local MCP clients launch a stdio adapter with an explicitly selected client identity. Multiple adapters use the same file; SQLite transactions coordinate writes. A CLI initializes the workspace, grants/revokes client capabilities, inspects context, and exports/restores private state.
+A standalone Rust program uses SQLite as the single canonical store, outside the checkout. Local MCP clients launch a stdio adapter with an explicitly selected client identity. Multiple adapters use the same file; SQLite transactions coordinate writes. A CLI initializes the workspace, grants/revokes client capabilities, inspects context, and exports/restores private state.
 
 Identity lives in SOUL.md. Selected memories, decisions, tasks, artifacts, action outcomes, and handoffs live in typed records. Every record has an ID, revision, timestamps, status, attribution, and source references. Context retrieval is bounded and records omissions; direct retrieval resolves full records. No automatic history scraping or full transcript synchronization.
 
@@ -22,7 +22,7 @@ The first transport is local stdio. Remote ChatGPT connections require a separat
 
 ## Concrete v1 contract
 
-The discriminated record schema in src/contracts.ts is normative. Memory carries an asserted basis (owner_statement, source, model_inference); this is attributed to the writing client and never grants owner authority. Decision states distinguish proposed/confirmed/superseded/retracted. Tasks use todo/doing/blocked/done/cancelled. Actions use pending/succeeded/failed/unknown. Checkpoints contain nextStep, completed steps, open questions, and references. Artifacts embed bounded plain text or Markdown; arbitrary binary files and external source bytes are not imported or fetched.
+The discriminated record schema in src/contracts.rs is normative. Memory carries an asserted basis (owner_statement, source, model_inference); this is attributed to the writing client and never grants owner authority. Decision states distinguish proposed/confirmed/superseded/retracted. Tasks use todo/doing/blocked/done/cancelled. Actions use pending/succeeded/failed/unknown. Checkpoints contain nextStep, completed steps, open questions, and references. Artifacts embed bounded plain text or Markdown; arbitrary binary files and external source bytes are not imported or fetched.
 
 References can point to any existing record in this single workspace, including retracted records as historical evidence. They do not imply execution authority. Read requires read; each mutation requires its kind's capability (memory:write, decision:write, task:write, checkpoint:write, artifact:write, action:write). Credential identity determines the actor; no tool can choose it.
 

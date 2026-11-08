@@ -11,3 +11,4 @@ private/
 exports/
 *.private.json
 coverage/
+/target/

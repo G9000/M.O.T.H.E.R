@@ -1,3 +1,5 @@
+> Historical v0.1 TypeScript bootstrap plan, completed before the Rust port. Current implementation and validation are in rust-port-plan.md, setup.md and validation.md.
+
 # Independent workspace implementation plan
 
 **Goal:** Give the owner a usable private context store shared by local MCP harnesses without AnimaOS.

@@ -1,0 +1,565 @@
+{
+  "auth": {
+    "clientId": "fixture-client",
+    "token": "0000000000000000000000000000000000000000000000000000000000000000",
+    "scopes": [
+      "read",
+      "memory:write",
+      "task:write",
+      "checkpoint:write",
+      "decision:write",
+      "artifact:write",
+      "action:write"
+    ]
+  },
+  "requests": [
+    {
+      "workspaceId": "fa0512bc-13e5-42f6-8edf-78c9c7dacf90",
+      "generation": "6ac17f59-d119-4aeb-95f7-e53986d9d5bd",
+      "operationId": "b2837213-0d60-4316-9c91-bd6b067991d2",
+      "expectedRevision": 0,
+      "record": {
+        "kind": "memory",
+        "title": " Tea 🫖 ",
+        "content": " Prefers green tea — café ",
+        "status": "active",
+        "basis": "owner_statement"
+      }
+    },
+    {
+      "workspaceId": "fa0512bc-13e5-42f6-8edf-78c9c7dacf90",
+      "generation": "6ac17f59-d119-4aeb-95f7-e53986d9d5bd",
+      "operationId": "473e149d-0770-4270-beca-cdbe8b856d15",
+      "expectedRevision": 1,
+      "record": {
+        "kind": "memory",
+        "title": "Tea 🫖",
+        "content": "Prefers black tea — café",
+        "status": "active",
+        "basis": "owner_statement"
+      },
+      "id": "b31db143-56b0-4166-8fea-e2288d55738d"
+    },
+    {
+      "workspaceId": "fa0512bc-13e5-42f6-8edf-78c9c7dacf90",
+      "generation": "6ac17f59-d119-4aeb-95f7-e53986d9d5bd",
+      "operationId": "5f5f6c89-f5f7-43f9-9e40-ea2410541430",
+      "expectedRevision": 0,
+      "record": {
+        "kind": "task",
+        "title": "Weekend",
+        "content": "Choose a destination",
+        "status": "doing"
+      }
+    },
+    {
+      "workspaceId": "fa0512bc-13e5-42f6-8edf-78c9c7dacf90",
+      "generation": "6ac17f59-d119-4aeb-95f7-e53986d9d5bd",
+      "operationId": "961a0f6f-f3c9-4043-b80c-e2bac1493d5d",
+      "expectedRevision": 0,
+      "record": {
+        "kind": "decision",
+        "title": "Timing",
+        "content": "Proposed weekend",
+        "status": "proposed"
+      }
+    },
+    {
+      "workspaceId": "fa0512bc-13e5-42f6-8edf-78c9c7dacf90",
+      "generation": "6ac17f59-d119-4aeb-95f7-e53986d9d5bd",
+      "operationId": "990021af-1c14-47bf-a57d-9f0fda5efd59",
+      "expectedRevision": 0,
+      "record": {
+        "kind": "artifact",
+        "title": "Plan",
+        "content": "# Weekend\nA portable plan.",
+        "status": "active",
+        "mediaType": "text/markdown"
+      }
+    },
+    {
+      "workspaceId": "fa0512bc-13e5-42f6-8edf-78c9c7dacf90",
+      "generation": "6ac17f59-d119-4aeb-95f7-e53986d9d5bd",
+      "operationId": "3f798b30-71ed-466b-ae3f-b276ca8d2e3f",
+      "expectedRevision": 0,
+      "record": {
+        "kind": "action",
+        "title": "Booking",
+        "content": "Response lost; outcome unresolved",
+        "status": "unknown",
+        "destination": "synthetic service",
+        "references": [
+          "288c6480-bfb7-4669-9678-e31fa7ff4993"
+        ],
+        "sources": [
+          {
+            "label": "evidence",
+            "uri": "https://example.com/evidence"
+          }
+        ]
+      }
+    },
+    {
+      "workspaceId": "fa0512bc-13e5-42f6-8edf-78c9c7dacf90",
+      "generation": "6ac17f59-d119-4aeb-95f7-e53986d9d5bd",
+      "operationId": "a57cb961-71ee-4881-99ff-e93a6a534f70",
+      "expectedRevision": 0,
+      "record": {
+        "kind": "checkpoint",
+        "title": "Continuation",
+        "content": "Owner has not chosen a destination",
+        "status": "active",
+        "nextStep": "Ask owner about the destination",
+        "references": [
+          "288c6480-bfb7-4669-9678-e31fa7ff4993",
+          "230246c9-b6a4-4ddb-a3d7-6a6b2c5cee5d"
+        ]
+      }
+    }
+  ],
+  "receipts": [
+    {
+      "operationId": "b2837213-0d60-4316-9c91-bd6b067991d2",
+      "generation": "6ac17f59-d119-4aeb-95f7-e53986d9d5bd",
+      "committedAt": "2026-11-08T20:50:17.677Z",
+      "record": {
+        "title": "Tea 🫖",
+        "content": "Prefers green tea — café",
+        "references": [],
+        "sources": [],
+        "kind": "memory",
+        "status": "active",
+        "basis": "owner_statement",
+        "id": "b31db143-56b0-4166-8fea-e2288d55738d",
+        "revision": 1,
+        "actor": "fixture-client",
+        "createdAt": "2026-11-08T20:50:17.677Z",
+        "updatedAt": "2026-11-08T20:50:17.677Z"
+      }
+    },
+    {
+      "operationId": "473e149d-0770-4270-beca-cdbe8b856d15",
+      "generation": "6ac17f59-d119-4aeb-95f7-e53986d9d5bd",
+      "committedAt": "2026-11-08T20:50:17.679Z",
+      "record": {
+        "title": "Tea 🫖",
+        "content": "Prefers black tea — café",
+        "references": [],
+        "sources": [],
+        "kind": "memory",
+        "status": "active",
+        "basis": "owner_statement",
+        "id": "b31db143-56b0-4166-8fea-e2288d55738d",
+        "revision": 2,
+        "actor": "fixture-client",
+        "createdAt": "2026-11-08T20:50:17.677Z",
+        "updatedAt": "2026-11-08T20:50:17.679Z"
+      }
+    },
+    {
+      "operationId": "5f5f6c89-f5f7-43f9-9e40-ea2410541430",
+      "generation": "6ac17f59-d119-4aeb-95f7-e53986d9d5bd",
+      "committedAt": "2026-11-08T20:50:17.679Z",
+      "record": {
+        "title": "Weekend",
+        "content": "Choose a destination",
+        "references": [],
+        "sources": [],
+        "kind": "task",
+        "status": "doing",
+        "id": "288c6480-bfb7-4669-9678-e31fa7ff4993",
+        "revision": 1,
+        "actor": "fixture-client",
+        "createdAt": "2026-11-08T20:50:17.679Z",
+        "updatedAt": "2026-11-08T20:50:17.679Z"
+      }
+    },
+    {
+      "operationId": "961a0f6f-f3c9-4043-b80c-e2bac1493d5d",
+      "generation": "6ac17f59-d119-4aeb-95f7-e53986d9d5bd",
+      "committedAt": "2026-11-08T20:50:17.680Z",
+      "record": {
+        "title": "Timing",
+        "content": "Proposed weekend",
+        "references": [],
+        "sources": [],
+        "kind": "decision",
+        "status": "proposed",
+        "id": "85518f38-907d-4bfb-8f80-4e19eb00bf2f",
+        "revision": 1,
+        "actor": "fixture-client",
+        "createdAt": "2026-11-08T20:50:17.680Z",
+        "updatedAt": "2026-11-08T20:50:17.680Z"
+      }
+    },
+    {
+      "operationId": "990021af-1c14-47bf-a57d-9f0fda5efd59",
+      "generation": "6ac17f59-d119-4aeb-95f7-e53986d9d5bd",
+      "committedAt": "2026-11-08T20:50:17.681Z",
+      "record": {
+        "title": "Plan",
+        "content": "# Weekend\nA portable plan.",
+        "references": [],
+        "sources": [],
+        "kind": "artifact",
+        "status": "active",
+        "mediaType": "text/markdown",
+        "id": "230246c9-b6a4-4ddb-a3d7-6a6b2c5cee5d",
+        "revision": 1,
+        "actor": "fixture-client",
+        "createdAt": "2026-11-08T20:50:17.681Z",
+        "updatedAt": "2026-11-08T20:50:17.681Z"
+      }
+    },
+    {
+      "operationId": "3f798b30-71ed-466b-ae3f-b276ca8d2e3f",
+      "generation": "6ac17f59-d119-4aeb-95f7-e53986d9d5bd",
+      "committedAt": "2026-11-08T20:50:17.682Z",
+      "record": {
+        "title": "Booking",
+        "content": "Response lost; outcome unresolved",
+        "references": [
+          "288c6480-bfb7-4669-9678-e31fa7ff4993"
+        ],
+        "sources": [
+          {
+            "label": "evidence",
+            "uri": "https://example.com/evidence"
+          }
+        ],
+        "kind": "action",
+        "status": "unknown",
+        "destination": "synthetic service",
+        "id": "107b9e3a-6a6e-4239-b9ac-3ae3d3ba21f1",
+        "revision": 1,
+        "actor": "fixture-client",
+        "createdAt": "2026-11-08T20:50:17.682Z",
+        "updatedAt": "2026-11-08T20:50:17.682Z"
+      }
+    },
+    {
+      "operationId": "a57cb961-71ee-4881-99ff-e93a6a534f70",
+      "generation": "6ac17f59-d119-4aeb-95f7-e53986d9d5bd",
+      "committedAt": "2026-11-08T20:50:17.682Z",
+      "record": {
+        "title": "Continuation",
+        "content": "Owner has not chosen a destination",
+        "references": [
+          "288c6480-bfb7-4669-9678-e31fa7ff4993",
+          "230246c9-b6a4-4ddb-a3d7-6a6b2c5cee5d"
+        ],
+        "sources": [],
+        "kind": "checkpoint",
+        "status": "active",
+        "nextStep": "Ask owner about the destination",
+        "completed": [],
+        "openQuestions": [],
+        "id": "1cc622cc-3aac-4dbd-adf6-c245c0259ca5",
+        "revision": 1,
+        "actor": "fixture-client",
+        "createdAt": "2026-11-08T20:50:17.682Z",
+        "updatedAt": "2026-11-08T20:50:17.682Z"
+      }
+    }
+  ],
+  "bundle": {
+    "schemaVersion": 1,
+    "exportedAt": "2026-11-08T20:50:17.683Z",
+    "workspace": {
+      "id": "fa0512bc-13e5-42f6-8edf-78c9c7dacf90",
+      "generation": "6ac17f59-d119-4aeb-95f7-e53986d9d5bd",
+      "schemaVersion": 1,
+      "createdAt": "2026-11-08T20:50:17.672Z"
+    },
+    "persona": {
+      "content": "Synthetic MOTHER persona for compatibility tests.",
+      "hash": "26c98c2f55571f3f0f14abb3dbafb53a7ed7df6f89fe84240cc2866766e680c5"
+    },
+    "records": [
+      {
+        "title": "Booking",
+        "content": "Response lost; outcome unresolved",
+        "references": [
+          "288c6480-bfb7-4669-9678-e31fa7ff4993"
+        ],
+        "sources": [
+          {
+            "label": "evidence",
+            "uri": "https://example.com/evidence"
+          }
+        ],
+        "kind": "action",
+        "status": "unknown",
+        "destination": "synthetic service",
+        "id": "107b9e3a-6a6e-4239-b9ac-3ae3d3ba21f1",
+        "revision": 1,
+        "actor": "fixture-client",
+        "createdAt": "2026-11-08T20:50:17.682Z",
+        "updatedAt": "2026-11-08T20:50:17.682Z"
+      },
+      {
+        "title": "Continuation",
+        "content": "Owner has not chosen a destination",
+        "references": [
+          "288c6480-bfb7-4669-9678-e31fa7ff4993",
+          "230246c9-b6a4-4ddb-a3d7-6a6b2c5cee5d"
+        ],
+        "sources": [],
+        "kind": "checkpoint",
+        "status": "active",
+        "nextStep": "Ask owner about the destination",
+        "completed": [],
+        "openQuestions": [],
+        "id": "1cc622cc-3aac-4dbd-adf6-c245c0259ca5",
+        "revision": 1,
+        "actor": "fixture-client",
+        "createdAt": "2026-11-08T20:50:17.682Z",
+        "updatedAt": "2026-11-08T20:50:17.682Z"
+      },
+      {
+        "title": "Plan",
+        "content": "# Weekend\nA portable plan.",
+        "references": [],
+        "sources": [],
+        "kind": "artifact",
+        "status": "active",
+        "mediaType": "text/markdown",
+        "id": "230246c9-b6a4-4ddb-a3d7-6a6b2c5cee5d",
+        "revision": 1,
+        "actor": "fixture-client",
+        "createdAt": "2026-11-08T20:50:17.681Z",
+        "updatedAt": "2026-11-08T20:50:17.681Z"
+      },
+      {
+        "title": "Weekend",
+        "content": "Choose a destination",
+        "references": [],
+        "sources": [],
+        "kind": "task",
+        "status": "doing",
+        "id": "288c6480-bfb7-4669-9678-e31fa7ff4993",
+        "revision": 1,
+        "actor": "fixture-client",
+        "createdAt": "2026-11-08T20:50:17.679Z",
+        "updatedAt": "2026-11-08T20:50:17.679Z"
+      },
+      {
+        "title": "Timing",
+        "content": "Proposed weekend",
+        "references": [],
+        "sources": [],
+        "kind": "decision",
+        "status": "proposed",
+        "id": "85518f38-907d-4bfb-8f80-4e19eb00bf2f",
+        "revision": 1,
+        "actor": "fixture-client",
+        "createdAt": "2026-11-08T20:50:17.680Z",
+        "updatedAt": "2026-11-08T20:50:17.680Z"
+      },
+      {
+        "title": "Tea 🫖",
+        "content": "Prefers black tea — café",
+        "references": [],
+        "sources": [],
+        "kind": "memory",
+        "status": "active",
+        "basis": "owner_statement",
+        "id": "b31db143-56b0-4166-8fea-e2288d55738d",
+        "revision": 2,
+        "actor": "fixture-client",
+        "createdAt": "2026-11-08T20:50:17.677Z",
+        "updatedAt": "2026-11-08T20:50:17.679Z"
+      }
+    ],
+    "operations": [
+      {
+        "actor": "fixture-client",
+        "generation": "6ac17f59-d119-4aeb-95f7-e53986d9d5bd",
+        "operationId": "3f798b30-71ed-466b-ae3f-b276ca8d2e3f",
+        "requestHash": "a6bf084b5183fc393b4fbca49899c85343987c9d99ec3d6816c94c4bbc71dd9c",
+        "receipt": {
+          "operationId": "3f798b30-71ed-466b-ae3f-b276ca8d2e3f",
+          "generation": "6ac17f59-d119-4aeb-95f7-e53986d9d5bd",
+          "committedAt": "2026-11-08T20:50:17.682Z",
+          "record": {
+            "title": "Booking",
+            "content": "Response lost; outcome unresolved",
+            "references": [
+              "288c6480-bfb7-4669-9678-e31fa7ff4993"
+            ],
+            "sources": [
+              {
+                "label": "evidence",
+                "uri": "https://example.com/evidence"
+              }
+            ],
+            "kind": "action",
+            "status": "unknown",
+            "destination": "synthetic service",
+            "id": "107b9e3a-6a6e-4239-b9ac-3ae3d3ba21f1",
+            "revision": 1,
+            "actor": "fixture-client",
+            "createdAt": "2026-11-08T20:50:17.682Z",
+            "updatedAt": "2026-11-08T20:50:17.682Z"
+          }
+        }
+      },
+      {
+        "actor": "fixture-client",
+        "generation": "6ac17f59-d119-4aeb-95f7-e53986d9d5bd",
+        "operationId": "473e149d-0770-4270-beca-cdbe8b856d15",
+        "requestHash": "528079d5995e65c3b7852fd5148f02e58396a5c713c53f97ebdc6f3fb1de3e83",
+        "receipt": {
+          "operationId": "473e149d-0770-4270-beca-cdbe8b856d15",
+          "generation": "6ac17f59-d119-4aeb-95f7-e53986d9d5bd",
+          "committedAt": "2026-11-08T20:50:17.679Z",
+          "record": {
+            "title": "Tea 🫖",
+            "content": "Prefers black tea — café",
+            "references": [],
+            "sources": [],
+            "kind": "memory",
+            "status": "active",
+            "basis": "owner_statement",
+            "id": "b31db143-56b0-4166-8fea-e2288d55738d",
+            "revision": 2,
+            "actor": "fixture-client",
+            "createdAt": "2026-11-08T20:50:17.677Z",
+            "updatedAt": "2026-11-08T20:50:17.679Z"
+          }
+        }
+      },
+      {
+        "actor": "fixture-client",
+        "generation": "6ac17f59-d119-4aeb-95f7-e53986d9d5bd",
+        "operationId": "5f5f6c89-f5f7-43f9-9e40-ea2410541430",
+        "requestHash": "d529afe45f615b418b62252114ae4ff06c3e9a752852c8c7a02eb4d7b2e2ee67",
+        "receipt": {
+          "operationId": "5f5f6c89-f5f7-43f9-9e40-ea2410541430",
+          "generation": "6ac17f59-d119-4aeb-95f7-e53986d9d5bd",
+          "committedAt": "2026-11-08T20:50:17.679Z",
+          "record": {
+            "title": "Weekend",
+            "content": "Choose a destination",
+            "references": [],
+            "sources": [],
+            "kind": "task",
+            "status": "doing",
+            "id": "288c6480-bfb7-4669-9678-e31fa7ff4993",
+            "revision": 1,
+            "actor": "fixture-client",
+            "createdAt": "2026-11-08T20:50:17.679Z",
+            "updatedAt": "2026-11-08T20:50:17.679Z"
+          }
+        }
+      },
+      {
+        "actor": "fixture-client",
+        "generation": "6ac17f59-d119-4aeb-95f7-e53986d9d5bd",
+        "operationId": "961a0f6f-f3c9-4043-b80c-e2bac1493d5d",
+        "requestHash": "d17b76d1f5b366fdec3a7ac35fb9e2c9d75287a97f1a724f4d9f2f1d83417145",
+        "receipt": {
+          "operationId": "961a0f6f-f3c9-4043-b80c-e2bac1493d5d",
+          "generation": "6ac17f59-d119-4aeb-95f7-e53986d9d5bd",
+          "committedAt": "2026-11-08T20:50:17.680Z",
+          "record": {
+            "title": "Timing",
+            "content": "Proposed weekend",
+            "references": [],
+            "sources": [],
+            "kind": "decision",
+            "status": "proposed",
+            "id": "85518f38-907d-4bfb-8f80-4e19eb00bf2f",
+            "revision": 1,
+            "actor": "fixture-client",
+            "createdAt": "2026-11-08T20:50:17.680Z",
+            "updatedAt": "2026-11-08T20:50:17.680Z"
+          }
+        }
+      },
+      {
+        "actor": "fixture-client",
+        "generation": "6ac17f59-d119-4aeb-95f7-e53986d9d5bd",
+        "operationId": "990021af-1c14-47bf-a57d-9f0fda5efd59",
+        "requestHash": "c2e566c598f3bede363ec33d6a0ccafcc014b6ebb99d12008b6073a9da71ae8d",
+        "receipt": {
+          "operationId": "990021af-1c14-47bf-a57d-9f0fda5efd59",
+          "generation": "6ac17f59-d119-4aeb-95f7-e53986d9d5bd",
+          "committedAt": "2026-11-08T20:50:17.681Z",
+          "record": {
+            "title": "Plan",
+            "content": "# Weekend\nA portable plan.",
+            "references": [],
+            "sources": [],
+            "kind": "artifact",
+            "status": "active",
+            "mediaType": "text/markdown",
+            "id": "230246c9-b6a4-4ddb-a3d7-6a6b2c5cee5d",
+            "revision": 1,
+            "actor": "fixture-client",
+            "createdAt": "2026-11-08T20:50:17.681Z",
+            "updatedAt": "2026-11-08T20:50:17.681Z"
+          }
+        }
+      },
+      {
+        "actor": "fixture-client",
+        "generation": "6ac17f59-d119-4aeb-95f7-e53986d9d5bd",
+        "operationId": "a57cb961-71ee-4881-99ff-e93a6a534f70",
+        "requestHash": "b607f38d70ba6e408e1146922eda3dc3a8f6889371935c6f48c0bb8dbed8b07b",
+        "receipt": {
+          "operationId": "a57cb961-71ee-4881-99ff-e93a6a534f70",
+          "generation": "6ac17f59-d119-4aeb-95f7-e53986d9d5bd",
+          "committedAt": "2026-11-08T20:50:17.682Z",
+          "record": {
+            "title": "Continuation",
+            "content": "Owner has not chosen a destination",
+            "references": [
+              "288c6480-bfb7-4669-9678-e31fa7ff4993",
+              "230246c9-b6a4-4ddb-a3d7-6a6b2c5cee5d"
+            ],
+            "sources": [],
+            "kind": "checkpoint",
+            "status": "active",
+            "nextStep": "Ask owner about the destination",
+            "completed": [],
+            "openQuestions": [],
+            "id": "1cc622cc-3aac-4dbd-adf6-c245c0259ca5",
+            "revision": 1,
+            "actor": "fixture-client",
+            "createdAt": "2026-11-08T20:50:17.682Z",
+            "updatedAt": "2026-11-08T20:50:17.682Z"
+          }
+        }
+      },
+      {
+        "actor": "fixture-client",
+        "generation": "6ac17f59-d119-4aeb-95f7-e53986d9d5bd",
+        "operationId": "b2837213-0d60-4316-9c91-bd6b067991d2",
+        "requestHash": "a0bf5a546a7245b2fbfb50d7c76c03e6374b3924e4ff41e48eaa804f3b4bdc50",
+        "receipt": {
+          "operationId": "b2837213-0d60-4316-9c91-bd6b067991d2",
+          "generation": "6ac17f59-d119-4aeb-95f7-e53986d9d5bd",
+          "committedAt": "2026-11-08T20:50:17.677Z",
+          "record": {
+            "title": "Tea 🫖",
+            "content": "Prefers green tea — café",
+            "references": [],
+            "sources": [],
+            "kind": "memory",
+            "status": "active",
+            "basis": "owner_statement",
+            "id": "b31db143-56b0-4166-8fea-e2288d55738d",
+            "revision": 1,
+            "actor": "fixture-client",
+            "createdAt": "2026-11-08T20:50:17.677Z",
+            "updatedAt": "2026-11-08T20:50:17.677Z"
+          }
+        }
+      }
+    ],
+    "omittedExternalSources": [
+      "https://example.com/evidence"
+    ]
+  }
+}
