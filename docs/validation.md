@@ -1,3 +1,16 @@
+# Validation — existing workspace SOUL updates v0.3.2, 9 November 2026
+
+- `cargo test --locked`: 62 passed; 2 optional real-model tests excluded from this offline run.
+- Both opt-in actual-model release fixtures passed separately.
+- Formatting, all-target/all-feature Clippy with warnings denied, release build and Rust docs passed.
+- Independent review found no substantive issue.
+
+New regression tests cover explicit owner CLI inspection/update, mandatory expected hash, same-content no-op, stale retry rejection, blank/BOM-only/oversized drafts, direct Store validation, two concurrent owners (exactly one success), preserved workspace/records/receipts/grants, updated export/restore, already-connected MCP clients and in-flight search freshness.
+
+The versioned 0.3.2 executable was installed after private backups. A synthetic temporary workspace was opened by an actual installed 0.3.0 MCP process, updated with the installed 0.3.2 CLI, and read again through the same process. It returned the new persona/hash without restart and preserved workspace identity. The owned temporary workspace was cleaned. The real workspace was only read: its persona and identity matched the previous installed CLI. No new personal persona text was supplied or imported. Codex configuration selects 0.3.2 on next start and new terminals select its CLI; the existing connected server remains usable.
+
+---
+
 # Validation — owner-supplied SOUL v0.3.1, 9 November 2026
 
 The executable no longer embeds the maintainer's persona. New workspaces load an explicit `init --soul` path or SOUL.md beside the selected database; missing or invalid files do not fall back to a repository persona. Existing stored snapshots remain unchanged.

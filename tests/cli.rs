@@ -371,3 +371,79 @@ fn default_soul_follows_an_explicit_database_location() {
     );
     assert!(!home.path().join("context.sqlite").exists());
 }
+
+#[test]
+fn owner_updates_existing_soul_with_hash_precondition_and_preserves_workspace() {
+    let dir = TempDir::new().unwrap();
+    initialize(dir.path());
+    succeeds(dir.path(), &["grant", "reader"]);
+    let before = succeeds(dir.path(), &["soul", "show"]);
+    let old_hash = before["persona"]["hash"].as_str().unwrap();
+    let file = dir.path().join("edited.md");
+    let file_arg = file.to_str().unwrap();
+    let update = [
+        "soul",
+        "update",
+        "--file",
+        file_arg,
+        "--expected-hash",
+        old_hash,
+    ];
+    fs::write(&file, "# Updated companion\nUse concise replies.\n").unwrap();
+    let result = succeeds(dir.path(), &update);
+    assert_eq!(result["changed"], true);
+    assert_eq!(result["previousHash"], old_hash);
+    assert_eq!(result["workspace"], before["workspace"]);
+    let after = succeeds(dir.path(), &["soul", "show"]);
+    assert_eq!(
+        after["persona"]["content"],
+        fs::read_to_string(&file).unwrap()
+    );
+    assert_eq!(after["persona"]["hash"], result["hash"]);
+    let stale = run(dir.path(), &update);
+    assert!(!stale.status.success());
+    assert!(String::from_utf8_lossy(&stale.stderr).contains("CONFLICT"));
+    let new_hash = after["persona"]["hash"].as_str().unwrap();
+    assert_eq!(
+        succeeds(
+            dir.path(),
+            &[
+                "soul",
+                "update",
+                "--file",
+                file_arg,
+                "--expected-hash",
+                new_hash
+            ]
+        )["changed"],
+        false
+    );
+    fs::write(&file, "\u{feff} \n").unwrap();
+    assert!(
+        !run(
+            dir.path(),
+            &[
+                "soul",
+                "update",
+                "--file",
+                file_arg,
+                "--expected-hash",
+                new_hash
+            ]
+        )
+        .status
+        .success()
+    );
+    assert_eq!(succeeds(dir.path(), &["soul", "show"]), after);
+    let config = dir.path().join("clients/reader.private.json");
+    let context = succeeds(
+        dir.path(),
+        &["context", "--config", config.to_str().unwrap()],
+    );
+    assert_eq!(context["persona"], after["persona"]);
+    assert!(
+        !run(dir.path(), &["soul", "update", "--file", file_arg])
+            .status
+            .success()
+    );
+}

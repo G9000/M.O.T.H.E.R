@@ -38,6 +38,11 @@ enum Command {
         #[arg(long)]
         soul: Option<PathBuf>,
     },
+    /// Inspect or explicitly update this workspace's stored persona as its owner.
+    Soul {
+        #[command(subcommand)]
+        command: SoulCommand,
+    },
     /// Create a client grant and exclusive private configuration file.
     Grant {
         client: String,
@@ -111,6 +116,25 @@ enum Command {
         config: PathBuf,
     },
 }
+#[derive(Debug, Subcommand)]
+enum SoulCommand {
+    /// Read the stored persona and its hash; output may contain private text.
+    Show {
+        #[arg(long)]
+        db: Option<PathBuf>,
+    },
+    /// Import your edited persona only if the current stored hash still matches.
+    Update {
+        #[arg(long)]
+        db: Option<PathBuf>,
+        #[arg(long)]
+        file: PathBuf,
+        /// Current persona hash from soul show; stale hashes fail without changing state.
+        #[arg(long)]
+        expected_hash: String,
+    },
+}
+
 #[derive(Debug, Subcommand)]
 enum ModelCommand {
     /// Download and verify the pinned model files; no record text leaves this device.
@@ -203,7 +227,7 @@ fn read_soul(path: &Path) -> Result<String> {
         if error.kind() == std::io::ErrorKind::NotFound {
             Error::domain(
                 "SOUL_REQUIRED",
-                "Provide your own SOUL.md beside the database or pass init --soul <path>. No persona is bundled in the executable.",
+                "SOUL.md was not found. Use an existing file with init --soul <path> or soul update --file <path>; init also accepts SOUL.md beside the database.",
             )
         } else {
             error.into()
@@ -232,6 +256,21 @@ fn execute(command: Command) -> Result<()> {
             let store = Store::initialize(&db, &persona)?;
             print_json(json!({"databasePath":db, "workspace":store.workspace()?}))
         }
+        Command::Soul { command } => match command {
+            SoulCommand::Show { db } => {
+                let store = Store::open(&db_path(db)?)?;
+                print_json(json!({"workspace":store.workspace()?,"persona":store.persona()?}))
+            }
+            SoulCommand::Update {
+                db,
+                file,
+                expected_hash,
+            } => {
+                let content = read_soul(&file)?;
+                let mut store = Store::open(&db_path(db)?)?;
+                print_json(store.update_persona(&content, &expected_hash)?)
+            }
+        },
         Command::Grant {
             client,
             db,

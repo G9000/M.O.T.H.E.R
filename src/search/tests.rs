@@ -207,3 +207,28 @@ fn short_match_keeps_bounded_neighbouring_sentence_context() {
     let (from, to) = context_span(&long, start, long.len());
     assert_eq!(&long[from..to], "End.");
 }
+
+#[test]
+fn owner_persona_change_during_search_returns_the_new_snapshot() {
+    let (_dir, mut s, auth) = fixture();
+    write(&mut s, &auth, "evidence", None, "active");
+    let query = Query::parse(json!({"query":"evidence"})).unwrap();
+    let before = Snapshot::capture(&mut s, &auth, &query).unwrap();
+    let cache = cached(&before);
+    let hash = s.persona().unwrap()["hash"].as_str().unwrap().to_owned();
+    s.update_persona("Updated owner persona", &hash).unwrap();
+    let result = finish(
+        &mut s,
+        &auth,
+        &query,
+        &before,
+        &cache,
+        &axis(),
+        &Progress::default(),
+    )
+    .unwrap();
+    assert_eq!(result["search"]["reason"], "workspace_changed");
+    assert_eq!(result["search"]["semanticUsed"], false);
+    assert_eq!(result["persona"]["content"], "Updated owner persona");
+    assert_eq!(result["records"].as_array().unwrap().len(), 1);
+}

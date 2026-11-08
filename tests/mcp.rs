@@ -504,3 +504,58 @@ fn real_model_semantic_mcp_search_survives_process_restart() {
     assert_eq!(result["search"]["newlyIndexedRecords"], 0);
     assert_eq!(result["records"][0]["id"], wanted["record"]["id"]);
 }
+
+#[test]
+fn connected_harnesses_observe_owner_soul_updates_without_restarting() {
+    let f = Fixture::new();
+    let mut a = Client::connect(&f.a_config);
+    let mut b = Client::connect(&f.b_config);
+    let before = a.call("mother_get_context", json!({}));
+    let old_hash = before["persona"]["hash"].as_str().unwrap();
+    let file = f.dir.path().join("edited-soul.md");
+    let content = "Synthetic revised companion: prefer short, practical answers.";
+    std::fs::write(&file, content).unwrap();
+    let updated = cli(
+        f.dir.path(),
+        &[
+            "soul",
+            "update",
+            "--file",
+            file.to_str().unwrap(),
+            "--expected-hash",
+            old_hash,
+        ],
+    );
+    for client in [&mut a, &mut b] {
+        let context = client.call("mother_get_context", json!({}));
+        assert_eq!(context["persona"]["content"], content);
+        assert_eq!(context["persona"]["hash"], updated["hash"]);
+        assert_eq!(context["workspace"], before["workspace"]);
+        let search = client.call(
+            "mother_search_context",
+            json!({"query":"companion","mode":"literal"}),
+        );
+        assert_eq!(search["persona"], context["persona"]);
+        assert_eq!(
+            client.rpc("tools/list", json!({}))["tools"]
+                .as_array()
+                .unwrap()
+                .len(),
+            6
+        );
+    }
+    let saved = a.call(
+        "mother_write_record",
+        f.request(memory("Unchanged memory capability")),
+    );
+    assert_eq!(
+        b.call("mother_get_record", json!({"id":saved["record"]["id"]})),
+        saved["record"]
+    );
+    drop(a);
+    let mut resumed = Client::connect(&f.a_config);
+    assert_eq!(
+        resumed.call("mother_get_context", json!({}))["persona"]["hash"],
+        updated["hash"]
+    );
+}
