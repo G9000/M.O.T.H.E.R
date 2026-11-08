@@ -4,14 +4,16 @@ use clap::{Parser, Subcommand, ValueEnum};
 use mother::{
     config::{create_private_file, data_directory, load_config, read_json},
     contracts::SCOPES,
+    embedding,
     error::{Error, Result},
     limits::MAX_EXPORT_BYTES,
+    search::Search,
     store::Store,
 };
 use serde_json::{Value, json};
 use std::{
     fs,
-    io::Write,
+    io::{Read, Write},
     path::{Path, PathBuf},
 };
 
@@ -28,10 +30,13 @@ struct Cli {
 }
 #[derive(Debug, Subcommand)]
 enum Command {
-    /// Initialize a fresh workspace with the current SOUL.md or bundled persona.
+    /// Initialize a fresh workspace from your own SOUL.md file.
     Init {
         #[arg(long)]
         db: Option<PathBuf>,
+        /// Your persona file; defaults to SOUL.md beside the selected database.
+        #[arg(long)]
+        soul: Option<PathBuf>,
     },
     /// Create a client grant and exclusive private configuration file.
     Grant {
@@ -53,6 +58,31 @@ enum Command {
     Context {
         #[arg(long)]
         config: PathBuf,
+    },
+    /// Search bounded record previews with local semantic or literal retrieval.
+    Search {
+        #[arg(long)]
+        config: PathBuf,
+        #[arg(long)]
+        query: String,
+        #[arg(long, default_value = "hybrid", value_parser = ["hybrid", "semantic", "literal"])]
+        mode: String,
+        #[arg(long)]
+        kind: Option<String>,
+        #[arg(long, default_value_t = 20, value_parser = clap::value_parser!(u16).range(1..=100))]
+        limit: u16,
+    },
+    /// Prepare a bounded batch of local derived embeddings using a client grant.
+    Index {
+        #[arg(long)]
+        config: PathBuf,
+        #[arg(long, default_value_t = 32, value_parser = clap::value_parser!(u16).range(1..=100))]
+        max_records: u16,
+    },
+    /// Install or inspect the pinned local embedding model.
+    Model {
+        #[command(subcommand)]
+        command: ModelCommand,
     },
     /// Print token-free harness connection configuration.
     Connection {
@@ -81,6 +111,14 @@ enum Command {
         config: PathBuf,
     },
 }
+#[derive(Debug, Subcommand)]
+enum ModelCommand {
+    /// Download and verify the pinned model files; no record text leaves this device.
+    Install,
+    /// Inspect installed model files without downloading anything.
+    Status,
+}
+
 #[derive(Debug, Clone, Copy, ValueEnum)]
 enum Format {
     Json,
@@ -158,18 +196,39 @@ fn exclusive_json(path: &Path, value: Value) -> Result<()> {
     }
     Ok(())
 }
+// A 32,000 UTF-16-unit persona needs at most 128,000 UTF-8 bytes.
+const MAX_SOUL_BYTES: u64 = 128_000;
+fn read_soul(path: &Path) -> Result<String> {
+    let file = fs::File::open(path).map_err(|error| {
+        if error.kind() == std::io::ErrorKind::NotFound {
+            Error::domain(
+                "SOUL_REQUIRED",
+                "Provide your own SOUL.md beside the database or pass init --soul <path>. No persona is bundled in the executable.",
+            )
+        } else {
+            error.into()
+        }
+    })?;
+    let mut content = String::new();
+    file.take(MAX_SOUL_BYTES + 1).read_to_string(&mut content)?;
+    if content.len() as u64 > MAX_SOUL_BYTES
+        || content.trim_start_matches('\u{feff}').trim().is_empty()
+        || content.encode_utf16().count() > 32_000
+    {
+        return Err(Error::domain(
+            "INVALID_INPUT",
+            "SOUL.md must contain nonblank UTF-8 text of at most 32,000 UTF-16 units.",
+        ));
+    }
+    Ok(content)
+}
 fn execute(command: Command) -> Result<()> {
     match command {
-        Command::Init { db } => {
+        Command::Init { db, soul } => {
             let db = db_path(db)?;
+            let soul = soul.unwrap_or_else(|| db.with_file_name("SOUL.md"));
+            let persona = read_soul(&soul)?;
             private_parent(&db)?;
-            let persona = match fs::read_to_string("SOUL.md") {
-                Ok(text) => text,
-                Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
-                    mother::DEFAULT_PERSONA.to_owned()
-                }
-                Err(error) => return Err(error.into()),
-            };
             let store = Store::initialize(&db, &persona)?;
             print_json(json!({"databasePath":db, "workspace":store.workspace()?}))
         }
@@ -211,6 +270,38 @@ fn execute(command: Command) -> Result<()> {
             let mut store = Store::open(&config.database_path)?;
             store.authorize(&config.auth(), "read")?;
             print_json(store.context(&config.auth(), json!({}))?)
+        }
+        Command::Search {
+            config,
+            query,
+            mode,
+            kind,
+            limit,
+        } => {
+            let config = load_config(&absolute(&config)?)?;
+            let mut store = Store::open(&config.database_path)?;
+            let mut args = json!({"query":query, "mode":mode, "limit":limit});
+            if let Some(kind) = kind {
+                args["kind"] = kind.into();
+            }
+            let search = Search::from_environment();
+            print_json(search.search(&mut store, &config.auth(), args)?)
+        }
+        Command::Index {
+            config,
+            max_records,
+        } => {
+            let config = load_config(&absolute(&config)?)?;
+            let mut store = Store::open(&config.database_path)?;
+            let search = Search::from_environment();
+            print_json(search.index(&mut store, &config.auth(), usize::from(max_records))?)
+        }
+        Command::Model { command } => {
+            let dir = embedding::model_directory()?;
+            print_json(match command {
+                ModelCommand::Install => embedding::install(&dir)?,
+                ModelCommand::Status => embedding::status(&dir)?,
+            })
         }
         Command::Connection { config, format } => {
             let config_path = absolute(&config)?;

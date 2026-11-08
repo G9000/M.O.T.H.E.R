@@ -1,6 +1,6 @@
 # M.O.T.H.E.R contributor guide
 
-This is the owner's personal workspace, independent of AnimaOS. Keep the README limited to its approved title, poem and artwork. Put technical instructions in docs/.
+This is the owner's personal workspace, independent of AnimaOS. Preserve the README's approved title, centered poem and artwork. Keep its description brief and link to setup; put technical instructions in docs/.
 
 Use the independent Cargo package and locked dependencies. Run `cargo fmt --all -- --check`, `cargo test --locked`, `cargo build --release --locked`, and `cargo clippy --locked --all-targets --all-features -- -D warnings`. Tests use synthetic context and owned temporary directories. The executable needs no Bun, Node or AnimaOS runtime.
 
@@ -10,4 +10,4 @@ The domain contract is src/contracts.rs; contracts/mcp-tools.json preserves the 
 
 Preserve the v1 SQLite schema, existing grants, IDs, sources, corrections, retractions and uncertain outcomes. Runtime upgrades open existing stores without changing generation. Restore validates a bundle before creating a fresh destination, commits all state atomically, changes generation, excludes grants and never executes actions. Keep cross-runtime hash/normalization tests.
 
-SOUL.md seeds new instances; existing workspaces use the stored persona snapshot. Harnesses retain their model, permissions and instruction hierarchy. Protocol tests are not proof that a real host has loaded the connection. See PORTING.md for test mappings and deliberate differences.
+Owners supply SOUL.md with init --soul or beside the database. Do not embed the maintainer's persona or discover one from an unrelated working directory. Existing workspaces use the stored persona snapshot. Harnesses retain their model, permissions and instruction hierarchy. Protocol tests are not proof that a real host has loaded the connection. See PORTING.md for test mappings and deliberate differences.
