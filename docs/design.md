@@ -37,3 +37,7 @@ Recovery hardening: restore publishes schema and imported state in one transacti
 The existing search tool and owner CLI share local Candle inference and a disposable SQLite vector sidecar. Canonical SQLite records remain authoritative. Cache keys bind workspace/generation, model/profile, record revision and text digest; search rechecks grants and current canonical state before returning. Hybrid retrieval preserves exact identifiers and adds meaning-based candidates. Missing or busy infrastructure produces explicit literal fallback.
 
 This extends the context layer only: no agent loop, tool execution, transcript ingestion, automatic memory extraction or third-party memory service. Each harness still decides what to retrieve and save. See [semantic search](semantic-search.md) for model installation, coverage limits and acceptance fixtures.
+
+## Owner persona updates (v0.3.2)
+
+The owner CLI can inspect the stored persona and explicitly import a revised SOUL.md using the current content hash. Store::update_persona validates the draft and performs its hash comparison and metadata replacement inside one IMMEDIATE SQLite transaction. It does not alter workspace identity, grants, record revisions or receipts, and is not exposed as an MCP write tool. Context and export operations read the current stored snapshot; search already includes it in final freshness validation. Persona history and automatic file watching are outside this scope.

@@ -36,7 +36,24 @@ The command prints the database path and stable workspace identity. It refuses t
 
 Use a local disk. Do not place the live SQLite database on a network share or sync its live files through a cloud folder. Use a portable export for transfer.
 
-`SOUL.md` is owned by the workspace user. Initialization imports the chosen text (at most 32,000 UTF-16 units) and stores its SHA-256 digest. Runtime context reads and exports use this stored snapshot, so switching harnesses or restoring elsewhere does not depend on the original file path. Editing the source file afterward does not reload it automatically; persona editing for an existing workspace is not exposed in this release. Existing workspaces retain their saved persona through upgrades, even if the original file is absent. The repository root `SOUL.md` is the maintainer's personal file, not a compiled default; it is used only if explicitly selected with `--soul`.
+`SOUL.md` is owned by the workspace user. Initialization imports the chosen text (at most 32,000 UTF-16 units) and stores its SHA-256 digest. Runtime context reads and exports use this stored snapshot, so switching harnesses or restoring elsewhere does not depend on the original file path. Editing the source file afterward does not reload it automatically; use the explicit owner update command below. Existing workspaces retain their saved persona through upgrades, even if the original file is absent. The repository root `SOUL.md` is the maintainer's personal file, not a compiled default; it is used only if explicitly selected with `--soul`.
+
+## Update an existing workspace's SOUL.md
+
+Inspect the currently stored persona, then import your edited UTF-8 file using that persona's hash:
+
+```powershell
+mother soul show
+mother soul update --file "C:\private\SOUL.md" --expected-hash "<hash from soul show>"
+```
+
+Both commands accept `--db "C:\private\context.sqlite"` for another workspace; use the same database for inspection and update. Read/review the current text before applying edits. There is no file watcher: saving the file alone does not alter the workspace. The file is read once, validated, and imported as the new stored snapshot.
+
+The expected hash prevents overwriting a different current version. A stale hash returns `CONFLICT` without changing anything; reread and reconcile instead of automatically substituting the latest hash. Importing identical text with the current hash returns `changed: false`. If a response is lost, use `soul show` to compare the stored text/hash with your intended file; a retry with the previous hash will conflict after a successful update. Hashes compare current content, not revision history.
+
+Only persona metadata changes. Workspace identity/generation, memories, grants, existing record receipts and semantic record vectors are preserved. Connected MCP clients receive the new snapshot on their next context/search call, with no restart needed. Previously returned text in a harness's conversation is not erased or rewritten. An in-flight semantic search that observes the change returns fresh literal context rather than a stale persona.
+
+This is owner administration using local filesystem access, like grant/export; MCP clients receive no new mutation scope or tool. The command creates no persona history or operation receipt. Use `mother export` beforehand if you want a portable backup; old exports retain their saved persona and new exports include the updated one. To undo, explicitly import the desired prior file with the current hash. The same nonblank UTF-8 and 32,000 UTF-16-unit limits apply as at initialization.
 
 ## Give each harness its own connection
 

@@ -214,9 +214,43 @@ impl Store {
     pub fn workspace(&self) -> Result<Value> {
         workspace(&self.conn)
     }
-    /// Retrieve the initialized personality snapshot and verified digest.
+    /// Retrieve the current personality snapshot and verified digest.
     pub fn persona(&self) -> Result<Value> {
         persona(&self.conn)
+    }
+    /// Replace the owner's persona atomically if its current content hash still matches.
+    ///
+    /// This owner-administration operation is not exposed through MCP grants.
+    /// Returns `CONFLICT` for a stale hash, including retries after a successful change.
+    /// Only persona metadata changes; no record receipt or persona history is created.
+    pub fn update_persona(&mut self, content: &str, expected_hash: &str) -> Result<Value> {
+        if !contracts::hex_digest(expected_hash) {
+            return Err(invalid(
+                "Expected persona hash must be a lowercase SHA-256 digest",
+            ));
+        }
+        let new_persona = json!({"content":content,"hash":contracts::hash(content)});
+        contracts::validate_persona(&new_persona)?;
+        if content.trim_start_matches('\u{feff}').trim().is_empty() {
+            return Err(invalid("Persona must contain nonblank text"));
+        }
+        let tx = self
+            .conn
+            .transaction_with_behavior(TransactionBehavior::Immediate)?;
+        let current = persona(&tx)?;
+        if current["hash"].as_str() != Some(expected_hash) {
+            return Err(Error::domain(
+                "CONFLICT",
+                "Persona changed. Read soul show and review the current version before updating.",
+            ));
+        }
+        let changed = current != new_persona;
+        if changed {
+            set_metadata(&tx, "persona", &new_persona)?;
+        }
+        let result = json!({"workspace":workspace(&tx)?,"previousHash":current["hash"],"hash":new_persona["hash"],"changed":changed});
+        tx.commit()?;
+        Ok(result)
     }
     /// Check the current grant; previously connected clients are not exempt.
     pub fn authorize(&self, auth: &Auth, scope: &str) -> Result<()> {

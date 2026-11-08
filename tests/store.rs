@@ -211,3 +211,67 @@ fn opens_typescript_database_and_replays_original_operations() {
     let q = request(&s);
     assert_eq!(s.write(&auth, q).unwrap()["record"]["revision"], 1);
 }
+
+#[test]
+fn persona_updates_preserve_identity_records_receipts_grants_and_portability() {
+    let (dir, mut s, auth) = setup();
+    let request = request(&s);
+    let receipt = s.write(&auth, request.clone()).unwrap();
+    let before = s.export().unwrap();
+    let original = s.persona().unwrap();
+    let old_hash = original["hash"].as_str().unwrap();
+    for text in ["", " \n\t", "\u{feff}", &"x".repeat(32_001)] {
+        code(s.update_persona(text, old_hash), "INVALID_INPUT");
+        assert_eq!(s.persona().unwrap(), original);
+    }
+    code(s.update_persona("New persona", "bad hash"), "INVALID_INPUT");
+    code(s.update_persona("New persona", &"0".repeat(64)), "CONFLICT");
+    let result = s.update_persona("New persona", old_hash).unwrap();
+    assert_eq!(result["changed"], true);
+    let after = s.export().unwrap();
+    let mut comparable = after.clone();
+    comparable["persona"] = before["persona"].clone();
+    comparable["exportedAt"] = before["exportedAt"].clone();
+    assert_eq!(
+        comparable, before,
+        "only persona may change in the portable state"
+    );
+    s.authorize(&auth, "memory:write").unwrap();
+    assert_eq!(s.write(&auth, request).unwrap(), receipt);
+    let restored = Store::restore(&dir.path().join("restored.sqlite"), after).unwrap();
+    assert_eq!(restored.persona().unwrap(), s.persona().unwrap());
+    let reopened = Store::open(&dir.path().join("context.sqlite")).unwrap();
+    assert_eq!(reopened.persona().unwrap(), s.persona().unwrap());
+}
+
+#[test]
+fn concurrent_owner_persona_updates_allow_exactly_one_current_hash() {
+    use std::sync::{Arc, Barrier};
+    let (dir, s, _) = setup();
+    let path = dir.path().join("context.sqlite");
+    let hash = s.persona().unwrap()["hash"].as_str().unwrap().to_owned();
+    let barrier = Arc::new(Barrier::new(2));
+    let jobs: Vec<_> = ["First owner edit", "Second owner edit"]
+        .into_iter()
+        .map(|text| {
+            let path = path.clone();
+            let hash = hash.clone();
+            let barrier = barrier.clone();
+            std::thread::spawn(move || {
+                let mut store = Store::open(&path).unwrap();
+                barrier.wait();
+                store.update_persona(text, &hash)
+            })
+        })
+        .collect();
+    let results: Vec<_> = jobs.into_iter().map(|job| job.join().unwrap()).collect();
+    assert_eq!(results.iter().filter(|r| r.is_ok()).count(), 1);
+    assert_eq!(
+        results
+            .iter()
+            .filter(|r| r.as_ref().is_err_and(|e| e.code() == "CONFLICT"))
+            .count(),
+        1
+    );
+    assert_ne!(s.persona().unwrap()["hash"], hash);
+}
