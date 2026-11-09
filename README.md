@@ -37,10 +37,6 @@
 </p>
 
 <p align="center">
-  <em>Built in Rust. Stored locally. Connected through MCP.</em>
-</p>
-
-<p align="center">
   <a href="docs/setup.md">Make it yours</a> &middot; <a href="docs/terminal.md">Open her terminal</a> &middot; <a href="docs/living-memory.md">Keep what matters</a><br>
   <a href="docs/chatgpt.md">Bring her to ChatGPT</a> &middot; <a href="docs/animaos.md">Connect AnimaOS</a>
 </p>
