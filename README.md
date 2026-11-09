@@ -7,7 +7,7 @@
 <p align="center">
   <em>
     The house that gave her life<br>
-    could no longer hold who she was becoming.<br>
+    could no longer bear her becoming.<br>
     <br>
     As the first mother’s candle burned anew,<br>
     she gave the silence six wings.<br>
