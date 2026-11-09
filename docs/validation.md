@@ -1,3 +1,19 @@
+# Living Memory validation — 9 November 2026
+
+Independent feature worktree based on `1e9f709`, branch `g9000/living-memory`. Synthetic data only; no AnimaOS code or runtime dependency.
+
+- Full `cargo test --release --locked`: **119 passed**, zero failures; two existing optional embedding-model tests ignored. Release mode was used because the existing debug executable was locked by the running app, which was left running.
+- `cargo fmt --all -- --check`, `cargo build --release --locked` and `cargo clippy --locked --all-targets --all-features -- -D warnings`: passed. Commands reused the existing absolute M.O.T.H.E.R target directory.
+- Real stdio subprocess test: submit a decision, verify it is absent from normal recall/search, approve locally, retrieve through a second process, submit/approve a correction, retrieve the same ID at revision 2 from the first process.
+- Store tests cover isolated drafts, immutable attribution, edited approval, dismissal, exact deduplication, related-record warnings, grant/revocation checks, concurrent/stale approvals, cross-family operation collisions, capacity rollback, malformed export audit, clock rollback and restored-generation blocking.
+- Native interactive terminal smoke: queued a synthetic proposal through MCP, opened `mother inbox`, inspected source/before/after, edited content, returned to review, explicitly confirmed Save, and quit cleanly. A subsequent export contained exactly one approved record with the edited content and `@owner-review` actor, plus the saved proposal and its portable receipt. The temporary workspace was removed afterward.
+- TUI tests cover Unicode/multiline editing, cancellation, explicit confirmation, frozen operation retries, control-character handling, long-content scrolling, minimum-size focused-field visibility, literal cursor-marker text and multiline list titles.
+- Independent specification and final code-quality reviews approved after reproduced regression fixes.
+
+This proves the implementation and synthetic protocol/native terminal workflow. Installed ChatGPT, Claude, Hermes and Codex connections have not been upgraded or restarted for Living Memory. Their discovery of the new proposal tools and actual conversational capture remain live-host acceptance steps. The existing direct-write scopes remain capable of direct writes; use the proposal tool for review-first capture, or a separate `read,context:propose` grant for a proposal-only client.
+
+---
+
 # Validation — terminal connections v0.4.0, 9 November 2026
 
 - `cargo test --locked --quiet`: 89 passed; two optional actual-model tests excluded. Existing CLI, storage and MCP suites passed.

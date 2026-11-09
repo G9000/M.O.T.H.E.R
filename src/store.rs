@@ -340,6 +340,15 @@ impl Store {
                 |r| r.get(0),
             )
             .optional()?;
+        let raw = match raw {
+            Some(raw) => Some(raw),
+            None => crate::inbox::operation_receipt(
+                &tx,
+                &auth.client_id,
+                contracts::string(&w, "generation")?,
+                operation_id,
+            )?,
+        };
         let raw = raw.ok_or_else(|| {
             Error::domain(
                 "NOT_FOUND",
@@ -412,127 +421,131 @@ impl Store {
     /// Atomically validate a revision, mutate a record and persist its idempotent receipt.
     pub fn write(&mut self, auth: &Auth, raw: Value) -> Result<Value> {
         let input = contracts::Write::parse(raw)?;
-        let v = &input.value;
         let tx = self
             .conn
             .transaction_with_behavior(TransactionBehavior::Immediate)?;
         authorize(&tx, auth, &input.kind.scope())?;
-        let w = workspace(&tx)?;
-        if v["workspaceId"] != w["id"] {
-            return Err(Error::domain(
-                "WORKSPACE_MISMATCH",
-                "Fetch the current workspace.",
-            ));
-        }
-        if v["generation"] != w["generation"] {
-            return Err(Error::domain(
-                "STALE_GENERATION",
-                "Workspace was restored; reconnect and reconcile current records.",
-            ));
-        }
-        let generation = contracts::string(v, "generation")?;
-        let op = contracts::string(v, "operationId")?;
-        let fingerprint = contracts::hash(&contracts::canonical(v));
-        let prior:Option<(String,String)>=tx.query_row("SELECT request_hash,receipt FROM operations WHERE actor=? AND generation=? AND operation_id=?",params![auth.client_id,generation,op],|r|Ok((r.get(0)?,r.get(1)?))).optional()?;
-        if let Some((old_hash, receipt)) = prior {
-            if old_hash != fingerprint {
-                return Err(Error::domain(
-                    "OPERATION_REUSED",
-                    "An operation ID cannot be reused for a different request.",
-                ));
-            }
-            let receipt = serde_json::from_str(&receipt)?;
-            tx.commit()?;
-            return Ok(receipt);
-        }
-        let previous = v
-            .get("id")
-            .map(|_| read_record(&tx, contracts::string(v, "id")?))
-            .transpose()?;
-        if let Some((p, _)) = &previous {
-            if p["revision"] != v["expectedRevision"] {
-                return Err(Error::domain(
-                    "CONFLICT",
-                    "Record changed; retrieve it before proposing a new edit.",
-                ));
-            }
-            if p["kind"] != v["record"]["kind"] {
-                return Err(Error::domain("KIND_MISMATCH", "Record kind cannot change."));
-            }
-        }
-        for id in v["record"]["references"]
-            .as_array()
-            .ok_or_else(|| invalid("Invalid references"))?
-        {
-            let found: bool = tx.query_row(
-                "SELECT EXISTS(SELECT 1 FROM records WHERE id=?)",
-                [id.as_str().ok_or_else(|| invalid("Invalid reference"))?],
-                |r| r.get(0),
-            )?;
-            if !found {
-                return Err(Error::domain(
-                    "REFERENCE_NOT_FOUND",
-                    "Referenced record does not exist in this workspace.",
-                ));
-            }
-        }
-        let prior_time = previous
-            .as_ref()
-            .map(|(p, _)| contracts::timestamp(contracts::string(p, "updatedAt")?))
-            .transpose()?;
-        let clock = Utc::now();
-        let stamp = prior_time
-            .map_or(clock, |p| clock.max(p))
-            .to_rfc3339_opts(SecondsFormat::Millis, true);
-        let mut record = v["record"].clone();
-        record["id"] = previous.as_ref().map_or_else(
-            || json!(uuid::Uuid::new_v4().to_string()),
-            |(p, _)| p["id"].clone(),
-        );
-        record["revision"] = json!(
-            previous
-                .as_ref()
-                .map_or(Ok(0), |(p, _)| contracts::integer(
-                    p,
-                    "revision",
-                    1,
-                    9007199254740990
-                ))?
-                + 1
-        );
-        record["actor"] = json!(auth.client_id);
-        record["createdAt"] = previous
-            .as_ref()
-            .map_or_else(|| json!(stamp), |(p, _)| p["createdAt"].clone());
-        record["updatedAt"] = json!(stamp);
-        let receipt =
-            json!({"operationId":op,"generation":generation,"committedAt":stamp,"record":record});
-        let mut usage: Usage = serde_json::from_value(metadata(&tx, "usage")?)?;
-        usage.records += u64::from(previous.is_none());
-        usage.operations += 1;
-        usage.payload_bytes = usage
-            .payload_bytes
-            .checked_sub(previous.as_ref().map_or(0, |(_, n)| *n as u64))
-            .and_then(|n| {
-                n.checked_add(record.to_string().len() as u64 + receipt.to_string().len() as u64)
-            })
-            .ok_or_else(|| Error::domain("CORRUPT_STORE", "Invalid usage accounting"))?;
-        usage.check()?;
-        insert_record(&tx, &record)?;
-        set_metadata(&tx, "usage", &serde_json::to_value(usage)?)?;
-        tx.execute(
-            "INSERT INTO operations VALUES (?,?,?,?,?)",
-            params![
-                auth.client_id,
-                generation,
-                op,
-                fingerprint,
-                receipt.to_string()
-            ],
-        )?;
+        let receipt = write_transaction(&tx, &auth.client_id, &input)?;
         tx.commit()?;
         Ok(receipt)
     }
+}
+
+pub(crate) fn write_transaction(
+    tx: &Connection,
+    actor: &str,
+    input: &contracts::Write,
+) -> Result<Value> {
+    let v = &input.value;
+    let w = workspace(tx)?;
+    if v["workspaceId"] != w["id"] {
+        return Err(Error::domain(
+            "WORKSPACE_MISMATCH",
+            "Fetch the current workspace.",
+        ));
+    }
+    if v["generation"] != w["generation"] {
+        return Err(Error::domain(
+            "STALE_GENERATION",
+            "Workspace was restored; reconnect and reconcile current records.",
+        ));
+    }
+    let generation = contracts::string(v, "generation")?;
+    let op = contracts::string(v, "operationId")?;
+    let fingerprint = contracts::hash(&contracts::canonical(v));
+    crate::inbox::reject_operation_collision(tx, actor, generation, op)?;
+    let prior:Option<(String,String)>=tx.query_row("SELECT request_hash,receipt FROM operations WHERE actor=? AND generation=? AND operation_id=?",params![actor,generation,op],|r|Ok((r.get(0)?,r.get(1)?))).optional()?;
+    if let Some((old_hash, receipt)) = prior {
+        if old_hash != fingerprint {
+            return Err(Error::domain(
+                "OPERATION_REUSED",
+                "An operation ID cannot be reused for a different request.",
+            ));
+        }
+        let receipt = serde_json::from_str(&receipt)?;
+        return Ok(receipt);
+    }
+    let previous = v
+        .get("id")
+        .map(|_| read_record(tx, contracts::string(v, "id")?))
+        .transpose()?;
+    if let Some((p, _)) = &previous {
+        if p["revision"] != v["expectedRevision"] {
+            return Err(Error::domain(
+                "CONFLICT",
+                "Record changed; retrieve it before proposing a new edit.",
+            ));
+        }
+        if p["kind"] != v["record"]["kind"] {
+            return Err(Error::domain("KIND_MISMATCH", "Record kind cannot change."));
+        }
+    }
+    for id in v["record"]["references"]
+        .as_array()
+        .ok_or_else(|| invalid("Invalid references"))?
+    {
+        let found: bool = tx.query_row(
+            "SELECT EXISTS(SELECT 1 FROM records WHERE id=?)",
+            [id.as_str().ok_or_else(|| invalid("Invalid reference"))?],
+            |r| r.get(0),
+        )?;
+        if !found {
+            return Err(Error::domain(
+                "REFERENCE_NOT_FOUND",
+                "Referenced record does not exist in this workspace.",
+            ));
+        }
+    }
+    let prior_time = previous
+        .as_ref()
+        .map(|(p, _)| contracts::timestamp(contracts::string(p, "updatedAt")?))
+        .transpose()?;
+    let clock = Utc::now();
+    let stamp = prior_time
+        .map_or(clock, |p| clock.max(p))
+        .to_rfc3339_opts(SecondsFormat::Millis, true);
+    let mut record = v["record"].clone();
+    record["id"] = previous.as_ref().map_or_else(
+        || json!(uuid::Uuid::new_v4().to_string()),
+        |(p, _)| p["id"].clone(),
+    );
+    record["revision"] = json!(
+        previous
+            .as_ref()
+            .map_or(Ok(0), |(p, _)| contracts::integer(
+                p,
+                "revision",
+                1,
+                9007199254740990
+            ))?
+            + 1
+    );
+    record["actor"] = json!(actor);
+    record["createdAt"] = previous
+        .as_ref()
+        .map_or_else(|| json!(stamp), |(p, _)| p["createdAt"].clone());
+    record["updatedAt"] = json!(stamp);
+    let receipt =
+        json!({"operationId":op,"generation":generation,"committedAt":stamp,"record":record});
+    let mut usage: Usage = serde_json::from_value(metadata(tx, "usage")?)?;
+    usage.records += u64::from(previous.is_none());
+    usage.operations += 1;
+    usage.payload_bytes = usage
+        .payload_bytes
+        .checked_sub(previous.as_ref().map_or(0, |(_, n)| *n as u64))
+        .and_then(|n| {
+            n.checked_add(record.to_string().len() as u64 + receipt.to_string().len() as u64)
+        })
+        .ok_or_else(|| Error::domain("CORRUPT_STORE", "Invalid usage accounting"))?;
+    usage.check()?;
+    insert_record(tx, &record)?;
+    set_metadata(tx, "usage", &serde_json::to_value(usage)?)?;
+    tx.execute(
+        "INSERT INTO operations VALUES (?,?,?,?,?)",
+        params![actor, generation, op, fingerprint, receipt.to_string()],
+    )?;
+    crate::inbox::check_capacity(tx)?;
+    Ok(receipt)
 }
 
 #[cfg(test)]

@@ -36,6 +36,22 @@ fn sources(records: &[Value], operations: &[Value]) -> Result<Vec<String>> {
     }
     Ok(out.into_iter().collect())
 }
+fn bundle_sources(
+    records: &[Value],
+    operations: &[Value],
+    inbox: Option<&Value>,
+) -> Result<Vec<String>> {
+    let mut all = records.to_vec();
+    if let Some(inbox) = inbox {
+        for p in array(inbox, "proposals", 10000)? {
+            all.push(p["record"].clone());
+            if !p["before"].is_null() {
+                all.push(p["before"].clone());
+            }
+        }
+    }
+    sources(&all, operations)
+}
 fn validate(mut v: Value) -> Result<Value> {
     contracts::strict(
         &v,
@@ -47,6 +63,7 @@ fn validate(mut v: Value) -> Result<Value> {
             "records",
             "operations",
             "omittedExternalSources",
+            "inbox",
         ],
     )?;
     integer(&v, "schemaVersion", 1, 1)?;
@@ -151,7 +168,10 @@ fn validate(mut v: Value) -> Result<Value> {
         payload_bytes,
     }
     .check()?;
-    let omitted = sources(&records, &operations)?;
+    if let Some(inbox) = v.get("inbox") {
+        crate::inbox::validate(inbox, &v["workspace"], &records, &operations)?;
+    }
+    let omitted = bundle_sources(&records, &operations, v.get("inbox"))?;
     let supplied = array(&v, "omittedExternalSources", usize::MAX)?
         .iter()
         .map(|s| {
@@ -196,10 +216,13 @@ impl Store {
                 .collect::<std::result::Result<Vec<_>, _>>()?;
             rows.into_iter().map(|(a,g,o,h,r)|Ok(json!({"actor":a,"generation":g,"operationId":o,"requestHash":h,"receipt":serde_json::from_str::<Value>(&r)?}))).collect::<Result<Vec<_>>>()?
         };
-        let omitted = sources(&records, &operations)?;
-        let bundle = validate(
-            json!({"schemaVersion":1,"exportedAt":store::now(),"workspace":store::workspace(&tx)?,"persona":store::persona(&tx)?,"records":records,"operations":operations,"omittedExternalSources":omitted}),
-        )?;
+        let inbox = crate::inbox::export(&tx)?;
+        let omitted = bundle_sources(&records, &operations, inbox.as_ref())?;
+        let mut bundle = json!({"schemaVersion":1,"exportedAt":store::now(),"workspace":store::workspace(&tx)?,"persona":store::persona(&tx)?,"records":records,"operations":operations,"omittedExternalSources":omitted});
+        if let Some(inbox) = inbox {
+            bundle["inbox"] = inbox;
+        }
+        let bundle = validate(bundle)?;
         tx.commit()?;
         Ok(bundle)
     }
@@ -227,6 +250,10 @@ impl Store {
                 )?;
             }
             store::rebuild_usage(conn)?;
+            if let Some(inbox) = bundle.get("inbox") {
+                crate::inbox::restore(conn, inbox)?;
+            }
+            crate::inbox::check_capacity(conn)?;
             Ok(())
         })
     }

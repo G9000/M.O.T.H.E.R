@@ -54,3 +54,17 @@ fn noninteractive_connect_without_settings_never_prompts_or_creates_state() {
     assert!(String::from_utf8_lossy(&result.stderr).contains("setup"));
     assert_eq!(std::fs::read_dir(home.path()).unwrap().count(), 0);
 }
+
+#[test]
+fn inbox_shortcut_requires_terminal_and_does_not_create_workspace() {
+    let dir = tempfile::tempdir().unwrap();
+    let out = std::process::Command::new(env!("CARGO_BIN_EXE_mother"))
+        .arg("inbox")
+        .env("MOTHER_HOME", dir.path())
+        .stdin(std::process::Stdio::null())
+        .output()
+        .unwrap();
+    assert!(!out.status.success());
+    assert!(String::from_utf8_lossy(&out.stderr).contains("TERMINAL_REQUIRED"));
+    assert!(!dir.path().join("context.sqlite").exists());
+}

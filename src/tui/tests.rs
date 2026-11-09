@@ -3,6 +3,7 @@ use ratatui::{Terminal, backend::TestBackend};
 fn fixture(page: Page) -> App {
     App {
         page,
+        inbox: None,
         form: Some(Form::new(Settings {
             version: 1,
             tunnel_id: "tunnel_synthetic".into(),
@@ -115,4 +116,14 @@ fn unknown_startup_is_never_displayed_as_off() {
     app.startup = None;
     let output = screen(&app, 110, 32);
     assert!(output.contains("Start at sign-in: unknown"));
+}
+
+#[test]
+fn home_exposes_memory_inbox_without_tunnel_setup() {
+    let app = fixture(Page::Home);
+    let output = screen(&app, 110, 32);
+    assert!(
+        output.contains("Memory Inbox"),
+        "Owner must find review without configuring ChatGPT"
+    );
 }

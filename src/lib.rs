@@ -3,6 +3,7 @@ pub mod config;
 pub mod contracts;
 pub mod embedding;
 pub mod error;
+mod inbox;
 pub mod limits;
 mod portability;
 pub mod search;

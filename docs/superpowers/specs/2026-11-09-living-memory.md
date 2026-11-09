@@ -1,0 +1,34 @@
+# Living Memory and owner review inbox
+
+Approved scope: the owner requested implementing explicit capture with Save, Edit and Dismiss in the native TUI. Independent M.O.T.H.E.R only. No transcript harvesting, extra model, AnimaOS dependency, live grants/settings changes, install, commit or publish is included.
+
+## Design
+
+MCP clients submit one small memory, decision or task proposal at a time. A proposal is a separate durable object, never a canonical record or search document until the owner saves it. New MCP tools propose and retrieve a proposal; no MCP tool approves it. Read-only clients cannot propose. Reuse the corresponding existing kind write scope; optionally support a proposal-only scope without granting canonical writes. Keep existing direct writes compatible and explicitly document that existing write grants still allow them; reviewed capture must use the proposal tool.
+
+Use additive inbox tables within the canonical SQLite database, leaving all v1 tables, records, metadata identity, grants and PRAGMA user_version unchanged. Lazily create extension tables only during inbox mutations. Approval reuses the canonical record mutation transaction helper: atomically validate workspace/generation, proposal revision, target revision/kind, references and limits, write canonical record+receipt, close proposal+owner receipt. Owner review is local-only. Retrying identical operations returns the original receipt; changed requests or operation reuse across families fail. Revoked proposers cannot sneak pending content into approval; owner sees error and can dismiss. New records check exact duplicate content/kind; duplicate proposals resolve to one pending item, and approval rechecks duplicates under the write lock. Near duplicates remain a review responsibility.
+
+Proposal payload contains id, revision, status (pending/saved/dismissed), proposer identity, workspaceId, generation, source (required short attribution text), basis (owner_statement/source/model_inference), normalized draft record, optional target ID+expectedRevision, full before snapshot, timestamps and final receipt if resolved. Context/semantic search do not include inbox contents. Bound payload sizes, proposal and receipt counts; list returns bounded summaries with omitted count and get returns the full proposal plus current target and conflict information. Edits change the candidate draft only at review; source/proposer/original proposal remain auditable. No unreviewed draft becomes a confirmed fact. Decision status and basis are visible and editable in the TUI.
+
+Portable export must not silently lose pending proposals. Preserve legacy v1 bundles and add a validated optional inbox extension. Restore preserves drafts/audit but never automatically approves; pre-restore pending proposals must be re-proposed for the new generation. Validate extension identities, revisions, hashes, receipts and references before creating destination; exclude credentials. Legacy binaries are unsupported for bundles containing the extension; document the boundary.
+
+## Store interface for TUI
+
+- Store::inbox_list() -> Result<Value>: {workspace, proposals:[{id,title,actor,status,revision}], omitted}; bounded pending list, no writes.
+- Store::inbox_get(id: &str) -> Result<Value>: full proposal, plus currentRecord (object/null), conflict (bool), duplicateRecordId (string/null). Read-only owner access.
+- Store::review_proposal(raw: Value) -> Result<Value>: {workspaceId,generation,operationId,proposalId,expectedRevision,action:"save"|"dismiss",record?: edited normalized draft}. Canonical receipt returned at receipt.record for save. Proposal immutable until resolved; review revision increments once. Return status and proposalId.
+- Store::propose(auth, raw: Value): existing write request envelope plus source:string and basis:string. id means canonical target ID. Returns {proposal:full proposal,operationId,generation}. Store::get_proposal(auth,id) returns full proposal after read authorization. Store::receipt includes proposal receipts with collision protection.
+
+## TUI
+
+Home has prominent Memory Inbox entry (i); optional mother inbox shortcut opens it. List pending titles, navigate arrows and Enter to full review. Show source, proposer, basis, kind/status, before and candidate after, current revision conflicts and duplicate warnings. Scroll all content; no preview-only approvals. Save/Dismiss have explicit final confirmation; Edit supports title/content and kind-specific status and memory basis with bounded input, multiline content, cancellation and visible unsaved changes. No external editor execution. A stale draft cannot be saved; refresh never silently rebases its expected revision. Keep operation UUID stable across uncertain result/retry; don't rerun uncertain changes automatically. Explicit UI success only on a committed receipt. No dependency on a configured ChatGPT tunnel to open inbox. Preserve connection controls/theme. Protect terminal rendering from control characters. Small terminals stay usable or show resize guidance.
+
+## Acceptance
+
+Synthetic ChatGPT MCP process proposes a decision; no normal recall sees it; owner reviews/edits/saves via same TUI controller; synthetic Hermes process reads canonical record and proposes correction; owner saves; first process reads same ID/new revision. Test dismissed/duplicate/stale/concurrent/revoked/read-only/malformed/changed-operation/restore cases, receipt persistence after restart, all-field review and scrolling. Distinguish protocol acceptance from actual third-party UI acceptance. Run locked full tests, fmt, clippy and release build. Preserve README artwork and poem.
+
+## Review clarifications
+
+Coalesce pending proposals only when actor, source, basis, normalized entire draft, target ID and expected target revision all match; preserve each submitted operation receipt. Canonical exact duplicate means full normalized draft equality (including status, basis, references and sources), not content alone. Other content/title similarities are warnings, never automatic merges. Recheck exact duplicates when approving new records and require reconciliation instead of silently choosing an existing ID. Owner review actor is @owner-review, outside valid client-ID grammar; canonical approved writes use this actor while the immutable proposal preserves proposer/source and original candidate. Do not store proposer tokens. Recheck proposer's current revocation and eligible scope at Save; Dismiss remains available.
+
+Restored proposals retain their original generation, appear visibly stale and cannot be saved even if a client grant is recreated. Dismiss uses the current workspace generation and is permitted. Re-proposal is a new ID/current-generation proposal with a fresh target snapshot; historical audit remains unchanged. Source/basis changes to an edited memory must be reflected consistently in the candidate; original attribution remains immutable.

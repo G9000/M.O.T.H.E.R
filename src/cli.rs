@@ -32,6 +32,8 @@ struct Cli {
 enum Command {
     /// Open the interactive workspace and connection dashboard.
     Tui,
+    /// Open the owner review inbox for proposed memories.
+    Inbox,
     /// Connect a saved harness, or guide first-time setup in a terminal.
     Connect {
         #[arg(value_enum)]
@@ -134,7 +136,7 @@ enum Command {
         #[arg(long)]
         db: PathBuf,
     },
-    /// Serve the workspace's six MCP tools over standard input/output.
+    /// Serve the workspace's MCP tools over standard input/output.
     Mcp {
         #[arg(long)]
         config: PathBuf,
@@ -286,6 +288,7 @@ fn read_soul(path: &Path) -> Result<String> {
 }
 fn execute(command: Command) -> Result<()> {
     match command {
+        Command::Inbox => crate::tui::run(crate::tui::Launch::Inbox),
         Command::Tui => crate::tui::run(crate::tui::Launch::Home),
         Command::Connect {
             harness: Harness::Chatgpt,

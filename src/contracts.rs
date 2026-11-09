@@ -54,8 +54,9 @@ impl Kind {
     }
 }
 /// Named scopes accepted by the existing v1 grant format.
-pub const SCOPES: [&str; 7] = [
+pub const SCOPES: [&str; 8] = [
     "read",
+    "context:propose",
     "memory:write",
     "decision:write",
     "task:write",

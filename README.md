@@ -30,5 +30,5 @@
 </p>
 
 <p align="center">
-  <a href="docs/setup.md">Make it yours</a> &middot; <a href="docs/chatgpt.md">Bring her to ChatGPT</a>
+  <a href="docs/setup.md">Make it yours</a> &middot; <a href="docs/chatgpt.md">Bring her to ChatGPT</a> &middot; <a href="docs/living-memory.md">Keep what matters</a>
 </p>

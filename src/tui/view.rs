@@ -79,6 +79,11 @@ pub(super) fn render(frame: &mut Frame, app: &App) {
     );
     match app.page {
         Page::Home => home(frame, rows[1], app),
+        Page::Inbox => {
+            if let Some(inbox) = &app.inbox {
+                inbox.render(frame, rows[1]);
+            }
+        }
         Page::Setup => setup(frame, rows[1], app),
         Page::ConfirmSave => confirm_save(frame, rows[1], app),
         Page::Help => help(frame, rows[1]),
@@ -92,13 +97,19 @@ pub(super) fn render(frame: &mut Frame, app: &App) {
         }
     }
     frame.render_widget(
-        text(safe(&app.message))
-            .style(Style::default().fg(if app.busy { GOLD } else { MUTED }))
-            .block(
-                Block::default()
-                    .borders(Borders::TOP)
-                    .border_style(Style::default().fg(MUTED)),
-            ),
+        text(safe(if app.page == Page::Inbox {
+            app.inbox
+                .as_ref()
+                .map_or(app.message.as_str(), |inbox| inbox.message.as_str())
+        } else {
+            &app.message
+        }))
+        .style(Style::default().fg(if app.busy { GOLD } else { MUTED }))
+        .block(
+            Block::default()
+                .borders(Borders::TOP)
+                .border_style(Style::default().fg(MUTED)),
+        ),
         rows[2],
     );
     let hints = if app.busy {
@@ -106,8 +117,9 @@ pub(super) fn render(frame: &mut Frame, app: &App) {
     } else {
         match app.page {
             Page::Home => {
-                "s setup   c connect   d disconnect   r refresh   a startup   h help   q quit"
+                "i inbox   s setup   c connect   d disconnect   r refresh   a startup   h help   q quit"
             }
+            Page::Inbox => app.inbox.as_ref().map_or("Esc home", |inbox| inbox.hints()),
             Page::Setup => "Tab / arrows move   Ctrl+U clear   Enter review   Esc cancel",
             Page::ConfirmSave | Page::ConfirmStartup => "Enter confirm   Esc back",
             Page::Help => "Esc / h return",
@@ -142,6 +154,7 @@ fn home(frame: &mut Frame, area: Rect, app: &App) {
     };
     let lines = vec![
         Line::from(safe(&app.workspace)),
+        key("i", "  Memory Inbox · review what matters"),
         Line::from(""),
         Line::from(vec![
             Span::raw("ChatGPT   "),

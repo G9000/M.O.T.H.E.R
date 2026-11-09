@@ -2,6 +2,8 @@
 
 ## 9 November 2026
 
+- Added Living Memory: explicit MCP proposals, owner TUI review through `mother inbox`, durable approval/dismissal receipts, stale-correction checks and portable inbox recovery.
+
 - Added native `cargo dev` and `cargo release` shortcuts; no Bun or Node tooling is needed.
 
 - Added the native terminal dashboard, connection wizard, secure OS credential storage, typed status, disconnect and optional Windows sign-in startup guide.

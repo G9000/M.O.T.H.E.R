@@ -4,7 +4,7 @@ M.O.T.H.E.R is a standalone Rust executable with its own SQLite store. Bun and N
 
 ## Terminal home
 
-Run `mother` in a terminal or `mother tui` for the connection dashboard. It guides private ChatGPT setup, stores the runtime key in your OS credential store, and reports readiness. See [the terminal guide](terminal.md). Existing scripting and MCP commands remain available.
+Run `mother` in a terminal or `mother tui` for the connection dashboard. It guides private ChatGPT setup, stores the runtime key in your OS credential store, and reports readiness. See [the terminal guide](terminal.md). Open `mother inbox` (or press **i** at home) to review proposed memories with Save, Edit or Dismiss; [Living Memory](living-memory.md) explains capture and cross-harness corrections. Existing scripting and MCP commands remain available.
 
 ## Build or upgrade
 
@@ -99,7 +99,7 @@ For another harness, enter the generated command and arguments in its supported 
 
 ## Local semantic retrieval
 
-Install the optional local model with `mother model install`. Search uses hybrid retrieval by default and falls back explicitly to literal matching when the model or cache is unavailable. `mother search` and `mother index` expose the same retrieval layer through the CLI. See [local semantic search](semantic-search.md) for setup, bounds and offline behavior. The six-tool MCP interface and canonical v1 record store remain compatible.
+Install the optional local model with `mother model install`. Search uses hybrid retrieval by default and falls back explicitly to literal matching when the model or cache is unavailable. `mother search` and `mother index` expose the same retrieval layer through the CLI. See [local semantic search](semantic-search.md) for setup, bounds and offline behavior. The original six MCP tools and canonical v1 record store remain compatible; Living Memory adds two proposal tools.
 
 ## Check a connection
 

@@ -1,4 +1,5 @@
 //! Interactive terminal home; transport and storage stay behind the connection adapter.
+mod inbox;
 #[cfg(test)]
 mod tests;
 mod view;
@@ -13,6 +14,7 @@ use zeroize::Zeroizing;
 pub enum Launch {
     Home,
     Setup,
+    Inbox,
 }
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Page {
@@ -21,6 +23,7 @@ enum Page {
     ConfirmSave,
     Help,
     ConfirmStartup,
+    Inbox,
 }
 
 struct Form {
@@ -93,12 +96,14 @@ struct App {
     busy: bool,
     startup: Option<bool>,
     workspace: String,
+    inbox: Option<inbox::Inbox>,
 }
 impl App {
     fn new() -> Result<Self> {
         let home = mother::config::data_directory()?;
         Ok(Self {
             page: Page::Home,
+            inbox: None,
             form: None,
             status: None,
             message: "Checking your connection...".into(),
@@ -110,6 +115,12 @@ impl App {
                 "No default workspace yet - use mother init --soul <your file>".into()
             },
         })
+    }
+    fn open_inbox(&mut self) -> Result<()> {
+        let path = mother::config::data_directory()?.join("context.sqlite");
+        self.inbox = Some(inbox::Inbox::open(path)?);
+        self.page = Page::Inbox;
+        Ok(())
     }
     fn open_setup(&mut self) -> Result<()> {
         let settings = match connection::load_settings()? {
@@ -186,6 +197,7 @@ fn dispatch(app: &mut App, sender: &mpsc::Sender<Result<Status>>, action: Action
 struct TerminalGuard;
 impl Drop for TerminalGuard {
     fn drop(&mut self) {
+        let _ = crossterm::execute!(std::io::stdout(), event::DisableBracketedPaste);
         ratatui::restore();
     }
 }
@@ -202,15 +214,21 @@ pub fn run(launch: Launch) -> Result<()> {
     if matches!(launch, Launch::Setup) {
         app.open_setup()?;
     }
+    if matches!(launch, Launch::Inbox) {
+        app.open_inbox()?;
+    }
     let mut terminal = ratatui::try_init()?;
     let _guard = TerminalGuard;
+    crossterm::execute!(std::io::stdout(), event::EnableBracketedPaste)?;
     let (sender, receiver) = mpsc::channel();
-    dispatch(
-        &mut app,
-        &sender,
-        Action::Refresh,
-        "Checking connection state...",
-    );
+    if !matches!(launch, Launch::Inbox) {
+        dispatch(
+            &mut app,
+            &sender,
+            Action::Refresh,
+            "Checking connection state...",
+        );
+    }
     loop {
         if let Ok(result) = receiver.try_recv() {
             app.finish(result);
@@ -219,8 +237,23 @@ pub fn run(launch: Launch) -> Result<()> {
         if !event::poll(Duration::from_millis(100))? {
             continue;
         }
-        let Event::Key(key) = event::read()? else {
-            continue;
+        let key = match event::read()? {
+            Event::Key(key) => key,
+            Event::Paste(text) if !app.busy => {
+                if app.page == Page::Inbox {
+                    if let Some(inbox) = &mut app.inbox {
+                        inbox.paste(&text);
+                    }
+                } else if app.page == Page::Setup
+                    && let Some(form) = &mut app.form
+                {
+                    for c in text.chars().filter(|c| !c.is_control()) {
+                        form.input(KeyEvent::new(KeyCode::Char(c), KeyModifiers::NONE));
+                    }
+                }
+                continue;
+            }
+            _ => continue,
         };
         if key.kind != KeyEventKind::Press {
             continue;
@@ -237,6 +270,15 @@ pub fn run(launch: Launch) -> Result<()> {
             break;
         }
         match app.page {
+            Page::Inbox => {
+                if let Some(inbox) = &mut app.inbox {
+                    match inbox.input(key) {
+                        Ok(true) => app.page = Page::Home,
+                        Ok(false) => {}
+                        Err(error) => inbox.message = error.to_string(),
+                    }
+                }
+            }
             Page::Setup => match key.code {
                 KeyCode::Esc => {
                     app.form = None;
@@ -292,6 +334,11 @@ pub fn run(launch: Launch) -> Result<()> {
             },
             Page::Home => match key.code {
                 KeyCode::Char('q') | KeyCode::Esc => break,
+                KeyCode::Char('i') => {
+                    if let Err(error) = app.open_inbox() {
+                        app.message = error.to_string();
+                    }
+                }
                 KeyCode::Char('s') => {
                     if let Err(error) = app.open_setup() {
                         app.message = error.to_string();

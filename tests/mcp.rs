@@ -123,7 +123,7 @@ impl Fixture {
                     "grant",
                     client,
                     "--scopes",
-                    "read,memory:write,task:write,checkpoint:write",
+                    "read,memory:write,decision:write,task:write,checkpoint:write",
                 ],
             );
         }
@@ -170,14 +170,14 @@ fn real_stdio_round_trip_handoff_correction_task_progress_restart_and_connected_
     let mut expected: Value =
         serde_json::from_str(include_str!("../contracts/mcp-tools.json")).unwrap();
     // rmcp 3.9 no longer serializes the legacy task execution metadata.
-    // The six tools remain synchronous and advertise no task capability.
+    // The tools remain synchronous and advertise no task capability.
     for tool in expected.as_array_mut().unwrap() {
         assert_eq!(tool["execution"]["taskSupport"], "forbidden");
         tool.as_object_mut().unwrap().remove("execution");
     }
     assert_eq!(
         catalog["tools"], expected,
-        "preserve all six tool names, descriptions, schemas and annotations"
+        "preserve all advertised tool names, descriptions, schemas and annotations"
     );
     let first = a.call("mother_write_record", f.request(memory("Green tea")));
     let task = a.call("mother_write_record", f.request(json!({"kind":"task", "title":"Plan a weekend", "content":"Choose a destination", "status":"todo"})));
@@ -309,6 +309,12 @@ fn duplicate_operation_race_creates_one_record_and_read_only_clients_cannot_muta
     cli(f.dir.path(), &["grant", "reader"]);
     let mut reader = Client::connect(&f.dir.path().join("clients/reader.private.json"));
     let denied = reader.result("mother_write_record", f.request(memory("Black tea")));
+    assert_eq!(denied["isError"], true);
+    assert_eq!(denied["structuredContent"]["error"]["code"], "FORBIDDEN");
+    let mut proposal = f.request(memory("Black tea"));
+    proposal["source"] = json!("Synthetic read-only submission");
+    proposal["basis"] = json!("owner_statement");
+    let denied = reader.result("mother_propose_memory", proposal);
     assert_eq!(denied["isError"], true);
     assert_eq!(denied["structuredContent"]["error"]["code"], "FORBIDDEN");
 }
@@ -541,7 +547,7 @@ fn connected_harnesses_observe_owner_soul_updates_without_restarting() {
                 .as_array()
                 .unwrap()
                 .len(),
-            6
+            8
         );
     }
     let saved = a.call(
@@ -557,5 +563,63 @@ fn connected_harnesses_observe_owner_soul_updates_without_restarting() {
     assert_eq!(
         resumed.call("mother_get_context", json!({}))["persona"]["hash"],
         updated["hash"]
+    );
+}
+#[test]
+fn reviewed_capture_crosses_two_real_harness_processes_only_after_owner_save() {
+    use mother::store::Store;
+    let f = Fixture::new();
+    let mut chatgpt = Client::connect(&f.a_config);
+    let mut hermes = Client::connect(&f.b_config);
+    let mut owner = Store::open(&f.dir.path().join("context.sqlite")).unwrap();
+    let mut q = f.request(json!({"kind":"decision","title":"Synthetic decision capture","content":"Choose tea","status":"confirmed"}));
+    q["source"] = json!("Synthetic owner instruction in ChatGPT");
+    q["basis"] = json!("owner_statement");
+    let submitted = chatgpt.call("mother_propose_memory", q.clone());
+    let p = &submitted["proposal"];
+    assert!(
+        hermes.call("mother_get_context", json!({}))["records"]
+            .as_array()
+            .unwrap()
+            .is_empty()
+    );
+    assert!(
+        hermes.call(
+            "mother_search_context",
+            json!({"query":"tea","mode":"literal"})
+        )["records"]
+            .as_array()
+            .unwrap()
+            .is_empty()
+    );
+    assert_eq!(
+        hermes.call("mother_get_proposal", json!({"id":p["id"]}))["record"],
+        p["record"]
+    );
+    let save = json!({"workspaceId":f.workspace["id"],"generation":f.workspace["generation"],"operationId":Uuid::new_v4().to_string(),"proposalId":p["id"],"expectedRevision":1,"action":"save"});
+    let saved = owner.review_proposal(save).unwrap();
+    let record = &saved["receipt"]["record"];
+    assert_eq!(
+        hermes.call("mother_get_record", json!({"id":record["id"]})),
+        *record
+    );
+    let mut correction = q;
+    correction["id"] = record["id"].clone();
+    correction["expectedRevision"] = json!(1);
+    correction["operationId"] = json!(Uuid::new_v4().to_string());
+    correction["record"]["content"] = json!("Choose black tea");
+    let next = hermes.call("mother_propose_memory", correction);
+    let reviewed=owner.review_proposal(json!({"workspaceId":f.workspace["id"],"generation":f.workspace["generation"],"operationId":Uuid::new_v4().to_string(),"proposalId":next["proposal"]["id"],"expectedRevision":1,"action":"save"})).unwrap();
+    assert_eq!(reviewed["receipt"]["record"]["revision"], 2);
+    assert_eq!(
+        chatgpt.call("mother_get_record", json!({"id":record["id"]})),
+        reviewed["receipt"]["record"]
+    );
+    assert_eq!(
+        chatgpt.call(
+            "mother_get_receipt",
+            json!({"operationId":submitted["operationId"]})
+        ),
+        submitted
     );
 }

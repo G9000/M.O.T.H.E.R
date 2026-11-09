@@ -1,6 +1,6 @@
 # Rust port — v0.2.0
 
-M.O.T.H.E.R is now an independent Rust executable. The SQLite store, v1 JSON client configs and six synchronous MCP tools retain their existing contracts. No AnimaOS dependency or Bun/Node runtime is required. The TypeScript baseline remains in Git at commit `6f6e0cc`.
+M.O.T.H.E.R is now an independent Rust executable. The SQLite store, v1 JSON client configs and original six synchronous MCP tools retain their existing contracts. Living Memory adds two proposal tools and separate inbox tables; approved records still use the v1 contract. No AnimaOS dependency or Bun/Node runtime is required. The TypeScript baseline remains in Git at commit `6f6e0cc`.
 
 ## API mapping
 
@@ -61,7 +61,7 @@ Additional coverage opens a captured TypeScript SQL database and replays all ori
 ## Deliberate differences
 
 - The executable uses `mother mcp --config ...`; regenerate launcher entries with `mother connection`. Existing client JSON files and tokens remain valid. The generated entry points at the executable that produced it, so generate it after putting the binary in a stable location.
-- The official Rust MCP SDK negotiates its supported protocol versions, omits the older SDK's `execution.taskSupport: forbidden` catalog extension, and explicitly emits `isError: false` for success. Task-lifecycle capabilities are not advertised; the supported contract is six synchronous tools. Catalog field ordering and error prose are not byte-for-byte identical; structured error codes are preserved.
+- The official Rust MCP SDK negotiates its supported protocol versions, omits the older SDK's `execution.taskSupport: forbidden` catalog extension, and explicitly emits `isError: false` for success. Task-lifecycle capabilities are not advertised; the original contract is six synchronous tools, now supplemented by two Living Memory proposal tools. Catalog field ordering and error prose are not byte-for-byte identical; structured error codes are preserved.
 - Rust strings cannot contain unpaired UTF-16 surrogates. An excerpt stops before a surrogate pair that would straddle the 400-unit boundary instead of emitting half an emoji. Lone-surrogate JSON text is rejected. Full valid-Unicode content remains intact.
 - In v0.2.0 a new instance read SOUL.md from the current directory with an embedded fallback. Since v0.3.1, owners select their own file with init --soul, or provide SOUL.md beside the selected database. No persona is embedded and no unrelated working-directory file is selected automatically. Existing instances always read the stored snapshot. CLI help/error formatting comes from clap, and --help/--version are available.
 - Backup files remain private and unencrypted; OS account/filesystem access is the trust boundary. Revocation cannot withdraw already disclosed context. Export capacity and retained-history limitations are unchanged.

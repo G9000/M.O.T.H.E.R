@@ -6,6 +6,7 @@ Run `mother` in a terminal, or `mother tui`, to open M.O.T.H.E.R's dashboard. Pi
 
 | Key | Action |
 | --- | --- |
+| i | Open the Memory Inbox for Save, Edit or Dismiss |
 | s | Set up or inspect the ChatGPT connection |
 | c | Connect using saved settings and credential |
 | d | Disconnect this workspace's managed runtime |
@@ -42,6 +43,6 @@ Without a terminal, connect uses only previously saved settings and credentials.
 
 Local readiness means the intended runtime is running, healthy and ready. It does not prove that a ChatGPT conversation can read and save memory. Only after readiness, add M.O.T.H.E.R in ChatGPT with **Connection: Tunnel** and **Authentication: No authentication** for this stdio server. The tunnel still authenticates with OpenAI and M.O.T.H.E.R still validates its separate local grant. Then complete the [cross-harness acceptance test](chatgpt.md#verify-reads-and-saves-across-harnesses).
 
-The dashboard does not change SOUL.md, edit memories, import chats, or execute saved actions. Use the existing [owner commands](setup.md) for workspace administration and MCP for ordinary context writes.
+The Memory Inbox reviews proposed context with explicit Save, Edit and Dismiss actions. Run `mother inbox` to open it directly; see [Living Memory](living-memory.md). The dashboard does not change SOUL.md, import chats or execute saved actions. Use the existing [owner commands](setup.md) for workspace administration.
 
 If a previously configured executable or client-config file disappears, M.O.T.H.E.R preserves the old configuration until its runtime can be reconciled. Restore the expected file or inspect the old alias with the official tunnel client before changing paths; setup does not guess that an unreachable runtime has stopped.
