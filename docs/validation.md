@@ -1,3 +1,11 @@
+# Validation — private ChatGPT tunnel preparation, 9 November 2026
+
+A private tunnel was created and its intended organization/workspace associations were verified. The official tunnel-client v0.0.20 archive matched its published SHA-256. A separate M.O.T.H.E.R grant limited to read, memory writes and checkpoint writes was created after a private backup; the installed CLI read the existing workspace through that grant. Profile initialization and the private PowerShell launcher syntax were checked.
+
+Runtime-key entry, runtime health/polling, ChatGPT plugin discovery, and actual ChatGPT read/save/readback remain pending. The [private tunnel guide](chatgpt.md) documents the remaining acceptance steps. No private identifiers or credentials are included here.
+
+---
+
 # Validation — existing workspace SOUL updates v0.3.2, 9 November 2026
 
 - `cargo test --locked`: 62 passed; 2 optional real-model tests excluded from this offline run.

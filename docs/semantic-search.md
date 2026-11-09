@@ -13,7 +13,7 @@ mother model status
 
 Installation downloads approximately 91 MB of public weights, tokenizer and configuration from Hugging Face at a fixed revision, checks exact sizes and SHA-256 hashes, and publishes the verified directory. No record/query text or credentials are sent. There is no paid model API call. Search and MCP startup never download anything; after installation inference is local. The model uses the Apache-2.0 license; see its [model card](https://huggingface.co/sentence-transformers/all-MiniLM-L6-v2).
 
-By default assets live under the private MOTHER data directory in `models/all-MiniLM-L6-v2`. `MOTHER_MODEL_DIR` can select another absolute model directory. A missing/corrupt model or invalid model-directory setting leaves ordinary memory reads/writes and literal search usable. Explicit model commands report failures. Invalid existing installations are not overwritten; select another directory or move the invalid directory aside before installing again.
+By default assets live under the private MOTHER data directory in its `models` subfolder, under `all-MiniLM-L6-v2`. `MOTHER_MODEL_DIR` can select another absolute model directory. A missing/corrupt model or invalid model-directory setting leaves ordinary memory reads/writes and literal search usable. Explicit model commands report failures. Invalid existing installations are not overwritten; select another directory or move the invalid directory aside before installing again.
 
 ## Search and indexing
 
