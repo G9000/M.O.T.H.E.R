@@ -5,6 +5,7 @@ fn fixture(page: Page) -> App {
         page,
         inbox: None,
         animaos: None,
+        health: None,
         form: Some(Form::new(Settings {
             version: 1,
             tunnel_id: "tunnel_synthetic".into(),
@@ -132,4 +133,10 @@ fn home_exposes_memory_inbox_without_tunnel_setup() {
 #[test]
 fn home_exposes_animaos_setup_without_chatgpt_connection() {
     assert!(screen(&fixture(Page::Home), 110, 32).contains("AnimaOS"));
+}
+
+#[test]
+fn home_exposes_connection_test_and_health_page_handles_small_terminal() {
+    assert!(screen(&fixture(Page::Home), 110, 32).contains("Test connection"));
+    assert!(screen(&fixture(Page::Health), 25, 8).contains("Resize"));
 }

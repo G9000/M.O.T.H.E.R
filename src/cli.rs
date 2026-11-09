@@ -46,6 +46,13 @@ enum Command {
         #[arg(long)]
         json: bool,
     },
+    /// Test this executable's local MCP read with an existing private grant.
+    Doctor {
+        #[arg(long)]
+        config: PathBuf,
+        #[arg(long)]
+        json: bool,
+    },
     /// Stop this workspace's managed harness connection.
     Disconnect {
         #[arg(value_enum)]
@@ -289,6 +296,26 @@ fn read_soul(path: &Path) -> Result<String> {
 }
 fn execute(command: Command) -> Result<()> {
     match command {
+        Command::Doctor { config, json } => {
+            let report = crate::health::probe(&config);
+            if json {
+                print_json(serde_json::to_value(&report)?)?;
+            } else {
+                println!(
+                    "{}\n{}",
+                    report.scope,
+                    serde_json::to_string_pretty(&report)?
+                );
+            }
+            if report.status == "verified" {
+                Ok(())
+            } else {
+                Err(Error::domain(
+                    "HEALTH_CHECK",
+                    "Local MCP check incomplete; inspect the redacted report.",
+                ))
+            }
+        }
         Command::Inbox => crate::tui::run(crate::tui::Launch::Inbox),
         Command::Tui => crate::tui::run(crate::tui::Launch::Home),
         Command::Connect {

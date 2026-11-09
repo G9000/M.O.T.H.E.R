@@ -1,5 +1,6 @@
 //! Interactive terminal home; transport and storage stay behind the connection adapter.
 mod animaos;
+mod health;
 mod inbox;
 #[cfg(test)]
 mod tests;
@@ -27,6 +28,7 @@ enum Page {
     ConfirmStartup,
     Inbox,
     Animaos,
+    Health,
 }
 
 struct Form {
@@ -101,6 +103,7 @@ struct App {
     workspace: String,
     inbox: Option<inbox::Inbox>,
     animaos: Option<animaos::Setup>,
+    health: Option<health::Health>,
 }
 impl App {
     fn new() -> Result<Self> {
@@ -109,6 +112,7 @@ impl App {
             page: Page::Home,
             inbox: None,
             animaos: None,
+            health: None,
             form: None,
             status: None,
             message: "Checking your connection...".into(),
@@ -239,6 +243,9 @@ pub fn run(launch: Launch) -> Result<()> {
         );
     }
     loop {
+        if let Some(health) = &mut app.health {
+            health.poll();
+        }
         if let Some(setup) = &mut app.animaos {
             setup.poll();
         }
@@ -291,6 +298,12 @@ pub fn run(launch: Launch) -> Result<()> {
             break;
         }
         match app.page {
+            Page::Health => {
+                if app.health.as_mut().is_some_and(|health| health.input(key)) {
+                    app.health = None;
+                    app.page = Page::Home;
+                }
+            }
             Page::Animaos => {
                 if let Some(setup) = &mut app.animaos {
                     match setup.input(key) {
@@ -363,6 +376,10 @@ pub fn run(launch: Launch) -> Result<()> {
                 _ => {}
             },
             Page::Home => match key.code {
+                KeyCode::Char('t') => {
+                    app.health = Some(health::Health::open(&mother::config::data_directory()?));
+                    app.page = Page::Health;
+                }
                 KeyCode::Char('q') | KeyCode::Esc => break,
                 KeyCode::Char('n') => {
                     app.animaos = Some(animaos::Setup::new());

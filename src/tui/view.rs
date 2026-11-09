@@ -14,7 +14,7 @@ const VIOLET: Color = Color::Rgb(188, 160, 215);
 const GOLD: Color = Color::Rgb(225, 188, 139);
 const BACKGROUND: Color = Color::Rgb(25, 23, 32);
 
-fn safe(text: &str) -> String {
+pub(super) fn safe(text: &str) -> String {
     text.chars().filter(|c| !c.is_control()).collect()
 }
 fn panel(title: &str) -> Block<'_> {
@@ -78,6 +78,11 @@ pub(super) fn render(frame: &mut Frame, app: &App) {
         rows[0],
     );
     match app.page {
+        Page::Health => {
+            if let Some(health) = &app.health {
+                health.render(frame, rows[1]);
+            }
+        }
         Page::Home => home(frame, rows[1], app),
         Page::Animaos => {
             if let Some(setup) = &app.animaos {
@@ -102,7 +107,11 @@ pub(super) fn render(frame: &mut Frame, app: &App) {
         }
     }
     frame.render_widget(
-        text(safe(if app.page == Page::Animaos {
+        text(safe(if app.page == Page::Health {
+            app.health
+                .as_ref()
+                .map_or(app.message.as_str(), |health| health.message.as_str())
+        } else if app.page == Page::Animaos {
             app.animaos
                 .as_ref()
                 .map_or(app.message.as_str(), |setup| setup.message.as_str())
@@ -125,8 +134,9 @@ pub(super) fn render(frame: &mut Frame, app: &App) {
         "Working... status will update here. No automatic retry."
     } else {
         match app.page {
+            Page::Health => "Up/Down select   Enter test   PgUp/PgDn scroll   Esc cancel / home",
             Page::Home => {
-                "n AnimaOS   i inbox   s setup   c connect   d disconnect   r refresh   a startup   h help   q quit"
+                "t test   n AnimaOS   i inbox   s setup   c connect   d disconnect   r refresh   a startup   h help   q quit"
             }
             Page::Inbox => app.inbox.as_ref().map_or("Esc home", |inbox| inbox.hints()),
             Page::Animaos => app
@@ -169,6 +179,7 @@ fn home(frame: &mut Frame, area: Rect, app: &App) {
         Line::from(safe(&app.workspace)),
         key("i", "  Memory Inbox · review what matters"),
         key("n", "  Connect AnimaOS"),
+        key("t", "  Test connection"),
         Line::from(""),
         Line::from(vec![
             Span::raw("ChatGPT   "),

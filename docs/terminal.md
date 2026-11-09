@@ -7,6 +7,7 @@ Run `mother` in a terminal, or `mother tui`, to open M.O.T.H.E.R's dashboard. Pi
 | Key | Action |
 | --- | --- |
 | n | Connect an AnimaOS agent through local MCP |
+| t | Test this executable's local MCP read using an existing client config |
 | i | Open the Memory Inbox for Save, Edit or Dismiss |
 | s | Set up or inspect the ChatGPT connection |
 | c | Connect using saved settings and credential |
@@ -29,6 +30,8 @@ Use a stable installed mother executable for the connection. A running managed t
 Non-secret connection settings live under the private MOTHER data directory. Each configured identity gets its own runtime alias and profile. M.O.T.H.E.R checks ownership before connecting or stopping; it does not take over an unrelated tunnel or the earlier PowerShell-managed alias. An unknown result requires inspection before another effect. Disconnecting stops transport but keeps your settings and credential for reuse.
 
 ## Scriptable commands
+
+Press **t** for a bounded, read-only [connection health check](health.md), or run `mother doctor --config <private.json> --json`. Its local MCP report includes executable identity and category counts; actual host conversations require separate verification.
 
 ```powershell
 mother connect chatgpt

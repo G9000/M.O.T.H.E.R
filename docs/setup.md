@@ -8,6 +8,8 @@ Run `mother` in a terminal or `mother tui` for the connection dashboard. It guid
 
 ## Build or upgrade
 
+Use `mother doctor --config <private.json> --json` or press **t** at home to check the current executable through MCP without displaying private context. See [connection health](health.md) for report fields, bounds and the distinction from actual host verification.
+
 With Rust 1.93 or newer, run these native Cargo shortcuts from the repository root:
 
 ```powershell

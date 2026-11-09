@@ -1,3 +1,17 @@
+# Connection health and installed rollout — 10 November 2026
+
+Feature branch `g9000/connection-health`, based on main `2cee6df`. Independent M.O.T.H.E.R implementation; README poem and artwork unchanged. This section supersedes older deployment-pending notes below.
+
+- Native home **t** selects an existing private grant and performs current-executable MCP initialization, discovery and an unfiltered context read. `mother doctor --config <private.json> --json` exposes the same redacted diagnostic. Ten-second deadline, 2 MiB/32-message limits and owned child/reader cleanup apply. Workspace identity and six-category totals are validated; unavailable inventory never becomes inferred zeros.
+- Full locked release suite: **159 passed**, two existing optional model tests ignored. Formatting, strict release Clippy, release build and independent review passed. Coordinator reran the full suite, formatting and strict Clippy in the final tree. Regression coverage includes old/malformed counts, identity mismatch, revoked/invalid configs, timeout/cancellation, output limits, notification handling, read-only effects and replaced foreign-workspace configs.
+- Installed the verified build at existing client executable paths with rollback backups, preserving configurations, grants, persona and running processes. Installed SHA-256: `ee76eef046f096022e0b8f0e02cdece5d36ad76747179c20a3dd9cf70a80b77c`. Each existing ChatGPT, Claude Desktop, Hermes, Codex and AnimaOS grant passed the installed local doctor check against the same workspace. Existing host processes are not assumed reloaded solely because the file changed.
+- AnimaOS was reconnected through its versioned owner API and returned ready/automatic with eight discovered tools. ChatGPT's private tunnel was started and reported healthy. An actual ChatGPT conversation returned the updated category inventory, correctly separating an empty memory filter from nonempty checkpoint context.
+- Synthetic live loop: a local MCP process using the existing AnimaOS proposal grant submitted a clearly labeled draft; normal recall excluded it while pending. The native owner inbox reviewed and saved it. Codex read revision 1. A second local MCP process submitted its correction with the current revision; native review showed before/after and saved it. Codex and an actual ChatGPT conversation read revision 2 with the corrected synthetic marker. Finally the test record was retracted and literal search returned no match. This was a local MCP proposal test, not a successful AnimaOS model-generated proposal.
+- Native installed TUI smoke verified inbox save/correction, home **t**, actual verified-read report and Page Down access to all six categories. No private token, persona or record content appears in the diagnostic report.
+
+Remaining host acceptance: two explicitly approved AnimaOS model prompts did not complete the workflow. The first failed discovery; the second found the context reader but ended before invoking it. No third provider prompt was sent. ChatGPT's current six-tool grant lacks proposal scope; it correctly stopped rather than writing a canonical record as a fallback. Actual Claude Desktop and Hermes conversations were not exercised. These host boundaries remain explicit; local doctor success does not establish them. Publication was authorized by the owner after this validation; consult Git history for the resulting commit.
+
+---
 # Context inventory response — 10 November 2026
 
 Feature branch `g9000/context-counts`, based on main `4df847d`.
