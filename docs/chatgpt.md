@@ -21,45 +21,17 @@ The tunnel client makes an outbound HTTPS connection. M.O.T.H.E.R continues to s
 
 ## Start the private connection
 
-This PowerShell example prompts for the runtime key without echoing it, passes it through the process environment, and clears that environment value afterward. It does not save the key to disk. Replace the tunnel ID and both example paths first; use the executable and config paths from your installation, not a repository-relative path.
-
-Use forward slashes inside the MCP command on Windows: the tunnel command parser treats backslashes as escapes. Quote each path inside that command if it contains spaces.
+With M.O.T.H.E.R 0.4.0 or later, open the native setup screen:
 
 ```powershell
-$tunnelId = 'tunnel_REPLACE_WITH_YOUR_ID'
-$mcpCommand = '"C:/path/to/mother.exe" mcp --config "C:/private/chatgpt.private.json"'
-$profileDir = Join-Path $env:LOCALAPPDATA 'MOTHER/chatgpt-tunnel/profiles'
-$secureKey = Read-Host 'OpenAI runtime API key' -AsSecureString
-$keyPointer = [IntPtr]::Zero
-$previousKey = $env:CONTROL_PLANE_API_KEY
-try {
-    $keyPointer = [Runtime.InteropServices.Marshal]::SecureStringToBSTR($secureKey)
-    $env:CONTROL_PLANE_API_KEY = [Runtime.InteropServices.Marshal]::PtrToStringBSTR($keyPointer)
-    $env:HEALTH_LISTEN_ADDR = '127.0.0.1:0'
-    $env:MCP_STDIO_SEND_INITIALIZED_NOTIFICATION = 'true'
-
-    # First setup only. Reuse an existing matching profile; do not overwrite it.
-    tunnel-client init --sample sample_mcp_stdio_local --profile mother-chatgpt --profile-dir $profileDir --tunnel-id $tunnelId --mcp-command $mcpCommand --control-plane-api-key-ref env:CONTROL_PLANE_API_KEY --health-listen-addr 127.0.0.1:0
-    if ($LASTEXITCODE -ne 0) { throw 'Profile setup failed; inspect the existing configuration.' }
-
-    tunnel-client doctor --profile mother-chatgpt --profile-dir $profileDir --explain
-    if ($LASTEXITCODE -ne 0) { throw 'Resolve the doctor findings before connecting.' }
-
-    tunnel-client runtimes connect --alias mother-chatgpt --tunnel-id $tunnelId --profile mother-chatgpt --profile-dir $profileDir --mcp-command $mcpCommand --runtime-api-key env:CONTROL_PLANE_API_KEY --json
-    if ($LASTEXITCODE -ne 0) { throw 'Tunnel startup failed.' }
-    tunnel-client runtimes status mother-chatgpt --json
-} finally {
-    $env:CONTROL_PLANE_API_KEY = $previousKey
-    if ($keyPointer -ne [IntPtr]::Zero) {
-        [Runtime.InteropServices.Marshal]::ZeroFreeBSTR($keyPointer)
-    }
-    $secureKey.Dispose()
-}
+mother connect chatgpt --setup
 ```
 
-The health/admin listener uses a local ephemeral port, avoiding conflicts with other apps. The initialized notification supports M.O.T.H.E.R's MCP handshake. The managed runtime inherits the key in memory and continues after this setup terminal closes; clearing the parent variable does not stop it. Do not enable raw HTTP or payload logging for a personal workspace.
+Enter the existing tunnel ID, optional organization ID, your separate ChatGPT config path, the installed official tunnel-client executable path, a stable mother executable path, and the runtime key. Review and save, then press c to connect. The key is masked and saved in the native OS credential store; it is never added to command arguments or plain settings. A blank key field preserves the saved credential. No private PowerShell launcher is required.
 
-Check that status reports `process_running`, `healthy` and `ready`, and inspect the local client status for active polling. Starting a process alone is not proof that ChatGPT can use it. On a later restart, reuse the same profile, alias, tunnel and M.O.T.H.E.R config; supply the runtime key again and skip `init`. Inspect `runtimes status` before reconnecting an already-running alias. This recipe does not install automatic startup after reboot.
+The dashboard shows observed readiness and actionable setup errors. A managed runtime continues after the dashboard closes. Inspect it later with `mother status` or `mother status --json`, and reconnect with `mother connect chatgpt`. Optional Windows sign-in startup is explicit and off by default. See [the terminal guide](terminal.md) for controls and lifecycle details.
+
+Keep the computer and client running during discovery and calls. Wait for the intended runtime to report running, healthy and ready before adding it to ChatGPT. Starting a process alone does not establish connectivity or actual ChatGPT read/save behavior.
 
 ## Add it in ChatGPT
 
@@ -67,7 +39,7 @@ While the runtime is healthy:
 
 1. Open [ChatGPT Plugins](https://chatgpt.com/plugins), select the plus button, then **Add custom MCP server**.
 2. Name it **M.O.T.H.E.R**, choose **Tunnel** under **Connection**, and select your tunnel or paste its ID.
-3. Configure the authentication choice appropriate to this stdio connection. M.O.T.H.E.R uses its local config credential; it does not implement a separate OAuth service. Do not paste the local credential into a URL or description.
+3. Choose **No authentication** for this stdio connection. M.O.T.H.E.R uses its local config credential; it does not implement a separate OAuth service. Do not paste the local credential into a URL or description.
 4. Review the access warning, then create the private plugin. Review the six discovered tools against the [capability table](setup.md#tools-and-capabilities); tool visibility does not grant extra write scopes.
 5. Install it for your use. Start a chat, type `@`, and select M.O.T.H.E.R.
 
@@ -85,7 +57,7 @@ Finally, have ChatGPT save a checkpoint describing only the observed result, and
 
 ## Disconnect or troubleshoot
 
-- Stop the local connection with `tunnel-client runtimes stop mother-chatgpt`. Inspect status afterward. Stop this runtime only; Codex's separate local MCP connection can continue.
+- Stop the local connection with `mother disconnect chatgpt`. Inspect status afterward. Stop this runtime only; Codex's separate local MCP connection can continue.
 - Revoke record access with `mother revoke chatgpt` (add `--db` for a non-default workspace). Existing MCP processes check revocation on subsequent calls. Reconnecting a revoked client requires a new name and config.
 - A missing tunnel in ChatGPT usually needs its ChatGPT workspace association and the operator's **Read + Use** access checked. Platform organization association alone is insufficient.
 - For authentication or readiness errors, inspect `doctor` and runtime status, the runtime-key permissions, absolute MCP paths and initialized-notification setting. Do not recreate the database or grants to resolve a tunnel error.
@@ -95,6 +67,6 @@ Disconnecting or revoking access cannot remove context already returned to ChatG
 
 ## Verification boundary
 
-On 9 November 2026, the maintainer's private setup reached tunnel creation, a separate scoped ChatGPT grant, verified local CLI reads, checksum-verified tunnel-client v0.0.20 installation, and profile/launcher preparation. Runtime-key entry, a healthy tunnel, ChatGPT plugin discovery and live ChatGPT read/save acceptance were still pending. No end-to-end ChatGPT success is claimed by these docs.
+Before the native terminal manager was built, the maintainer's private setup on 9 November 2026 reached tunnel creation, a separate scoped ChatGPT grant, verified local CLI reads, checksum-verified tunnel-client v0.0.20 installation, and profile/launcher preparation. Runtime-key entry, a healthy tunnel, ChatGPT plugin discovery and live ChatGPT read/save acceptance were still pending. No end-to-end ChatGPT success is claimed by these docs.
 
 References: [Secure MCP Tunnel](https://developers.openai.com/api/docs/guides/secure-mcp-tunnels), [official onboarding](https://github.com/openai/tunnel-client/blob/master/docs/onboarding.md), and [connect and test a ChatGPT plugin](https://developers.openai.com/plugins/deploy/connect-chatgpt).

@@ -2,9 +2,25 @@
 
 M.O.T.H.E.R is a standalone Rust executable with its own SQLite store. Bun and Node are not required at runtime. AnimaOS is not required. The checked-in files contain the program and an editable persona example; private records and client credentials stay in your user data directory.
 
+## Terminal home
+
+Run `mother` in a terminal or `mother tui` for the connection dashboard. It guides private ChatGPT setup, stores the runtime key in your OS credential store, and reports readiness. See [the terminal guide](terminal.md). Existing scripting and MCP commands remain available.
+
 ## Build or upgrade
 
-Build with Rust 1.93 or newer:
+With Rust 1.93 or newer, run these native Cargo shortcuts from the repository root:
+
+```powershell
+cargo dev
+```
+
+This builds the development executable and opens the TUI. For an optimized standalone executable:
+
+```powershell
+cargo release
+```
+
+These aliases are defined in `.cargo/config.toml`. You can also use the full Cargo command:
 
 ```powershell
 cargo build --release --locked

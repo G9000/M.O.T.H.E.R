@@ -1,3 +1,15 @@
+# Validation — terminal connections v0.4.0, 9 November 2026
+
+- `cargo test --locked --quiet`: 89 passed; two optional actual-model tests excluded. Existing CLI, storage and MCP suites passed.
+- `cargo fmt --all -- --check`, `cargo build --release --locked`, `cargo clippy --locked --all-targets --all-features -- -D warnings`, and `cargo doc --no-deps --locked`: passed.
+- Focused regression coverage includes non-terminal behavior, dashboard/setup rendering, masked credentials, failed-save draft retention, runtime identity and direct health verification, stopped-runtime recovery, bounded failures, uncertain effects without replay, crash-released operation locks, and startup ownership.
+- An actual Windows terminal smoke test opened the dashboard and setup, cancelled without saving, and exited with terminal restoration. The installed release subsequently saved the existing non-secret connection details through the reviewed setup form and correctly reported `MissingCredential`, with sign-in startup off.
+- The official tunnel-client v0.0.20 missing-alias response was checked locally and added as a regression fixture. Release installation was verified by hash and version; new terminals select 0.4.0. Existing Codex MCP configuration and processes were preserved.
+
+The native credential write and Windows sign-in startup are covered by injected unit tests, not live acceptance. No runtime API key was entered, no tunnel was started, and ChatGPT discovery/read/save/readback remain pending. macOS/Linux behavior was not exercised on this Windows host. Two optional actual-model fixtures were not rerun because the retrieval implementation is unchanged. README artwork, poem, persona and canonical memory implementation are unchanged.
+
+---
+
 # Validation — private ChatGPT tunnel preparation, 9 November 2026
 
 A private tunnel was created and its intended organization/workspace associations were verified. The official tunnel-client v0.0.20 archive matched its published SHA-256. A separate M.O.T.H.E.R grant limited to read, memory writes and checkpoint writes was created after a private backup; the installed CLI read the existing workspace through that grant. Profile initialization and the private PowerShell launcher syntax were checked.

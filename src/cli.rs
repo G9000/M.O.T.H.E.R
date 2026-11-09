@@ -13,7 +13,7 @@ use mother::{
 use serde_json::{Value, json};
 use std::{
     fs,
-    io::{Read, Write},
+    io::{IsTerminal, Read, Write},
     path::{Path, PathBuf},
 };
 
@@ -30,6 +30,30 @@ struct Cli {
 }
 #[derive(Debug, Subcommand)]
 enum Command {
+    /// Open the interactive workspace and connection dashboard.
+    Tui,
+    /// Connect a saved harness, or guide first-time setup in a terminal.
+    Connect {
+        #[arg(value_enum)]
+        harness: Harness,
+        #[arg(long)]
+        setup: bool,
+    },
+    /// Inspect connection readiness without modifying settings or memories.
+    Status {
+        #[arg(long)]
+        json: bool,
+    },
+    /// Stop this workspace's managed harness connection.
+    Disconnect {
+        #[arg(value_enum)]
+        harness: Harness,
+    },
+    /// Opt in or out of starting the connection at Windows sign-in.
+    Startup {
+        #[arg(value_enum)]
+        action: StartupAction,
+    },
     /// Initialize a fresh workspace from your own SOUL.md file.
     Init {
         #[arg(long)]
@@ -116,6 +140,17 @@ enum Command {
         config: PathBuf,
     },
 }
+#[derive(Debug, Clone, Copy, ValueEnum)]
+enum Harness {
+    Chatgpt,
+}
+#[derive(Debug, Clone, Copy, ValueEnum)]
+enum StartupAction {
+    Enable,
+    Disable,
+    Status,
+}
+
 #[derive(Debug, Subcommand)]
 enum SoulCommand {
     /// Read the stored persona and its hash; output may contain private text.
@@ -155,6 +190,9 @@ pub async fn run() -> Result<()> {
     match cli.command {
         Some(Command::Mcp { config }) => crate::mcp::serve(&config).await,
         Some(command) => execute(command),
+        None if std::io::stdin().is_terminal() && std::io::stdout().is_terminal() => {
+            crate::tui::run(crate::tui::Launch::Home)
+        }
         None => {
             use clap::CommandFactory;
             Cli::command().print_help()?;
@@ -248,6 +286,68 @@ fn read_soul(path: &Path) -> Result<String> {
 }
 fn execute(command: Command) -> Result<()> {
     match command {
+        Command::Tui => crate::tui::run(crate::tui::Launch::Home),
+        Command::Connect {
+            harness: Harness::Chatgpt,
+            setup,
+        } => {
+            let interactive = std::io::stdin().is_terminal() && std::io::stdout().is_terminal();
+            if setup || crate::connection::load_settings()?.is_none() {
+                if !interactive {
+                    return Err(Error::domain(
+                        "SETUP_REQUIRED",
+                        "Run mother connect chatgpt --setup in an interactive terminal.",
+                    ));
+                }
+                return crate::tui::run(crate::tui::Launch::Setup);
+            }
+            let status = crate::connection::connect()?;
+            println!("{}: {}", status.state, status.detail);
+            if status.state == crate::connection::ConnectionState::Ready {
+                Ok(())
+            } else {
+                Err(Error::domain(
+                    "NOT_READY",
+                    "Connection is not ready; run mother status before retrying.",
+                ))
+            }
+        }
+        Command::Status { json: machine } => {
+            let status = crate::connection::status()?;
+            if machine {
+                print_json(serde_json::to_value(status)?)
+            } else {
+                println!("ChatGPT: {}\n{}", status.state, status.detail);
+                Ok(())
+            }
+        }
+        Command::Disconnect {
+            harness: Harness::Chatgpt,
+        } => {
+            let status = crate::connection::disconnect()?;
+            println!("{}: {}", status.state, status.detail);
+            if matches!(
+                status.state,
+                crate::connection::ConnectionState::Stopped
+                    | crate::connection::ConnectionState::Unconfigured
+            ) {
+                Ok(())
+            } else {
+                Err(Error::domain(
+                    "NOT_STOPPED",
+                    "The connection was not verified stopped; inspect mother status before another action.",
+                ))
+            }
+        }
+        Command::Startup { action } => {
+            use crate::connection::Startup;
+            match action {
+                StartupAction::Enable => crate::connection::set_startup(Startup::Enabled)?,
+                StartupAction::Disable => crate::connection::set_startup(Startup::Disabled)?,
+                StartupAction::Status => {}
+            }
+            print_json(json!({"startupEnabled":crate::connection::startup_enabled()?}))
+        }
         Command::Init { db, soul } => {
             let db = db_path(db)?;
             let soul = soul.unwrap_or_else(|| db.with_file_name("SOUL.md"));

@@ -1,5 +1,7 @@
 mod cli;
+mod connection;
 mod mcp;
+mod tui;
 
 #[tokio::main]
 async fn main() {

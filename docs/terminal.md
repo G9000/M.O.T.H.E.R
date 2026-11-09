@@ -1,0 +1,47 @@
+# Your terminal home
+
+Run `mother` in a terminal, or `mother tui`, to open M.O.T.H.E.R's dashboard. Piped invocations of bare `mother` still print help; all existing CLI and MCP commands remain available. M.O.T.H.E.R remains an independent context layer with your existing local database and owner-supplied persona.
+
+## Keys
+
+| Key | Action |
+| --- | --- |
+| s | Set up or inspect the ChatGPT connection |
+| c | Connect using saved settings and credential |
+| d | Disconnect this workspace's managed runtime |
+| r | Refresh observed status |
+| a | Review an explicit Windows sign-in startup change |
+| h or ? | Connection help and ChatGPT verification steps |
+| q or Esc | Leave the dashboard; an established connection keeps running |
+
+In setup, use Tab/Shift+Tab or the arrow keys to move between fields. Ctrl+U clears a field. Enter reviews the settings before saving; Escape returns or cancels. Key input is masked, never included in the review screen, and stored in the native OS credential store. Blank key input preserves the existing credential for that connection.
+
+## Connect ChatGPT once
+
+Install OpenAI's official tunnel-client and create a private tunnel associated with your Platform organization and target ChatGPT workspace. Create a separate M.O.T.H.E.R ChatGPT client grant and keep its private config. The [ChatGPT guide](chatgpt.md) covers these prerequisites.
+
+Run `mother connect chatgpt --setup`. Supply the tunnel ID, optional organization ID, absolute client-config path, installed tunnel-client path, stable mother executable path and OpenAI runtime API key. Review and save, then press c. No cloud account, tunnel, grant or credential is created silently. The native connection manager replaces the need for a private PowerShell launcher.
+
+Use a stable installed mother executable for the connection. A running managed tunnel survives the dashboard closing, but your computer must remain on. Startup at Windows sign-in is off by default and requires an explicit action. macOS/Linux startup integration is not provided; connection commands remain available. The native credential store must be available; there is no plaintext or in-memory fallback masquerading as saved credentials.
+
+Non-secret connection settings live under the private MOTHER data directory. Each configured identity gets its own runtime alias and profile. M.O.T.H.E.R checks ownership before connecting or stopping; it does not take over an unrelated tunnel or the earlier PowerShell-managed alias. An unknown result requires inspection before another effect. Disconnecting stops transport but keeps your settings and credential for reuse.
+
+## Scriptable commands
+
+```powershell
+mother connect chatgpt
+mother status
+mother status --json
+mother disconnect chatgpt
+mother startup status
+mother startup enable
+mother startup disable
+```
+
+Without a terminal, connect uses only previously saved settings and credentials. It never prompts for a secret. Missing setup or a connection that is not ready returns a failure. `mother status --json` reports the observed state and readiness signals without returning keys or raw subprocess logs.
+
+Local readiness means the intended runtime is running, healthy and ready. It does not prove that a ChatGPT conversation can read and save memory. Only after readiness, add M.O.T.H.E.R in ChatGPT with **Connection: Tunnel** and **Authentication: No authentication** for this stdio server. The tunnel still authenticates with OpenAI and M.O.T.H.E.R still validates its separate local grant. Then complete the [cross-harness acceptance test](chatgpt.md#verify-reads-and-saves-across-harnesses).
+
+The dashboard does not change SOUL.md, edit memories, import chats, or execute saved actions. Use the existing [owner commands](setup.md) for workspace administration and MCP for ordinary context writes.
+
+If a previously configured executable or client-config file disappears, M.O.T.H.E.R preserves the old configuration until its runtime can be reconciled. Restore the expected file or inspect the old alias with the official tunnel client before changing paths; setup does not guess that an unreachable runtime has stopped.
