@@ -1,3 +1,15 @@
+# Context inventory response — 10 November 2026
+
+Feature branch `g9000/context-counts`, based on main `4df847d`.
+
+- Added workspace-wide canonical and recallable totals and counts for all six categories, separate query/kind/preview coverage, a plain-language summary and exact task/action unsettled-work totals. Legacy preview fields and limits remain compatible. Historical records remain excluded from recall; unreviewed proposals are not canonical records.
+- New regression tests first failed on missing inventory. Coverage includes checkpoint-only and empty workspaces, every category, retained historical records, filters/limits, proposal exclusion, authorization and unsettled-work truncation. Actual stdio protocol assertions verify the additive fields.
+- Full locked release suite: 146 passed, two existing optional model tests ignored. Formatting, strict Clippy, release build, docs-code-sync and diff checks passed. Independent read-only review approved after correcting Windows temporary-directory lifetime in tests. Verified owned synthetic scratch was cleaned.
+- A read-only CLI check using the existing AnimaOS client grant and the updated binary returned 14 canonical records: 12 recallable checkpoints and two retained historical memory records. Recallable memory count was zero while total context remained clearly nonempty. No stored records or client credentials were changed by that check.
+
+The built executable has the new response. Installed MCP processes have not been upgraded or reconnected for this feature; live model use of the new summary remains a separate deployment/acceptance step. No commit, merge or push performed for this branch.
+
+---
 # Live AnimaOS discovery compatibility fix — 10 November 2026
 
 The live owner setup created and enabled its connection, but AnimaOS rejected tool index 0 with SchemaRejected. Root cause: the preserved v1 M.O.T.H.E.R catalog explicitly declares Draft-07, while AnimaOS normalizes and compiles only JSON Schema 2020-12. The catalog uses shared constraints, so the MCP adapter now projects only the root dialect marker to 2020-12; the v1 source contract and domain validation are unchanged.

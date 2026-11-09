@@ -1,7 +1,7 @@
 [
   {
     "name": "mother_get_context",
-    "description": "Get workspace identity, initialized persona, bounded record previews and unsettled work. Read omitted/truncated flags; retrieve full records before relying on details.",
+    "description": "Read M.O.T.H.E.R shared context across all record categories, including memories, decisions, tasks and checkpoints. Returns workspace-wide category counts, explicit query/kind selection counts, bounded previews and task/action unsettled-work totals. Zero memory-category records does not mean the workspace is empty. Retrieve full records by ID before relying on details.",
     "inputSchema": {
       "type": "object",
       "properties": {

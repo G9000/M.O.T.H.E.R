@@ -140,6 +140,32 @@ pub(crate) fn rebuild_usage(conn: &Connection) -> Result<()> {
     usage.check()?;
     set_metadata(conn, "usage", &serde_json::to_value(usage)?)
 }
+fn context_inventory(conn: &Connection) -> Result<Value> {
+    let mut by_kind =
+        json!({"memory":0,"decision":0,"task":0,"checkpoint":0,"artifact":0,"action":0});
+    let mut recallable_by_kind = by_kind.clone();
+    let mut total = 0i64;
+    let mut recallable = 0i64;
+    let mut statement = conn.prepare("SELECT kind,COUNT(*),SUM(CASE WHEN status NOT IN ('retracted','superseded','cancelled') THEN 1 ELSE 0 END) FROM records GROUP BY kind")?;
+    for row in statement.query_map([], |row| {
+        Ok((
+            row.get::<_, String>(0)?,
+            row.get::<_, i64>(1)?,
+            row.get::<_, i64>(2)?,
+        ))
+    })? {
+        let (kind, count, available) = row?;
+        Kind::parse(&kind)?;
+        by_kind[&kind] = json!(count);
+        recallable_by_kind[&kind] = json!(available);
+        total += count;
+        recallable += available;
+    }
+    Ok(
+        json!({"totalRecords":total,"byKind":by_kind,"recallableRecords":recallable,"recallableByKind":recallable_by_kind,"excludedRecords":total-recallable}),
+    )
+}
+
 impl Store {
     /// Create a new store; an existing destination is never overwritten.
     pub fn initialize(path: &Path, content: &str) -> Result<Self> {
@@ -383,6 +409,7 @@ impl Store {
         };
         let tx = self.conn.transaction()?;
         authorize(&tx, auth, "read")?;
+        let inventory = context_inventory(&tx)?;
         let filter = "status NOT IN ('retracted','superseded','cancelled') AND (?1 IS NULL OR kind=?1) AND (?2 IS NULL OR instr(lower(title || ' ' || content),lower(?2))>0)";
         let total: i64 = tx.query_row(
             &format!("SELECT COUNT(*) FROM records WHERE {filter}"),
@@ -408,13 +435,29 @@ impl Store {
     Ok(json!({"id":r["id"],"kind":r["kind"],"title":r["title"],"status":r["status"],"revision":r["revision"],"actor":r["actor"],"updatedAt":r["updatedAt"],"excerpt":excerpt,"truncated":content.encode_utf16().count()>400}))
    }).collect::<Result<Vec<_>>>()?
         };
+        let unsettled_total: i64 = tx.query_row("SELECT COUNT(*) FROM records WHERE (kind='task' AND status IN ('doing','blocked')) OR (kind='action' AND status IN ('pending','unknown'))", [], |row| row.get(0))?;
         let mut work = {
             let mut stmt=tx.prepare("SELECT id,kind,status FROM records WHERE (kind='task' AND status IN ('doing','blocked')) OR (kind='action' AND status IN ('pending','unknown')) ORDER BY updated_at DESC,id LIMIT 21")?;
             stmt.query_map([],|r|Ok(json!({"id":r.get::<_,String>(0)?,"kind":r.get::<_,String>(1)?,"status":r.get::<_,String>(2)?})))?.collect::<std::result::Result<Vec<_>,_>>()?
         };
         let truncated = work.len() > 20;
         work.truncate(20);
-        let result = json!({"workspace":workspace(&tx)?,"persona":persona(&tx)?,"capturedAt":now(),"omitted":total-records.len() as i64,"records":records,"unsettledWork":work,"unsettledWorkTruncated":truncated,"note":"Excerpts are navigation, not complete records. Resolve IDs before editing or acting. A handoff does not pause running jobs."});
+        let counts = &inventory["recallableByKind"];
+        let summary = format!(
+            "Shared context has {} recallable records: {} memories, {} decisions, {} tasks, {} checkpoints, {} artifacts and {} actions. {} retained historical records are excluded from recall. This request matches {total} records and returns {} previews.",
+            inventory["recallableRecords"],
+            counts["memory"],
+            counts["decision"],
+            counts["task"],
+            counts["checkpoint"],
+            counts["artifact"],
+            counts["action"],
+            inventory["excludedRecords"],
+            records.len()
+        );
+        let selection = json!({"query":q,"kind":kind,"matchingRecords":total,"returnedRecords":records.len(),"omittedRecords":total-records.len() as i64});
+        let unsettled_summary = json!({"total":unsettled_total,"returned":work.len(),"omitted":unsettled_total-work.len() as i64,"scope":"Workspace-wide tasks in doing/blocked and actions in pending/unknown. Checkpoint next steps and open questions are not counted as unsettled task/action records."});
+        let result = json!({"workspace":workspace(&tx)?,"persona":persona(&tx)?,"capturedAt":now(),"inventory":inventory,"selection":selection,"summary":summary,"omitted":total-records.len() as i64,"records":records,"unsettledWork":work,"unsettledWorkSummary":unsettled_summary,"unsettledWorkTruncated":truncated,"note":"Inventory counts cover all canonical record categories, independently of this request's query/kind filters and preview limit. Zero memory-category records is not an empty workspace when other categories contain records. Unreviewed inbox proposals are excluded. Excerpts are navigation, not complete records; retrieve IDs before relying on details or editing. Unsettled work counts only the task/action states described in unsettledWorkSummary. A handoff does not pause running jobs."});
         tx.commit()?;
         Ok(result)
     }

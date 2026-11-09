@@ -168,3 +168,7 @@ See [validation evidence](validation.md) for what was actually exercised. The RE
 ## Connect AnimaOS
 
 Use `mother connect animaos`, or press **n** in the TUI. Select your AnimaOS agent and confirm the connection after owner authentication. See [AnimaOS setup](animaos.md). No manual command/path copying is needed after opening the wizard.
+
+## Read shared context
+
+Context includes checkpoints, decisions and other record categories as well as memories. Workspace inventory counts are separate from request filters and bounded previews. See [understanding shared context](context.md) for category counts, retained history and unsettled-work scope.

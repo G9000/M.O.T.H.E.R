@@ -2,6 +2,10 @@
 
 ## 10 November 2026
 
+- Refined the poem's opening to echo its sheltering imagery and linked the shared-context guide from the README.
+
+- Added workspace-wide context inventory/category counts, explicit selection coverage and task/action unsettled-work totals so zero memory-category records is not mistaken for an empty workspace.
+
 - Refreshed the centered poem with the first mother's candle and cradle imagery, preserving the artwork and closing lines.
 - Added brief local memory, SOUL, review inbox and setup links to the README.
 - Removed the obsolete porting document and repaired its references.

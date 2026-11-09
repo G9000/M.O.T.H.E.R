@@ -184,6 +184,11 @@ fn real_stdio_round_trip_handoff_correction_task_progress_restart_and_connected_
     let task = a.call("mother_write_record", f.request(json!({"kind":"task", "title":"Plan a weekend", "content":"Choose a destination", "status":"todo"})));
     let checkpoint = a.call("mother_checkpoint", f.request(json!({"kind":"checkpoint", "title":"Weekend handoff", "content":"Destination still open", "status":"active", "nextStep":"Choose a destination with the owner", "references":[first["record"]["id"], task["record"]["id"]]})));
     let context = b.call("mother_get_context", json!({}));
+    assert_eq!(context["inventory"]["recallableRecords"], 3);
+    assert_eq!(context["inventory"]["recallableByKind"]["checkpoint"], 1);
+    assert_eq!(context["selection"]["matchingRecords"], 3);
+    assert_eq!(context["unsettledWorkSummary"]["total"], 0);
+
     assert_eq!(context["workspace"]["id"], f.workspace["id"]);
     assert!(
         context["records"]
