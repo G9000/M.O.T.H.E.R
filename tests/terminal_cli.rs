@@ -68,3 +68,12 @@ fn inbox_shortcut_requires_terminal_and_does_not_create_workspace() {
     assert!(String::from_utf8_lossy(&out.stderr).contains("TERMINAL_REQUIRED"));
     assert!(!dir.path().join("context.sqlite").exists());
 }
+
+#[test]
+fn animaos_setup_requires_terminal_without_creating_workspace() {
+    let home = TempDir::new().unwrap();
+    let out = run(home.path(), &["connect", "animaos"]);
+    assert!(!out.status.success());
+    assert!(String::from_utf8_lossy(&out.stderr).contains("TERMINAL_REQUIRED"));
+    assert_eq!(std::fs::read_dir(home.path()).unwrap().count(), 0);
+}

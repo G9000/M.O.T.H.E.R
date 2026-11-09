@@ -1,3 +1,4 @@
+mod animaos;
 mod cli;
 mod connection;
 mod mcp;

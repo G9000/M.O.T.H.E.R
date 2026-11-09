@@ -1,3 +1,30 @@
+# Live AnimaOS discovery compatibility fix — 10 November 2026
+
+The live owner setup created and enabled its connection, but AnimaOS rejected tool index 0 with SchemaRejected. Root cause: the preserved v1 M.O.T.H.E.R catalog explicitly declares Draft-07, while AnimaOS normalizes and compiles only JSON Schema 2020-12. The catalog uses shared constraints, so the MCP adapter now projects only the root dialect marker to 2020-12; the v1 source contract and domain validation are unchanged.
+
+- Added a real stdio catalog regression; confirmed failure for mother_get_context before the fix.
+- Full locked release suite: 139 tests passed, two existing optional embedding-model tests ignored. Clippy and release build passed.
+- Installed the fixed executable at the same existing private path, preserving a before-schema-fix backup. Source and installed SHA256 matched: 966b161148c11dd85c985f46fd39d545b57fcb4c0cb96c51399bd1cb0a17d22b.
+- After the owner closed setup windows, one leftover setup process was identified and stopped; unrelated M.O.T.H.E.R clients were preserved.
+- Read current live connection metadata (enabled, idle/degraded, version 2), verified its exact installed executable/agent identity, and made one versioned reconnect request. AnimaOS returned HTTP 200, state ready, automatic access and all eight M.O.T.H.E.R tools. No duplicate or replacement connection was created.
+- This proves live discovery and AnimaOS policy availability. Actual conversational read/proposal acceptance remains a separate user check; no synthetic personal memory was written.
+
+---
+
+# AnimaOS TUI setup validation — 10 November 2026
+
+Feature branch `g9000/animaos-tui`, based on local main `5af2959`. Independent optional HTTP adapter; no AnimaOS source changes.
+
+- Full locked release suite: **138 passed**, two existing optional embedding-model tests ignored. Formatting, strict Clippy and release build passed. After strengthening the automatic-policy fixture to mirror real `needs_review` state, all 17 adapter/setup tests passed again.
+- Synthetic HTTP tests cover separate owner/API-gate headers, loopback-only requests, no redirects, bounded responses, exact grant/workspace/generation/scope validation, locking, conflicting entries, versions, current tool discovery, automatic/review/denied permissions and lost or malformed create/enable/connect responses.
+- Windows fake HTTP sockets were corrected to blocking mode; teardown preserves the original failure instead of panicking again. Tests pass in parallel.
+- Native PTY smoke opened `mother connect animaos`, verified the setup screen and masked synthetic input, cancelled and exited. No HTTP connection or private workspace was created by that screen-only check.
+- Independent read-only review approved the final implementation. No live credentials were read and no existing harness configuration was changed as a test.
+
+Actual owner authentication, connection to a running AnimaOS agent, and conversational read/proposal acceptance remain user setup steps. Discovery alone does not prove a conversation used the tools. The tested build is not installed automatically.
+
+---
+
 # Living Memory validation — 9 November 2026
 
 Independent feature worktree based on `1e9f709`, branch `g9000/living-memory`. Synthetic data only; no AnimaOS code or runtime dependency.
@@ -116,4 +143,4 @@ Logical hashes over every row of metadata, clients, records and operations, plus
 
 ## Limits
 
-This proves local protocol and storage compatibility. It does not prove a conversation in a live Codex/Claude/AnimaOS host. No existing M.O.T.H.E.R entry was present in the inspected Codex configuration, and no live harness settings were changed. Remote HTTP/OAuth deployment, web ChatGPT integration, cross-machine synchronization and full transcript ingestion remain unsupported. MCP metadata/Unicode edge differences are documented in PORTING.md.
+This proves local protocol and storage compatibility. It does not prove a conversation in a live Codex/Claude/AnimaOS host. No existing M.O.T.H.E.R entry was present in the inspected Codex configuration, and no live harness settings were changed. Remote HTTP/OAuth deployment, web ChatGPT integration, cross-machine synchronization and full transcript ingestion remain unsupported. The historical compatibility checks above record the runtime differences tested at that stage.

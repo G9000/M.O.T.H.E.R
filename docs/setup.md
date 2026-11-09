@@ -36,7 +36,7 @@ mother context --config "C:\path\to\codex.private.json"
 mother connection --config "C:\path\to\codex.private.json" --format codex
 ```
 
-Replace the previous Bun launch command in the chosen harness with that generated entry. Existing clients do not need new tokens. This is a runtime upgrade, so use the existing store directly rather than the restore command. See [porting notes](../PORTING.md).
+Replace the previous Bun launch command in the chosen harness with that generated entry. Existing clients do not need new tokens. This is a runtime upgrade, so use the existing store directly rather than the restore command. See [validation notes](validation.md) for recorded compatibility checks.
 
 ## Initialize a new workspace
 
@@ -164,3 +164,7 @@ cargo clippy --locked --all-targets --all-features -- -D warnings
 ```
 
 See [validation evidence](validation.md) for what was actually exercised. The README remains the poem and artwork.
+
+## Connect AnimaOS
+
+Use `mother connect animaos`, or press **n** in the TUI. Select your AnimaOS agent and confirm the connection after owner authentication. See [AnimaOS setup](animaos.md). No manual command/path copying is needed after opening the wizard.

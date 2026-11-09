@@ -4,6 +4,7 @@ fn fixture(page: Page) -> App {
     App {
         page,
         inbox: None,
+        animaos: None,
         form: Some(Form::new(Settings {
             version: 1,
             tunnel_id: "tunnel_synthetic".into(),
@@ -126,4 +127,9 @@ fn home_exposes_memory_inbox_without_tunnel_setup() {
         output.contains("Memory Inbox"),
         "Owner must find review without configuring ChatGPT"
     );
+}
+
+#[test]
+fn home_exposes_animaos_setup_without_chatgpt_connection() {
+    assert!(screen(&fixture(Page::Home), 110, 32).contains("AnimaOS"));
 }

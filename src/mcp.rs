@@ -130,6 +130,21 @@ fn dispatch(
         _ => Err(input_error()),
     }
 }
+// The v1 catalog uses only constraints shared by Draft-07 and 2020-12.
+// Preserve that source contract while advertising the current MCP schema dialect.
+fn advertised_tools() -> Result<Vec<Tool>> {
+    let mut tools: Vec<Value> = serde_json::from_str(include_str!("../contracts/mcp-tools.json"))?;
+    for tool in &mut tools {
+        let schema = tool["inputSchema"]
+            .as_object_mut()
+            .ok_or_else(input_error)?;
+        schema.insert(
+            "$schema".into(),
+            json!("https://json-schema.org/draft/2020-12/schema"),
+        );
+    }
+    Ok(serde_json::from_value(Value::Array(tools))?)
+}
 /// Authenticate a client once at startup, then recheck grants on every operation.
 pub async fn serve(config_path: &Path) -> Result<()> {
     let path = config_path.to_owned();
@@ -140,7 +155,7 @@ pub async fn serve(config_path: &Path) -> Result<()> {
         Ok(WorkspaceServer {
             path: config.database_path,
             auth,
-            tools: serde_json::from_str(include_str!("../contracts/mcp-tools.json"))?,
+            tools: advertised_tools()?,
             search: Arc::new(Search::from_environment()),
         })
     })

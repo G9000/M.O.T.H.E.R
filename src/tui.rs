@@ -1,4 +1,5 @@
 //! Interactive terminal home; transport and storage stay behind the connection adapter.
+mod animaos;
 mod inbox;
 #[cfg(test)]
 mod tests;
@@ -15,6 +16,7 @@ pub enum Launch {
     Home,
     Setup,
     Inbox,
+    Animaos,
 }
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Page {
@@ -24,6 +26,7 @@ enum Page {
     Help,
     ConfirmStartup,
     Inbox,
+    Animaos,
 }
 
 struct Form {
@@ -97,6 +100,7 @@ struct App {
     startup: Option<bool>,
     workspace: String,
     inbox: Option<inbox::Inbox>,
+    animaos: Option<animaos::Setup>,
 }
 impl App {
     fn new() -> Result<Self> {
@@ -104,6 +108,7 @@ impl App {
         Ok(Self {
             page: Page::Home,
             inbox: None,
+            animaos: None,
             form: None,
             status: None,
             message: "Checking your connection...".into(),
@@ -217,11 +222,15 @@ pub fn run(launch: Launch) -> Result<()> {
     if matches!(launch, Launch::Inbox) {
         app.open_inbox()?;
     }
+    if matches!(launch, Launch::Animaos) {
+        app.animaos = Some(animaos::Setup::new());
+        app.page = Page::Animaos;
+    }
     let mut terminal = ratatui::try_init()?;
     let _guard = TerminalGuard;
     crossterm::execute!(std::io::stdout(), event::EnableBracketedPaste)?;
     let (sender, receiver) = mpsc::channel();
-    if !matches!(launch, Launch::Inbox) {
+    if !matches!(launch, Launch::Inbox | Launch::Animaos) {
         dispatch(
             &mut app,
             &sender,
@@ -230,6 +239,9 @@ pub fn run(launch: Launch) -> Result<()> {
         );
     }
     loop {
+        if let Some(setup) = &mut app.animaos {
+            setup.poll();
+        }
         if let Ok(result) = receiver.try_recv() {
             app.finish(result);
         }
@@ -240,7 +252,11 @@ pub fn run(launch: Launch) -> Result<()> {
         let key = match event::read()? {
             Event::Key(key) => key,
             Event::Paste(text) if !app.busy => {
-                if app.page == Page::Inbox {
+                if app.page == Page::Animaos {
+                    if let Some(setup) = &mut app.animaos {
+                        setup.paste(&text);
+                    }
+                } else if app.page == Page::Inbox {
                     if let Some(inbox) = &mut app.inbox {
                         inbox.paste(&text);
                     }
@@ -267,9 +283,23 @@ pub fn run(launch: Launch) -> Result<()> {
             continue;
         }
         if key.code == KeyCode::Char('c') && key.modifiers.contains(KeyModifiers::CONTROL) {
+            if app.page == Page::Animaos
+                && app.animaos.as_ref().is_some_and(|setup| setup.is_busy())
+            {
+                continue;
+            }
             break;
         }
         match app.page {
+            Page::Animaos => {
+                if let Some(setup) = &mut app.animaos {
+                    match setup.input(key) {
+                        Ok(true) => app.page = Page::Home,
+                        Ok(false) => {}
+                        Err(error) => setup.message = error.to_string(),
+                    }
+                }
+            }
             Page::Inbox => {
                 if let Some(inbox) = &mut app.inbox {
                     match inbox.input(key) {
@@ -334,6 +364,10 @@ pub fn run(launch: Launch) -> Result<()> {
             },
             Page::Home => match key.code {
                 KeyCode::Char('q') | KeyCode::Esc => break,
+                KeyCode::Char('n') => {
+                    app.animaos = Some(animaos::Setup::new());
+                    app.page = Page::Animaos;
+                }
                 KeyCode::Char('i') => {
                     if let Err(error) = app.open_inbox() {
                         app.message = error.to_string();

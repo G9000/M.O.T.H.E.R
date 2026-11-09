@@ -145,6 +145,7 @@ enum Command {
 #[derive(Debug, Clone, Copy, ValueEnum)]
 enum Harness {
     Chatgpt,
+    Animaos,
 }
 #[derive(Debug, Clone, Copy, ValueEnum)]
 enum StartupAction {
@@ -290,6 +291,16 @@ fn execute(command: Command) -> Result<()> {
     match command {
         Command::Inbox => crate::tui::run(crate::tui::Launch::Inbox),
         Command::Tui => crate::tui::run(crate::tui::Launch::Home),
+        Command::Connect {
+            harness: Harness::Animaos,
+            ..
+        } => crate::tui::run(crate::tui::Launch::Animaos),
+        Command::Disconnect {
+            harness: Harness::Animaos,
+        } => Err(Error::domain(
+            "CONNECTION",
+            "Stop the AnimaOS connection in its Connectors > MCP screen.",
+        )),
         Command::Connect {
             harness: Harness::Chatgpt,
             setup,

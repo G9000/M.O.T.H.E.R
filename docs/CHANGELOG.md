@@ -1,5 +1,11 @@
 # Documentation changes
 
+## 10 November 2026
+
+- Refreshed the centered poem with the first mother's candle and cradle imagery, preserving the artwork and closing lines.
+- Added brief local memory, SOUL, review inbox and setup links to the README.
+- Removed the obsolete porting document and repaired its references.
+
 ## 9 November 2026
 
 - Added Living Memory: explicit MCP proposals, owner TUI review through `mother inbox`, durable approval/dismissal receipts, stale-correction checks and portable inbox recovery.

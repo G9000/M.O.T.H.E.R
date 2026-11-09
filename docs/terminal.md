@@ -6,6 +6,7 @@ Run `mother` in a terminal, or `mother tui`, to open M.O.T.H.E.R's dashboard. Pi
 
 | Key | Action |
 | --- | --- |
+| n | Connect an AnimaOS agent through local MCP |
 | i | Open the Memory Inbox for Save, Edit or Dismiss |
 | s | Set up or inspect the ChatGPT connection |
 | c | Connect using saved settings and credential |
@@ -46,3 +47,7 @@ Local readiness means the intended runtime is running, healthy and ready. It doe
 The Memory Inbox reviews proposed context with explicit Save, Edit and Dismiss actions. Run `mother inbox` to open it directly; see [Living Memory](living-memory.md). The dashboard does not change SOUL.md, import chats or execute saved actions. Use the existing [owner commands](setup.md) for workspace administration.
 
 If a previously configured executable or client-config file disappears, M.O.T.H.E.R preserves the old configuration until its runtime can be reconciled. Restore the expected file or inspect the old alias with the official tunnel client before changing paths; setup does not guess that an unreachable runtime has stopped.
+
+## AnimaOS
+
+Press **n** at home or run `mother connect animaos` for masked owner authentication, agent selection and local MCP setup. See [the AnimaOS guide](animaos.md). The adapter is optional; M.O.T.H.E.R remains independent.

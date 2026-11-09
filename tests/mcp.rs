@@ -174,6 +174,7 @@ fn real_stdio_round_trip_handoff_correction_task_progress_restart_and_connected_
     for tool in expected.as_array_mut().unwrap() {
         assert_eq!(tool["execution"]["taskSupport"], "forbidden");
         tool.as_object_mut().unwrap().remove("execution");
+        tool["inputSchema"]["$schema"] = json!("https://json-schema.org/draft/2020-12/schema");
     }
     assert_eq!(
         catalog["tools"], expected,
@@ -622,4 +623,18 @@ fn reviewed_capture_crosses_two_real_harness_processes_only_after_owner_save() {
         ),
         submitted
     );
+}
+
+#[test]
+fn advertised_schema_dialect_matches_current_mcp_clients() {
+    let fixture = Fixture::new();
+    let mut client = Client::connect(&fixture.a_config);
+    let catalog = client.rpc("tools/list", json!({}));
+    for tool in catalog["tools"].as_array().unwrap() {
+        assert_eq!(
+            tool["inputSchema"]["$schema"], "https://json-schema.org/draft/2020-12/schema",
+            "{} advertises a rejected legacy dialect",
+            tool["name"]
+        );
+    }
 }

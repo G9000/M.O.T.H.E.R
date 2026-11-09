@@ -79,6 +79,11 @@ pub(super) fn render(frame: &mut Frame, app: &App) {
     );
     match app.page {
         Page::Home => home(frame, rows[1], app),
+        Page::Animaos => {
+            if let Some(setup) = &app.animaos {
+                setup.render(frame, rows[1]);
+            }
+        }
         Page::Inbox => {
             if let Some(inbox) = &app.inbox {
                 inbox.render(frame, rows[1]);
@@ -97,7 +102,11 @@ pub(super) fn render(frame: &mut Frame, app: &App) {
         }
     }
     frame.render_widget(
-        text(safe(if app.page == Page::Inbox {
+        text(safe(if app.page == Page::Animaos {
+            app.animaos
+                .as_ref()
+                .map_or(app.message.as_str(), |setup| setup.message.as_str())
+        } else if app.page == Page::Inbox {
             app.inbox
                 .as_ref()
                 .map_or(app.message.as_str(), |inbox| inbox.message.as_str())
@@ -117,9 +126,13 @@ pub(super) fn render(frame: &mut Frame, app: &App) {
     } else {
         match app.page {
             Page::Home => {
-                "i inbox   s setup   c connect   d disconnect   r refresh   a startup   h help   q quit"
+                "n AnimaOS   i inbox   s setup   c connect   d disconnect   r refresh   a startup   h help   q quit"
             }
             Page::Inbox => app.inbox.as_ref().map_or("Esc home", |inbox| inbox.hints()),
+            Page::Animaos => app
+                .animaos
+                .as_ref()
+                .map_or("Esc home", |setup| setup.hints()),
             Page::Setup => "Tab / arrows move   Ctrl+U clear   Enter review   Esc cancel",
             Page::ConfirmSave | Page::ConfirmStartup => "Enter confirm   Esc back",
             Page::Help => "Esc / h return",
@@ -155,6 +168,7 @@ fn home(frame: &mut Frame, area: Rect, app: &App) {
     let lines = vec![
         Line::from(safe(&app.workspace)),
         key("i", "  Memory Inbox · review what matters"),
+        key("n", "  Connect AnimaOS"),
         Line::from(""),
         Line::from(vec![
             Span::raw("ChatGPT   "),
