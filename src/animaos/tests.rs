@@ -28,6 +28,12 @@ struct Remote {
     wrong_update_id: bool,
     unchanged_update_version: bool,
     excessive_agents: bool,
+    binding: Value,
+    binding_ready: bool,
+    drop_after_binding: bool,
+    drop_without_binding: bool,
+    drop_after_review: bool,
+    drop_without_review: bool,
 }
 
 struct Server {
@@ -142,10 +148,27 @@ fn respond(socket: &mut TcpStream, state: &Mutex<Remote>) {
             vec![json!({"state":{"id":"test-agent","name":"Synthetic agent"}})]
         };
         (200, json!({"agents":agents}))
+    } else if path.ends_with("/workspace-context") {
+        if method == "PUT" {
+            assert_eq!(body["expectedRevision"], "synthetic-revision");
+            if state.drop_without_binding {
+                return;
+            }
+            state.binding = body["binding"].clone();
+            if state.drop_after_binding {
+                state.drop_after_binding = false;
+                return;
+            }
+        }
+        (
+            200,
+            json!({"revision":"synthetic-revision","binding":state.binding,"status":if state.binding.is_null(){"independent"}else{"configured"},"connections":state.entries.iter().filter(|e| e["reviewedTools"].as_array().is_some_and(|tools| tools.iter().any(|tool|tool["remoteName"]=="mother_get_context"))).map(|e| json!({"id":e["id"],"label":"MOTHER","state":e["state"],"tool":"mother_get_context"})).collect::<Vec<_>>()}),
+        )
     } else if method == "GET" && path.ends_with("mcp-connections") {
         (200, json!({"connections":state.entries}))
     } else if method == "POST" && path.ends_with("mcp-connections") {
-        let entry = json!({"id":"conn-1","agentId":"test-agent","label":body["label"],"transport":"stdio","stdio":body["stdio"],"endpoint":"","enabled":false,"version":1,"toolAccess":"automatic","state":"disconnected","physicalCallsActive":false,"discoveryId":null,"candidates":[],"reviewedTools":[]});
+        let id = format!("conn-{}", state.entries.len() + 1);
+        let entry = json!({"id":id,"agentId":"test-agent","label":body["label"],"transport":"stdio","stdio":body["stdio"],"endpoint":"","enabled":false,"version":1,"toolAccess":"automatic","state":"disconnected","physicalCallsActive":false,"discoveryId":null,"candidates":[],"reviewedTools":[]});
         state.entries.push(entry.clone());
         if state.drop_after_create {
             state.drop_after_create = false;
@@ -156,12 +179,50 @@ fn respond(socket: &mut TcpStream, state: &Mutex<Remote>) {
             reply["agentId"] = json!("another-agent");
         }
         (201, json!({"connection":reply}))
+    } else if method == "POST" && path.ends_with("/review") {
+        let index = state
+            .entries
+            .iter()
+            .position(|entry| {
+                path.split('/')
+                    .any(|part| Some(part) == entry["id"].as_str())
+            })
+            .unwrap();
+        assert_eq!(body["expectedVersion"], state.entries[index]["version"]);
+        assert_eq!(body["discoveryId"], state.entries[index]["discoveryId"]);
+        let reader = state.entries[index]["candidates"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|tool| tool["remoteName"] == "mother_get_context")
+            .unwrap()
+            .clone();
+        assert_eq!(body["descriptorDigest"], reader["descriptorDigest"]);
+        if state.drop_without_review {
+            return;
+        }
+        let entry = &mut state.entries[index];
+        entry["reviewedTools"] = json!([reader]);
+        entry["version"] = json!(entry["version"].as_u64().unwrap() + 1);
+        entry["state"] = json!("ready");
+        let reply = entry.clone();
+        if state.drop_after_review {
+            state.drop_after_review = false;
+            return;
+        }
+        (200, json!({"connection":reply}))
     } else if method == "PATCH" || method == "POST" {
-        if state.stale || body["expectedVersion"] != state.entries[0]["version"] {
+        let index = state
+            .entries
+            .iter()
+            .position(|e| path.split('/').any(|s| Some(s) == e["id"].as_str()))
+            .unwrap();
+        if state.stale || body["expectedVersion"] != state.entries[index]["version"] {
             (409, json!({"error":"stale"}))
         } else {
             let review = state.review;
-            let entry = &mut state.entries[0];
+            let ready = state.binding_ready;
+            let entry = &mut state.entries[index];
             if review {
                 entry["toolAccess"] = json!("review");
             }
@@ -171,9 +232,9 @@ fn respond(socket: &mut TcpStream, state: &Mutex<Remote>) {
             } else {
                 assert!(path.ends_with("/connect"));
                 // A fresh discovery is unreviewed even when the agent's automatic policy permits use.
-                entry["state"] = json!("needs_review");
+                entry["state"] = json!(if ready { "ready" } else { "needs_review" });
                 entry["discoveryId"] = json!("discovery-1");
-                entry["candidates"] = json!([{"remoteName":"mother_get_context"},{"remoteName":"mother_search_context"},{"remoteName":"mother_get_record"},{"remoteName":"mother_get_receipt"},{"remoteName":"mother_propose_memory"},{"remoteName":"mother_get_proposal"}]);
+                entry["candidates"] = json!([{"remoteName":"mother_get_context","descriptorDigest":"a".repeat(64)},{"remoteName":"mother_search_context"},{"remoteName":"mother_get_record"},{"remoteName":"mother_get_receipt"},{"remoteName":"mother_propose_memory"},{"remoteName":"mother_get_proposal"}]);
             }
             let mut reply = entry.clone();
             if method == "PATCH" {
@@ -558,4 +619,429 @@ fn rejects_remote_body_auth_errors_and_redirects_without_echoing_secrets() {
         assert!(!text.contains("owner-secret") && !text.contains("api-secret"));
         assert_eq!(server.state.lock().unwrap().requests.len(), 1);
     }
+}
+
+fn scoped(mode: AccessMode) -> ClientAccess {
+    ClientAccess {
+        mode,
+        subject: Some("test-agent".into()),
+        records: vec![],
+    }
+}
+
+#[test]
+fn large_shared_allowlist_roundtrips_and_reconciles_unknown_binding_without_replay() {
+    let server = Server::new();
+    {
+        let mut remote = server.state.lock().unwrap();
+        remote.binding_ready = true;
+        remote.drop_without_binding = true;
+    }
+    let (dir, exe) = fixture();
+    let mut store = Store::open(&dir.path().join("context.sqlite")).unwrap();
+    let owner = store
+        .grant("synthetic-owner", &["memory:write".into()])
+        .unwrap();
+    let auth = mother::contracts::Auth {
+        client_id: "synthetic-owner".into(),
+        token: owner["token"].as_str().unwrap().into(),
+    };
+    let workspace = store.workspace().unwrap();
+    let mut access = scoped(AccessMode::Shared);
+    for index in 0..500 {
+        let receipt = store.write(&auth, json!({"workspaceId":workspace["id"],"generation":workspace["generation"],"operationId":uuid::Uuid::new_v4().to_string(),"expectedRevision":0,"record":{"kind":"memory","status":"active","basis":"owner_statement","title":format!("Synthetic record {index}"),"content":"Synthetic boundary fixture"}})).unwrap();
+        access
+            .records
+            .push(receipt["record"]["id"].as_str().unwrap().into());
+    }
+    let session = server.session();
+    assert!(
+        session
+            .connect_with_access("test-agent", dir.path(), &exe, &access)
+            .is_err()
+    );
+    let binding_path = fs::read_dir(dir.path().join("clients"))
+        .unwrap()
+        .map(|entry| entry.unwrap().path())
+        .find(|path| path.to_string_lossy().ends_with(".binding.json"))
+        .unwrap();
+    assert!(fs::metadata(&binding_path).unwrap().len() > 16384);
+    assert!(
+        session
+            .connect_with_access("test-agent", dir.path(), &exe, &access)
+            .is_err()
+    );
+    {
+        let mut remote = server.state.lock().unwrap();
+        remote.binding = remote
+            .requests
+            .iter()
+            .find(|(method, _, _)| method == "PUT")
+            .unwrap()
+            .2["binding"]
+            .clone();
+    }
+    session
+        .connect_with_access("test-agent", dir.path(), &exe, &access)
+        .unwrap();
+    assert_eq!(
+        server
+            .state
+            .lock()
+            .unwrap()
+            .requests
+            .iter()
+            .filter(|(method, _, _)| method == "PUT")
+            .count(),
+        1
+    );
+    let saved: Binding =
+        serde_json::from_value(read_json(&binding_path, MAX_BINDING_BYTES).unwrap()).unwrap();
+    assert_eq!(saved.access.as_ref(), Some(&access));
+    assert!(saved.pending_binding.is_none());
+    let maximum = Binding {
+        access: Some(ClientAccess {
+            records: vec![access.records[0].clone(); 10000],
+            ..access
+        }),
+        ..saved
+    };
+    assert!(maximum.encoded().unwrap().len() <= MAX_BINDING_BYTES);
+}
+
+#[test]
+fn oversized_binding_is_rejected_before_provisioning_a_grant() {
+    let server = Server::new();
+    let (dir, exe) = fixture();
+    let access = ClientAccess {
+        records: vec!["00000000-0000-4000-8000-000000000001".into(); 14000],
+        ..scoped(AccessMode::Shared)
+    };
+    let error = server
+        .session()
+        .connect_with_access("test-agent", dir.path(), &exe, &access)
+        .unwrap_err();
+    assert!(error.to_string().contains("512 KiB"));
+    let database = rusqlite::Connection::open(dir.path().join("context.sqlite")).unwrap();
+    assert_eq!(
+        database
+            .query_row("SELECT count(*) FROM clients", [], |row| row
+                .get::<_, i64>(0))
+            .unwrap(),
+        0
+    );
+    assert!(server.state.lock().unwrap().requests.is_empty());
+    assert!(
+        !fs::read_dir(dir.path().join("clients"))
+            .unwrap()
+            .any(|entry| entry
+                .unwrap()
+                .path()
+                .to_string_lossy()
+                .ends_with(".private.json"))
+    );
+}
+
+#[test]
+fn scoped_binding_requires_current_ready_owner_review() {
+    let server = Server::new();
+    server.state.lock().unwrap().review = true;
+    let (dir, exe) = fixture();
+    let status = server
+        .session()
+        .connect_with_access(
+            "test-agent",
+            dir.path(),
+            &exe,
+            &scoped(AccessMode::Companion),
+        )
+        .unwrap();
+    assert!(status.contains("No identity"));
+    assert!(server.state.lock().unwrap().binding.is_null());
+    assert!(
+        !server
+            .state
+            .lock()
+            .unwrap()
+            .requests
+            .iter()
+            .any(|(m, _, _)| m == "PUT")
+    );
+    {
+        let mut remote = server.state.lock().unwrap();
+        remote.entries[0]["state"] = json!("ready");
+        remote.entries[0]["reviewedTools"] = json!([remote.entries[0]["candidates"][0].clone()]);
+    }
+    let status = server
+        .session()
+        .connect_with_access(
+            "test-agent",
+            dir.path(),
+            &exe,
+            &scoped(AccessMode::Companion),
+        )
+        .unwrap();
+    assert!(status.contains("same chat"));
+    let remote = server.state.lock().unwrap();
+    assert_eq!(remote.binding["mode"], "companion");
+    assert_eq!(remote.binding["subject"], "test-agent");
+    let store = Store::open(&dir.path().join("context.sqlite")).unwrap();
+    assert_eq!(
+        remote.binding["workspaceId"],
+        store.workspace().unwrap()["id"]
+    );
+}
+
+#[test]
+fn automatic_setup_pins_only_the_context_reader_once_without_changing_grants() {
+    let server = Server::new();
+    let (dir, exe) = fixture();
+    let session = server.session();
+    for _ in 0..2 {
+        let status = session
+            .connect_with_access(
+                "test-agent",
+                dir.path(),
+                &exe,
+                &scoped(AccessMode::Companion),
+            )
+            .unwrap();
+        assert!(status.contains("Companion configured"));
+    }
+    let remote = server.state.lock().unwrap();
+    let reviews = remote
+        .requests
+        .iter()
+        .filter(|(_, path, _)| path.ends_with("/review"))
+        .collect::<Vec<_>>();
+    assert_eq!(reviews.len(), 1);
+    assert_eq!(
+        reviews[0].2,
+        json!({"expectedVersion":2,"discoveryId":"discovery-1","descriptorDigest":"a".repeat(64)})
+    );
+    assert_eq!(
+        remote.entries[0]["reviewedTools"].as_array().unwrap().len(),
+        1
+    );
+    assert_eq!(
+        remote.entries[0]["reviewedTools"][0]["remoteName"],
+        "mother_get_context"
+    );
+    assert!(
+        !remote
+            .requests
+            .iter()
+            .any(|(_, path, _)| path.contains("/grants/"))
+    );
+}
+
+#[test]
+fn uncertain_reader_review_reconciles_only_the_exact_descriptor_discovery_and_version() {
+    for outcome in ["applied", "absent", "version", "digest", "discovery"] {
+        let server = Server::new();
+        {
+            let mut remote = server.state.lock().unwrap();
+            remote.drop_after_review = outcome != "absent";
+            remote.drop_without_review = outcome == "absent";
+        }
+        let (dir, exe) = fixture();
+        let session = server.session();
+        assert!(
+            session
+                .connect_with_access("test-agent", dir.path(), &exe, &scoped(AccessMode::Shared))
+                .is_err()
+        );
+        {
+            let mut remote = server.state.lock().unwrap();
+            match outcome {
+                "version" => remote.entries[0]["version"] = json!(4),
+                "digest" => {
+                    remote.entries[0]["candidates"][0]["descriptorDigest"] = json!("b".repeat(64))
+                }
+                "discovery" => remote.entries[0]["discoveryId"] = json!("different-discovery"),
+                _ => {}
+            }
+        }
+        let result = session.connect_with_access(
+            "test-agent",
+            dir.path(),
+            &exe,
+            &scoped(AccessMode::Shared),
+        );
+        assert_eq!(result.is_ok(), outcome == "applied", "{outcome}");
+        let remote = server.state.lock().unwrap();
+        assert_eq!(
+            remote
+                .requests
+                .iter()
+                .filter(|(_, path, _)| path.ends_with("/review"))
+                .count(),
+            1,
+            "{outcome}"
+        );
+        assert!(
+            !remote
+                .requests
+                .iter()
+                .any(|(_, path, _)| path.contains("/grants/"))
+        );
+        assert_eq!(remote.binding.is_null(), outcome != "applied");
+    }
+}
+
+#[test]
+fn dropped_binding_save_is_read_and_never_blindly_repeated() {
+    for applied in [true, false] {
+        let server = Server::new();
+        {
+            let mut remote = server.state.lock().unwrap();
+            remote.binding_ready = true;
+            remote.drop_after_binding = applied;
+            remote.drop_without_binding = !applied;
+        }
+        let (dir, exe) = fixture();
+        let session = server.session();
+        let result = session.connect_with_access(
+            "test-agent",
+            dir.path(),
+            &exe,
+            &scoped(AccessMode::Shared),
+        );
+        assert_eq!(result.is_ok(), applied);
+        let repeated = session.connect_with_access(
+            "test-agent",
+            dir.path(),
+            &exe,
+            &scoped(AccessMode::Shared),
+        );
+        assert_eq!(repeated.is_ok(), applied);
+        assert_eq!(
+            server
+                .state
+                .lock()
+                .unwrap()
+                .requests
+                .iter()
+                .filter(|(m, _, _)| m == "PUT")
+                .count(),
+            1
+        );
+    }
+}
+
+#[test]
+fn local_grants_are_separate_per_agent_and_role_and_never_widened() {
+    let server = Server::new();
+    let (dir, exe) = fixture();
+    let legacy = Local::open("test-agent", dir.path(), &exe, &server.endpoint).unwrap();
+    let original = fs::read(&legacy.config_path).unwrap();
+    let companion = Local::open_with_access(
+        "test-agent",
+        dir.path(),
+        &exe,
+        &server.endpoint,
+        Some(&scoped(AccessMode::Companion)),
+    )
+    .unwrap();
+    let shared = Local::open_with_access(
+        "test-agent",
+        dir.path(),
+        &exe,
+        &server.endpoint,
+        Some(&scoped(AccessMode::Shared)),
+    )
+    .unwrap();
+    let other = ClientAccess {
+        subject: Some("another-agent".into()),
+        ..scoped(AccessMode::Companion)
+    };
+    let another = Local::open_with_access(
+        "another-agent",
+        dir.path(),
+        &exe,
+        &server.endpoint,
+        Some(&other),
+    )
+    .unwrap();
+    let paths = [
+        &legacy.config_path,
+        &companion.config_path,
+        &shared.config_path,
+        &another.config_path,
+    ];
+    assert_eq!(
+        paths
+            .into_iter()
+            .collect::<std::collections::HashSet<_>>()
+            .len(),
+        4
+    );
+    assert_eq!(fs::read(&legacy.config_path).unwrap(), original);
+    let shared_path = shared.config_path.clone();
+    drop(shared);
+    let mut changed = scoped(AccessMode::Shared);
+    changed
+        .records
+        .push("00000000-0000-4000-8000-000000000001".into());
+    let original = fs::read(&shared_path).unwrap();
+    assert!(
+        Local::open_with_access(
+            "test-agent",
+            dir.path(),
+            &exe,
+            &server.endpoint,
+            Some(&changed)
+        )
+        .is_err()
+    );
+    assert_eq!(fs::read(&shared_path).unwrap(), original);
+}
+
+#[test]
+fn differing_binding_and_active_old_connection_are_preserved() {
+    let server = Server::new();
+    server.state.lock().unwrap().binding_ready = true;
+    let (dir, exe) = fixture();
+    let session = server.session();
+    session.connect("test-agent", dir.path(), &exe).unwrap();
+    let original = server.state.lock().unwrap().entries[0].clone();
+    assert!(
+        session
+            .connect_with_access(
+                "test-agent",
+                dir.path(),
+                &exe,
+                &scoped(AccessMode::Companion)
+            )
+            .is_err()
+    );
+    assert_eq!(server.state.lock().unwrap().entries[0], original);
+    {
+        let mut remote = server.state.lock().unwrap();
+        remote.entries[0]["enabled"] = json!(false);
+        remote.binding = json!({"connectionId":"different","tool":"mother_get_context","mode":"companion","workspaceId":"different","generation":"different","subject":"test-agent"});
+    }
+    assert!(
+        session
+            .connect_with_access(
+                "test-agent",
+                dir.path(),
+                &exe,
+                &scoped(AccessMode::Companion)
+            )
+            .is_err()
+    );
+    assert_eq!(
+        server.state.lock().unwrap().binding["connectionId"],
+        "different"
+    );
+    assert!(
+        !server
+            .state
+            .lock()
+            .unwrap()
+            .requests
+            .iter()
+            .any(|(m, _, _)| m == "PUT")
+    );
 }

@@ -1,5 +1,6 @@
 //! Durable, isolated capture proposals and local owner review.
 use crate::{
+    access,
     contracts::{self, Auth, Kind, Write, integer, string},
     error::{Error, Result, invalid},
     limits::Usage,
@@ -189,7 +190,17 @@ fn candidate(record: &Value) -> Result<Value> {
     contracts::normalize_draft(v)
 }
 fn duplicate(conn: &Connection, draft: &Value) -> Result<Option<String>> {
-    let mut stmt = conn.prepare("SELECT payload FROM records WHERE kind=?")?;
+    duplicate_visible(conn, draft, &access::ClientAccess::default())
+}
+fn duplicate_visible(
+    conn: &Connection,
+    draft: &Value,
+    access: &access::ClientAccess,
+) -> Result<Option<String>> {
+    let mut stmt = conn.prepare(&format!(
+        "SELECT payload FROM records WHERE kind=? AND {}",
+        access.filter()
+    ))?;
     for row in stmt.query_map([string(draft, "kind")?], |r| r.get::<_, String>(0))? {
         let r: Value = serde_json::from_str(&row?)?;
         if candidate(&r)? == *draft {
@@ -217,7 +228,10 @@ fn read(conn: &Connection, id: &str) -> Result<Value> {
         Error::domain("NOT_FOUND", "Proposal does not exist.")
     })?)?)
 }
-fn full(conn: &Connection, mut p: Value) -> Result<Value> {
+fn full(conn: &Connection, p: Value) -> Result<Value> {
+    full_visible(conn, p, &access::ClientAccess::default())
+}
+fn full_visible(conn: &Connection, mut p: Value, access: &access::ClientAccess) -> Result<Value> {
     let w = store::workspace(conn)?;
     let current = match p["targetId"].as_str() {
         Some(id) => Some(store::read_record(conn, id)?.0),
@@ -231,11 +245,11 @@ fn full(conn: &Connection, mut p: Value) -> Result<Value> {
     );
     p["currentRecord"] = json!(current);
     p["duplicateRecordId"] = if p["targetId"].is_null() {
-        json!(duplicate(conn, &p["record"])?)
+        json!(duplicate_visible(conn, &p["record"], access)?)
     } else {
         Value::Null
     };
-    let mut stmt = conn.prepare("SELECT id FROM records WHERE kind=?1 AND (lower(title)=lower(?2) OR lower(content)=lower(?3)) AND (?4 IS NULL OR id<>?4) AND (?5 IS NULL OR id<>?5) ORDER BY id LIMIT 5")?;
+    let mut stmt = conn.prepare(&format!("SELECT id FROM records WHERE {} AND kind=?1 AND (lower(title)=lower(?2) OR lower(content)=lower(?3)) AND (?4 IS NULL OR id<>?4) AND (?5 IS NULL OR id<>?5) ORDER BY id LIMIT 5",access.filter()))?;
     let similar = stmt
         .query_map(
             params![
@@ -324,7 +338,13 @@ impl Store {
             .transaction_with_behavior(TransactionBehavior::Immediate)?;
         authenticate_proposal(&tx, auth, kind)?;
         identity(&tx, &v)?;
-        if let Some(r) = prior(&tx, &auth.client_id, "propose", &v)? {
+        let access = access::load(&tx, &auth.client_id)?;
+        if let Some(id) = v["id"].as_str() {
+            access.require(id)?;
+        }
+        access.references(&v["record"])?;
+        if let Some(mut r) = prior(&tx, &auth.client_id, "propose", &v)? {
+            access.receipt(&auth.client_id, &mut r)?;
             tx.commit()?;
             return Ok(r);
         }
@@ -353,11 +373,13 @@ impl Store {
         } else {
             persist_proposal(&tx, &p)?;
         }
-        let result = json!({"proposal":full(&tx,p)?,"operationId":v["operationId"],"generation":v["generation"]});
+        let result = json!({"proposal":full_visible(&tx,p,&access)?,"operationId":v["operationId"],"generation":v["generation"]});
+        let mut visible = result.clone();
+        access.receipt(&auth.client_id, &mut visible)?;
         persist_operation(&tx, &auth.client_id, "propose", &v, &result)?;
         check_capacity(&tx)?;
         tx.commit()?;
-        Ok(result)
+        Ok(visible)
     }
     /// Return up to one hundred pending summaries without creating extension tables.
     pub fn inbox_list(&self) -> Result<Value> {
@@ -393,7 +415,11 @@ impl Store {
     pub fn get_proposal(&mut self, auth: &Auth, id: &str) -> Result<Value> {
         let tx = self.conn.transaction()?;
         store::authorize(&tx, auth, "read")?;
-        let p = full(&tx, read(&tx, id)?)?;
+        let access = access::load(&tx, &auth.client_id)?;
+        let mut p = read(&tx, id)?;
+        access.proposal(&auth.client_id, &mut p)?;
+        let mut p = full_visible(&tx, p, &access)?;
+        access.proposal(&auth.client_id, &mut p)?;
         tx.commit()?;
         Ok(p)
     }
@@ -430,6 +456,11 @@ impl Store {
                 string(&p, "actor")?,
                 Kind::parse(string(&draft, "kind")?)?,
             )?;
+            let proposer_access = access::load(&tx, string(&p, "actor")?)?;
+            if let Some(id) = p["targetId"].as_str() {
+                proposer_access.require(id)?;
+            }
+            proposer_access.references(&draft)?;
             if p["targetId"].is_null() && duplicate(&tx, &draft)?.is_some() {
                 return Err(Error::domain(
                     "DUPLICATE_RECORD",

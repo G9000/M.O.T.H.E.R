@@ -447,3 +447,81 @@ fn owner_updates_existing_soul_with_hash_precondition_and_preserves_workspace() 
             .success()
     );
 }
+#[test]
+fn scoped_owner_grant_requires_subject_and_keeps_legacy_default() {
+    let d = TempDir::new().unwrap();
+    initialize(d.path());
+    succeeds(
+        d.path(),
+        &[
+            "grant",
+            "reader",
+            "--access",
+            "shared",
+            "--subject",
+            "agent-b",
+        ],
+    );
+    let p = d.path().join("clients/reader.private.json");
+    let c = succeeds(d.path(), &["context", "--config", p.to_str().unwrap()]);
+    assert_eq!(
+        c["access"],
+        serde_json::json!({"version":1,"mode":"shared","subject":"agent-b"})
+    );
+    assert!(c.get("persona").is_none());
+    assert!(
+        !run(d.path(), &["grant", "invalid", "--access", "companion"])
+            .status
+            .success()
+    );
+    assert!(
+        !run(
+            d.path(),
+            &[
+                "grant",
+                "writer",
+                "--access",
+                "shared",
+                "--subject",
+                "agent-b",
+                "--scopes",
+                "read,task:write"
+            ]
+        )
+        .status
+        .success()
+    );
+    succeeds(d.path(), &["grant", "old"]);
+    let p = d.path().join("clients/old.private.json");
+    let c = succeeds(d.path(), &["context", "--config", p.to_str().unwrap()]);
+    assert_eq!(c["access"]["mode"], "legacy");
+}
+#[test]
+fn scoped_cli_credentials_use_version_two_and_legacy_stays_version_one() {
+    let d = TempDir::new().unwrap();
+    initialize(d.path());
+    for (name, mode) in [("companion", "companion"), ("shared", "shared")] {
+        succeeds(
+            d.path(),
+            &[
+                "grant",
+                name,
+                "--access",
+                mode,
+                "--subject",
+                "synthetic-agent",
+            ],
+        );
+        let p = d.path().join(format!("clients/{name}.private.json"));
+        let v: Value = serde_json::from_slice(&fs::read(&p).unwrap()).unwrap();
+        assert_eq!(v["version"], 2);
+        assert_eq!(
+            succeeds(d.path(), &["context", "--config", p.to_str().unwrap()])["access"]["mode"],
+            mode
+        );
+    }
+    succeeds(d.path(), &["grant", "legacy"]);
+    let p = d.path().join("clients/legacy.private.json");
+    let v: Value = serde_json::from_slice(&fs::read(p).unwrap()).unwrap();
+    assert_eq!(v["version"], 1);
+}

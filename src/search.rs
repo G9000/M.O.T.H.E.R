@@ -1,6 +1,7 @@
 //! Local semantic retrieval over authorized canonical records, with truthful literal fallback.
 mod cache;
 use crate::{
+    access::{self, AccessMode, ClientAccess},
     contracts::{self, Auth, Kind},
     embedding::{LocalEmbedder, MODEL_ID, MODEL_REVISION, PROFILE},
     error::{Error, Result, invalid},
@@ -99,6 +100,7 @@ struct Record {
 }
 #[derive(Debug)]
 struct Snapshot {
+    access: ClientAccess,
     records: Vec<Record>,
     base: Value,
     fingerprint: String,
@@ -108,8 +110,13 @@ impl Snapshot {
         let tx = store.conn.transaction()?;
         store::authorize(&tx, auth, "read")?;
         let workspace = store::workspace(&tx)?;
-        let persona = store::persona(&tx)?;
-        let mut stmt=tx.prepare("SELECT payload,instr(lower(title || ' ' || content),lower(?1))>0 FROM records WHERE status NOT IN ('retracted','superseded','cancelled') ORDER BY id LIMIT 10001")?;
+        let access = access::load(&tx, &auth.client_id)?;
+        let persona = if access.mode == AccessMode::Shared {
+            Value::Null
+        } else {
+            store::persona(&tx)?
+        };
+        let mut stmt=tx.prepare(&format!("SELECT payload,instr(lower(title || ' ' || content),lower(?1))>0 FROM records WHERE {} AND status NOT IN ('retracted','superseded','cancelled') ORDER BY id LIMIT 10001",access.filter()))?;
         let raw = stmt
             .query_map([&query.text], |r| {
                 Ok((r.get::<_, String>(0)?, r.get::<_, bool>(1)?))
@@ -122,7 +129,8 @@ impl Snapshot {
                 "Workspace exceeds supported record count.",
             ));
         }
-        let mut fingerprint = workspace.to_string() + &persona.to_string();
+        let mut fingerprint =
+            workspace.to_string() + &persona.to_string() + &serde_json::to_string(&access)?;
         let mut records = Vec::with_capacity(raw.len());
         for (raw, literal) in raw {
             let value = contracts::parse_record(serde_json::from_str(&raw)?)?;
@@ -162,9 +170,13 @@ impl Snapshot {
             .take(20)
             .map(|r| json!({"id":r.id,"kind":r.value["kind"],"status":r.value["status"]}))
             .collect::<Vec<_>>();
-        let base = json!({"workspace":workspace,"persona":persona,"capturedAt":store::now(),"records":[],"omitted":0,"unsettledWork":work,"unsettledWorkTruncated":truncated,"note":"Excerpts and similarity scores are navigation, not evidence of truth. Resolve full records before editing or acting. A handoff does not pause running jobs."});
+        let mut base = json!({"workspace":workspace,"access":access.metadata(),"capturedAt":store::now(),"records":[],"omitted":0,"unsettledWork":work,"unsettledWorkTruncated":truncated,"note":"Excerpts and similarity scores are navigation, not evidence of truth. Resolve full records before editing or acting. A handoff does not pause running jobs."});
+        if access.mode != AccessMode::Shared {
+            base["persona"] = persona;
+        }
         tx.commit()?;
         Ok(Self {
+            access,
             records,
             base,
             fingerprint: contracts::hash(&fingerprint),
@@ -227,6 +239,9 @@ impl Snapshot {
         self.base["records"] = json!(records);
         self.base["omitted"] = json!(omitted);
         self.base["search"] = metadata;
+        if self.base["access"]["mode"] == "shared" {
+            self.base["search"]["scope"] = json!("granted_records");
+        }
         self.base
     }
 }
@@ -290,12 +305,25 @@ struct Progress {
     new_passages: usize,
     capacity: bool,
 }
-fn cache_path(store: &Store) -> Result<PathBuf> {
-    store
+fn cache_path(store: &Store, auth: &Auth, snapshot: &Snapshot) -> Result<PathBuf> {
+    store.authorize(auth, "read")?;
+    let access = &snapshot.access;
+    let path = store
         .conn
         .path()
         .map(|p| cache::path(std::path::Path::new(p)))
-        .ok_or_else(|| Error::domain("SEARCH_CACHE", "Search requires a file-backed workspace."))
+        .ok_or_else(|| Error::domain("SEARCH_CACHE", "Search requires a file-backed workspace."))?;
+    if access.mode == AccessMode::Shared {
+        // Scoped snapshots must never prune the workspace-wide derived cache.
+        let mut name = path.into_os_string();
+        name.push(format!(
+            ".{}",
+            contracts::hash(&(auth.client_id.clone() + &serde_json::to_string(&access)?))
+        ));
+        Ok(PathBuf::from(name))
+    } else {
+        Ok(path)
+    }
 }
 fn entries(cache: &Cache, snapshot: &Snapshot) -> Result<HashMap<String, Entry>> {
     snapshot
@@ -471,7 +499,7 @@ impl Search {
         let query = Query::parse(args)?;
         let initial = Snapshot::capture(store, auth, &query)?;
         if query.mode == Mode::Literal {
-            return Ok(initial.literal_response(&query, None));
+            return Ok(Snapshot::capture(store, auth, &query)?.literal_response(&query, None));
         }
         let mut guard = match self.model.try_lock() {
             Ok(g) => g,
@@ -502,7 +530,7 @@ impl Search {
                 "Local embedding model is unavailable.",
             ));
         };
-        let path = cache_path(store)?;
+        let path = cache_path(store, auth, &initial)?;
         let mut cache = match Cache::open(&path, &initial.scope()) {
             Ok(c) => c,
             Err(_) => {
@@ -555,12 +583,12 @@ impl Search {
                 "Local embedding model is unavailable.",
             ));
         };
-        let mut cache = Cache::open(&cache_path(store)?, &initial.scope())?;
+        let mut cache = Cache::open(&cache_path(store, auth, &initial)?, &initial.scope())?;
         let (cached, progress) = prepare(&mut cache, &initial, model, max_records, INDEX_PASSAGES)?;
         let current = Snapshot::capture(store, auth, &query)?;
         if current.fingerprint != initial.fingerprint {
             return Ok(
-                json!({"complete":false,"reason":"workspace_changed","eligibleRecords":current.records.len(),"newlyIndexedRecords":progress.new_records}),
+                json!({"complete":false,"reason":"workspace_changed","eligibleRecords":current.records.len(),"newlyIndexedRecords":0}),
             );
         }
         let partial = cached.values().filter(|e| e.partial).count();

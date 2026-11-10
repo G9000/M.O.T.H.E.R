@@ -1,7 +1,9 @@
 //! Private client configuration and bounded file access.
 use crate::{
+    access::AccessMode,
     contracts::{Auth, hex_digest, integer, valid_client},
     error::{Error, Result, invalid},
+    store::Store,
 };
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -10,7 +12,7 @@ use std::{
     io::Read,
     path::{Path, PathBuf},
 };
-/// Existing v1 client credentials, with secret-redacting debug output.
+/// Private v1 legacy or v2 policy-aware credentials, with secret-redacting debug output.
 #[derive(Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct ClientConfig {
@@ -28,6 +30,20 @@ impl std::fmt::Debug for ClientConfig {
     }
 }
 impl ClientConfig {
+    /// Authenticate current read access; v2 credentials also require an explicit policy.
+    pub fn authorize(&self, store: &Store) -> Result<()> {
+        if !matches!(self.version, 1 | 2) {
+            return Err(invalid("Invalid client config version"));
+        }
+        let access = store.access_for(&self.auth())?;
+        if self.version == 2 && access.mode == AccessMode::Legacy {
+            return Err(Error::domain(
+                "FORBIDDEN",
+                "Policy-aware credentials require a current companion or shared policy.",
+            ));
+        }
+        Ok(())
+    }
     /// Bind calls to this configured client; identity never comes from a tool argument.
     pub fn auth(&self) -> Auth {
         Auth {
@@ -48,17 +64,20 @@ pub fn read_json(path: &Path, max: usize) -> Result<Value> {
     let text = std::str::from_utf8(&bytes).map_err(|_| invalid("Expected UTF-8 JSON"))?;
     Ok(serde_json::from_str(text.trim_start_matches('\u{feff}'))?)
 }
-/// Load a v1 client config without printing its bearer token.
+/// Load legacy credentials or authenticate policy-aware credentials without revealing secrets.
 pub fn load_config(path: &Path) -> Result<ClientConfig> {
     let mut value = read_json(path, 16384)?;
-    value["version"] = serde_json::json!(integer(&value, "version", 1, 1)?);
+    value["version"] = serde_json::json!(integer(&value, "version", 1, 2)?);
     let config: ClientConfig = serde_json::from_value(value)?;
-    if config.version != 1
+    if !matches!(config.version, 1 | 2)
         || !config.database_path.is_absolute()
         || !valid_client(&config.client_id)
         || !hex_digest(&config.token)
     {
         return Err(invalid("Invalid client config"));
+    }
+    if config.version == 2 {
+        config.authorize(&Store::open(&config.database_path)?)?;
     }
     Ok(config)
 }

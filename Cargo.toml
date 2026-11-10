@@ -52,3 +52,6 @@ incremental = false
 
 [profile.release]
 strip = true
+
+# Keep this independently hosted package separate in nested checkouts.
+[workspace]

@@ -2,6 +2,7 @@
 
 use clap::{Parser, Subcommand, ValueEnum};
 use mother::{
+    access::{AccessMode, ClientAccess},
     config::{create_private_file, data_directory, load_config, read_json},
     contracts::SCOPES,
     embedding,
@@ -79,6 +80,15 @@ enum Command {
     /// Create a client grant and exclusive private configuration file.
     Grant {
         client: String,
+        /// Context policy; omission preserves legacy access.
+        #[arg(long, value_parser = ["companion", "shared"])]
+        access: Option<String>,
+        /// External agent identity bound by the owner to this credential.
+        #[arg(long, requires = "access")]
+        subject: Option<String>,
+        /// Canonical record IDs visible to a shared client (empty means none).
+        #[arg(long, value_delimiter = ',', requires = "access")]
+        records: Vec<String>,
         #[arg(long)]
         db: Option<PathBuf>,
         #[arg(long, default_value = "read", value_delimiter = ',', action = clap::ArgAction::Set)]
@@ -414,6 +424,9 @@ fn execute(command: Command) -> Result<()> {
         },
         Command::Grant {
             client,
+            access,
+            subject,
+            records,
             db,
             scopes,
             out,
@@ -437,7 +450,16 @@ fn execute(command: Command) -> Result<()> {
             };
             let mut store = Store::open(&db)?;
             private_parent(&out)?;
-            store.grant_to_file(&client, &scopes, &out, &db)?;
+            let policy = ClientAccess {
+                mode: match access.as_deref() {
+                    Some("companion") => AccessMode::Companion,
+                    Some("shared") => AccessMode::Shared,
+                    _ => AccessMode::Legacy,
+                },
+                subject,
+                records,
+            };
+            store.grant_to_file_with_access(&client, &scopes, &out, &db, &policy)?;
             print_json(json!({"clientId":client, "scopes":scopes, "configPath":out}))
         }
         Command::Revoke { client, db } => {

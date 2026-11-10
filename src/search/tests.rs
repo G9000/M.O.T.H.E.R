@@ -232,3 +232,80 @@ fn owner_persona_change_during_search_returns_the_new_snapshot() {
     assert_eq!(result["persona"]["content"], "Updated owner persona");
     assert_eq!(result["records"].as_array().unwrap().len(), 1);
 }
+#[test]
+fn policy_withdrawal_during_semantic_search_discards_old_candidates_and_cache_is_isolated() {
+    use crate::access::{AccessMode, ClientAccess};
+    let (_d, mut s, a) = fixture();
+    let r = write(&mut s, &a, "evidence", None, "active");
+    let policy = ClientAccess {
+        mode: AccessMode::Shared,
+        subject: Some("agent-b".into()),
+        records: vec![r["id"].as_str().unwrap().into()],
+    };
+    let g = s
+        .grant_with_access("shared", &["read".into()], &policy)
+        .unwrap();
+    let b = Auth {
+        client_id: "shared".into(),
+        token: g["token"].as_str().unwrap().into(),
+    };
+    let q = Query::parse(json!({"query":"evidence"})).unwrap();
+    let before = Snapshot::capture(&mut s, &b, &q).unwrap();
+    let owner_snapshot = Snapshot::capture(&mut s, &a, &q).unwrap();
+    assert_ne!(
+        cache_path(&s, &a, &owner_snapshot).unwrap(),
+        cache_path(&s, &b, &before).unwrap()
+    );
+    let vectors = cached(&before);
+    s.conn
+        .execute(
+            "UPDATE client_access SET policy=? WHERE client_id='shared'",
+            [json!({"mode":"shared","subject":"agent-b","records":[]}).to_string()],
+        )
+        .unwrap();
+    let v = finish(
+        &mut s,
+        &b,
+        &q,
+        &before,
+        &vectors,
+        &axis(),
+        &Progress::default(),
+    )
+    .unwrap();
+    assert_eq!(v["records"], json!([]));
+    assert_eq!(v["search"]["eligibleRecords"], 0);
+    assert_eq!(v["search"]["newlyIndexedRecords"], 0);
+    assert!(v.get("persona").is_none());
+}
+#[test]
+fn in_flight_shared_cache_never_switches_to_global_when_policy_changes() {
+    use crate::access::{AccessMode, ClientAccess};
+    let (_d, mut s, a) = fixture();
+    write(&mut s, &a, "evidence", None, "active");
+    let g = s
+        .grant_with_access(
+            "shared",
+            &["read".into()],
+            &ClientAccess {
+                mode: AccessMode::Shared,
+                subject: Some("agent-b".into()),
+                records: vec![],
+            },
+        )
+        .unwrap();
+    let b = Auth {
+        client_id: "shared".into(),
+        token: g["token"].as_str().unwrap().into(),
+    };
+    let query = Query::parse(json!({"query":"evidence"})).unwrap();
+    let snapshot = Snapshot::capture(&mut s, &b, &query).unwrap();
+    let original = cache_path(&s, &b, &snapshot).unwrap();
+    s.conn
+        .execute(
+            "UPDATE client_access SET policy=? WHERE client_id='shared'",
+            [json!({"mode":"companion","subject":"agent-b","records":[]}).to_string()],
+        )
+        .unwrap();
+    assert_eq!(cache_path(&s, &b, &snapshot).unwrap(), original);
+}

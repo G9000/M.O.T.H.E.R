@@ -174,3 +174,7 @@ Use `mother connect animaos`, or press **n** in the TUI. Select your AnimaOS age
 ## Read shared context
 
 Context includes checkpoints, decisions and other record categories as well as memories. Workspace inventory counts are separate from request filters and bounded previews. See [understanding shared context](context.md) for category counts, retained history and unsettled-work scope.
+
+## Optional agent context policies
+
+New credentials can select companion identity or an explicit context-only record allowlist. Existing grants retain legacy access. See [client context policies](client-access.md) for owner grant flags, scoped counts, proposal visibility and restore behavior.

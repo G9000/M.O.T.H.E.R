@@ -22,6 +22,7 @@ fn owner_secret_is_masked_in_every_page_and_cleared_on_cancel() {
     for page in [
         Stage::Credentials,
         Stage::Agents,
+        Stage::Access,
         Stage::Confirm,
         Stage::Result,
     ] {
@@ -47,6 +48,10 @@ fn selecting_agent_requires_explicit_review_before_connect() {
     }];
     setup.session = Some(Session::new("http://127.0.0.1:8080", "synthetic-owner-token").unwrap());
     setup.input(press(KeyCode::Enter)).unwrap();
+    assert_eq!(setup.stage, Stage::Access);
+    assert_eq!(setup.access_mode, AccessMode::Shared);
+    assert!(screen(&setup).contains("empty means none"));
+    setup.input(press(KeyCode::Enter)).unwrap();
     assert_eq!(setup.stage, Stage::Confirm);
     assert!(!setup.busy);
     assert!(screen(&setup).contains("Synthetic companion"));
@@ -55,7 +60,39 @@ fn selecting_agent_requires_explicit_review_before_connect() {
     assert!(screen(&setup).contains("Workspace:"));
     assert!(screen(&setup).contains("read"));
     setup.input(press(KeyCode::Esc)).unwrap();
-    assert_eq!(setup.stage, Stage::Agents);
+    assert_eq!(setup.stage, Stage::Access);
+}
+
+#[test]
+fn role_selection_and_allowlist_are_explicit_and_no_paste_connects() {
+    let mut setup = Setup::new();
+    setup.stage = Stage::Access;
+    setup.agents = vec![Agent {
+        id: "synthetic-a".into(),
+        name: "Synthetic".into(),
+    }];
+    assert!(setup.selected_access().unwrap().records.is_empty());
+    let id = "00000000-0000-4000-8000-000000000001";
+    setup.paste(&format!("{id}, {id}\n"));
+    assert_eq!(setup.selected_access().unwrap().records, vec![id]);
+    setup.shareable = vec![(id.into(), "Synthetic record title".into())];
+    setup.records = "1".into();
+    assert_eq!(setup.selected_access().unwrap().records, vec![id]);
+    assert!(screen(&setup).contains("Synthetic record title"));
+    setup.records = "0".into();
+    assert!(setup.selected_access().is_err());
+    setup.input(press(KeyCode::Down)).unwrap();
+    assert_eq!(setup.access_mode, AccessMode::Companion);
+    assert!(setup.selected_access().unwrap().records.is_empty());
+    assert!(screen(&setup).contains("same chat"));
+    assert!(!setup.busy);
+    setup.input(press(KeyCode::Down)).unwrap();
+    assert_eq!(setup.selected_access().unwrap(), ClientAccess::default());
+    assert!(screen(&setup).contains("Legacy context tools"));
+    setup.input(press(KeyCode::Down)).unwrap();
+    setup.records = "bad-id".into();
+    assert!(setup.input(press(KeyCode::Enter)).is_err());
+    assert_eq!(setup.stage, Stage::Access);
 }
 #[test]
 fn paste_cannot_trigger_connect_and_controls_are_filtered() {

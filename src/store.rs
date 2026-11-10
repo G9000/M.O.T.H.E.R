@@ -1,5 +1,6 @@
 //! Canonical SQLite state, atomic mutations, and client capability enforcement.
 use crate::{
+    access::{self, AccessMode, ClientAccess},
     config::{ClientConfig, create_private_file},
     contracts::{self, Auth, Kind, SCOPES},
     error::{Error, Result, invalid},
@@ -77,6 +78,14 @@ pub(crate) fn authorize(conn: &Connection, auth: &Auth, scope: &str) -> Result<(
             format!("This client needs {scope}."),
         ));
     }
+    if access::load(conn, &auth.client_id)?.mode == AccessMode::Shared
+        && !matches!(scope, "read" | "context:propose")
+    {
+        return Err(Error::domain(
+            "FORBIDDEN",
+            "Shared clients cannot write canonical records.",
+        ));
+    }
     Ok(())
 }
 fn grant(conn: &Connection, client: &str, scopes: &[String]) -> Result<Value> {
@@ -140,13 +149,13 @@ pub(crate) fn rebuild_usage(conn: &Connection) -> Result<()> {
     usage.check()?;
     set_metadata(conn, "usage", &serde_json::to_value(usage)?)
 }
-fn context_inventory(conn: &Connection) -> Result<Value> {
+fn context_inventory(conn: &Connection, access: &ClientAccess) -> Result<Value> {
     let mut by_kind =
         json!({"memory":0,"decision":0,"task":0,"checkpoint":0,"artifact":0,"action":0});
     let mut recallable_by_kind = by_kind.clone();
     let mut total = 0i64;
     let mut recallable = 0i64;
-    let mut statement = conn.prepare("SELECT kind,COUNT(*),SUM(CASE WHEN status NOT IN ('retracted','superseded','cancelled') THEN 1 ELSE 0 END) FROM records GROUP BY kind")?;
+    let mut statement = conn.prepare(&format!("SELECT kind,COUNT(*),SUM(CASE WHEN status NOT IN ('retracted','superseded','cancelled') THEN 1 ELSE 0 END) FROM records WHERE {} GROUP BY kind", access.filter()))?;
     for row in statement.query_map([], |row| {
         Ok((
             row.get::<_, String>(0)?,
@@ -282,12 +291,28 @@ impl Store {
     pub fn authorize(&self, auth: &Auth, scope: &str) -> Result<()> {
         authorize(&self.conn, auth, scope)
     }
+    /// Verify current read authority and return its owner-selected visibility policy.
+    pub fn access_for(&self, auth: &Auth) -> Result<ClientAccess> {
+        self.authorize(auth, "read")?;
+        access::load(&self.conn, &auth.client_id)
+    }
     /// Provision a new local client. The returned token must be kept private.
     pub fn grant(&mut self, client: &str, scopes: &[String]) -> Result<Value> {
+        self.grant_with_access(client, scopes, &ClientAccess::default())
+    }
+    /// Provision an explicitly scoped owner policy without changing existing grants.
+    pub fn grant_with_access(
+        &mut self,
+        client: &str,
+        scopes: &[String],
+        access: &ClientAccess,
+    ) -> Result<Value> {
         let tx = self
             .conn
             .transaction_with_behavior(TransactionBehavior::Immediate)?;
-        let g = grant(&tx, client, scopes)?;
+        let mut g = grant(&tx, client, scopes)?;
+        access::save(&tx, client, scopes, access)?;
+        g["access"] = access.metadata();
         tx.commit()?;
         Ok(g)
     }
@@ -298,6 +323,23 @@ impl Store {
         scopes: &[String],
         path: &Path,
         database_path: &Path,
+    ) -> Result<()> {
+        self.grant_to_file_with_access(
+            client,
+            scopes,
+            path,
+            database_path,
+            &ClientAccess::default(),
+        )
+    }
+    /// Persist a private credential with its owner-selected access policy atomically.
+    pub fn grant_to_file_with_access(
+        &mut self,
+        client: &str,
+        scopes: &[String],
+        path: &Path,
+        database_path: &Path,
+        access: &ClientAccess,
     ) -> Result<()> {
         if !contracts::valid_client(client)
             || scopes.is_empty()
@@ -311,8 +353,13 @@ impl Store {
                 .conn
                 .transaction_with_behavior(TransactionBehavior::Immediate)?;
             let g = grant(&tx, client, scopes)?;
+            access::save(&tx, client, scopes, access)?;
             let config = ClientConfig {
-                version: 1,
+                version: if access.mode == AccessMode::Legacy {
+                    1
+                } else {
+                    2
+                },
                 database_path: database_path.to_path_buf(),
                 client_id: client.into(),
                 token: contracts::string(&g, "token")?.into(),
@@ -345,7 +392,10 @@ impl Store {
         contracts::id(id)?;
         let tx = self.conn.transaction()?;
         authorize(&tx, auth, "read")?;
-        let (r, _) = read_record(&tx, id)?;
+        let access = access::load(&tx, &auth.client_id)?;
+        access.require(id)?;
+        let (mut r, _) = read_record(&tx, id)?;
+        access.scrub(&mut r);
         tx.commit()?;
         Ok(r)
     }
@@ -381,7 +431,8 @@ impl Store {
                 "No committed receipt for this client and generation.",
             )
         })?;
-        let value = serde_json::from_str(&raw)?;
+        let mut value = serde_json::from_str(&raw)?;
+        access::load(&tx, &auth.client_id)?.receipt(&auth.client_id, &mut value)?;
         tx.commit()?;
         Ok(value)
     }
@@ -409,8 +460,12 @@ impl Store {
         };
         let tx = self.conn.transaction()?;
         authorize(&tx, auth, "read")?;
-        let inventory = context_inventory(&tx)?;
-        let filter = "status NOT IN ('retracted','superseded','cancelled') AND (?1 IS NULL OR kind=?1) AND (?2 IS NULL OR instr(lower(title || ' ' || content),lower(?2))>0)";
+        let access = access::load(&tx, &auth.client_id)?;
+        let inventory = context_inventory(&tx, &access)?;
+        let filter = format!(
+            "{} AND status NOT IN ('retracted','superseded','cancelled') AND (?1 IS NULL OR kind=?1) AND (?2 IS NULL OR instr(lower(title || ' ' || content),lower(?2))>0)",
+            access.filter()
+        );
         let total: i64 = tx.query_row(
             &format!("SELECT COUNT(*) FROM records WHERE {filter}"),
             params![kind, q],
@@ -435,9 +490,9 @@ impl Store {
     Ok(json!({"id":r["id"],"kind":r["kind"],"title":r["title"],"status":r["status"],"revision":r["revision"],"actor":r["actor"],"updatedAt":r["updatedAt"],"excerpt":excerpt,"truncated":content.encode_utf16().count()>400}))
    }).collect::<Result<Vec<_>>>()?
         };
-        let unsettled_total: i64 = tx.query_row("SELECT COUNT(*) FROM records WHERE (kind='task' AND status IN ('doing','blocked')) OR (kind='action' AND status IN ('pending','unknown'))", [], |row| row.get(0))?;
+        let unsettled_total: i64 = tx.query_row(&format!("SELECT COUNT(*) FROM records WHERE {} AND ((kind='task' AND status IN ('doing','blocked')) OR (kind='action' AND status IN ('pending','unknown')))",access.filter()), [], |row| row.get(0))?;
         let mut work = {
-            let mut stmt=tx.prepare("SELECT id,kind,status FROM records WHERE (kind='task' AND status IN ('doing','blocked')) OR (kind='action' AND status IN ('pending','unknown')) ORDER BY updated_at DESC,id LIMIT 21")?;
+            let mut stmt=tx.prepare(&format!("SELECT id,kind,status FROM records WHERE {} AND ((kind='task' AND status IN ('doing','blocked')) OR (kind='action' AND status IN ('pending','unknown'))) ORDER BY updated_at DESC,id LIMIT 21",access.filter()))?;
             stmt.query_map([],|r|Ok(json!({"id":r.get::<_,String>(0)?,"kind":r.get::<_,String>(1)?,"status":r.get::<_,String>(2)?})))?.collect::<std::result::Result<Vec<_>,_>>()?
         };
         let truncated = work.len() > 20;
@@ -457,7 +512,18 @@ impl Store {
         );
         let selection = json!({"query":q,"kind":kind,"matchingRecords":total,"returnedRecords":records.len(),"omittedRecords":total-records.len() as i64});
         let unsettled_summary = json!({"total":unsettled_total,"returned":work.len(),"omitted":unsettled_total-work.len() as i64,"scope":"Workspace-wide tasks in doing/blocked and actions in pending/unknown. Checkpoint next steps and open questions are not counted as unsettled task/action records."});
-        let result = json!({"workspace":workspace(&tx)?,"persona":persona(&tx)?,"capturedAt":now(),"inventory":inventory,"selection":selection,"summary":summary,"omitted":total-records.len() as i64,"records":records,"unsettledWork":work,"unsettledWorkSummary":unsettled_summary,"unsettledWorkTruncated":truncated,"note":"Inventory counts cover all canonical record categories, independently of this request's query/kind filters and preview limit. Zero memory-category records is not an empty workspace when other categories contain records. Unreviewed inbox proposals are excluded. Excerpts are navigation, not complete records; retrieve IDs before relying on details or editing. Unsettled work counts only the task/action states described in unsettledWorkSummary. A handoff does not pause running jobs."});
+        let mut result = json!({"workspace":workspace(&tx)?,"access":access.metadata(),"capturedAt":now(),"inventory":inventory,"selection":selection,"summary":summary,"omitted":total-records.len() as i64,"records":records,"unsettledWork":work,"unsettledWorkSummary":unsettled_summary,"unsettledWorkTruncated":truncated,"note":"Inventory counts cover all canonical record categories, independently of this request's query/kind filters and preview limit. Zero memory-category records is not an empty workspace when other categories contain records. Unreviewed inbox proposals are excluded. Excerpts are navigation, not complete records; retrieve IDs before relying on details or editing. Unsettled work counts only the task/action states described in unsettledWorkSummary. A handoff does not pause running jobs."});
+        if access.mode != AccessMode::Shared {
+            result["persona"] = persona(&tx)?;
+        } else {
+            result["selection"]["scope"] = json!("granted_records");
+            result["unsettledWorkSummary"]["scope"] = json!(
+                "Granted tasks in doing/blocked and actions in pending/unknown; hidden records are excluded."
+            );
+            result["note"] = json!(
+                "Inventory, selection and unsettled-work counts cover only this client's granted canonical records. Unreviewed inbox proposals are excluded. Excerpts are navigation; retrieve full records before relying on them. A handoff does not pause running jobs."
+            );
+        }
         tx.commit()?;
         Ok(result)
     }

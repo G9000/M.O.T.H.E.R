@@ -643,3 +643,125 @@ fn advertised_schema_dialect_matches_current_mcp_clients() {
         );
     }
 }
+#[test]
+fn scoped_clients_over_stdio_keep_persona_and_private_records_separate() {
+    let f = Fixture::new();
+    let mut owner = Client::connect(&f.a_config);
+    let shown = owner.call(
+        "mother_write_record",
+        f.request(memory("Shared synthetic tea")),
+    );
+    let hidden = owner.call(
+        "mother_write_record",
+        f.request(memory("Private synthetic tea")),
+    );
+    cli(
+        f.dir.path(),
+        &[
+            "grant",
+            "companion",
+            "--access",
+            "companion",
+            "--subject",
+            "agent-a",
+        ],
+    );
+    cli(
+        f.dir.path(),
+        &[
+            "grant",
+            "shared",
+            "--access",
+            "shared",
+            "--subject",
+            "agent-b",
+            "--records",
+            shown["record"]["id"].as_str().unwrap(),
+            "--scopes",
+            "read,context:propose",
+        ],
+    );
+    let mut companion = Client::connect(&f.dir.path().join("clients/companion.private.json"));
+    let mut shared = Client::connect(&f.dir.path().join("clients/shared.private.json"));
+    let c = companion.call("mother_get_context", json!({}));
+    assert_eq!(c["inventory"]["totalRecords"], 2);
+    assert!(c.get("persona").is_some());
+    assert_eq!(c["access"]["subject"], "agent-a");
+    let c = shared.call("mother_get_context", json!({}));
+    assert_eq!(c["inventory"]["totalRecords"], 1);
+    assert!(c.get("persona").is_none());
+    assert_eq!(c["access"]["subject"], "agent-b");
+    assert_eq!(c["selection"]["scope"], "granted_records");
+    assert!(
+        !c.to_string()
+            .contains(hidden["record"]["id"].as_str().unwrap())
+    );
+    assert_eq!(
+        shared.result("mother_get_record", json!({"id":hidden["record"]["id"]}))["isError"],
+        true
+    );
+    assert_eq!(
+        shared.result("mother_get_context", json!({"subject":"agent-a"}))["isError"],
+        true
+    );
+    for mode in ["literal", "hybrid", "semantic"] {
+        let v = shared.call("mother_search_context", json!({"query":"tea","mode":mode}));
+        assert_eq!(v["search"]["eligibleRecords"], 1);
+        assert!(v.get("persona").is_none());
+        assert!(
+            !v.to_string()
+                .contains(hidden["record"]["id"].as_str().unwrap())
+        );
+    }
+    assert_eq!(
+        shared.result("mother_write_record", f.request(memory("Forbidden write")))["isError"],
+        true
+    );
+    cli(f.dir.path(), &["revoke", "shared"]);
+    assert_eq!(
+        shared.result("mother_get_context", json!({}))["isError"],
+        true
+    );
+    assert_eq!(
+        companion.call("mother_get_context", json!({}))["inventory"]["totalRecords"],
+        2
+    );
+}
+#[test]
+fn version_two_mcp_rejects_missing_policy_at_startup_and_after_connection() {
+    let f = Fixture::new();
+    cli(
+        f.dir.path(),
+        &[
+            "grant",
+            "scoped-v2",
+            "--access",
+            "shared",
+            "--subject",
+            "agent-b",
+        ],
+    );
+    let config = f.dir.path().join("clients/scoped-v2.private.json");
+    let raw: Value = serde_json::from_slice(&std::fs::read(&config).unwrap()).unwrap();
+    assert_eq!(raw["version"], 2);
+    let mut c = Client::connect(&config);
+    assert_eq!(
+        c.call("mother_get_context", json!({}))["access"]["mode"],
+        "shared"
+    );
+    let db = rusqlite::Connection::open(raw["databasePath"].as_str().unwrap()).unwrap();
+    db.execute("DELETE FROM client_access WHERE client_id='scoped-v2'", [])
+        .unwrap();
+    let response = c.result("mother_get_context", json!({}));
+    assert_eq!(response["isError"], true);
+    assert_eq!(response["structuredContent"]["error"]["code"], "FORBIDDEN");
+    assert!(!response.to_string().contains("Synthetic MCP persona"));
+    let output = Command::new(env!("CARGO_BIN_EXE_mother"))
+        .args(["mcp", "--config", config.to_str().unwrap()])
+        .stdin(Stdio::null())
+        .output()
+        .unwrap();
+    assert!(!output.status.success());
+    assert!(output.stdout.is_empty());
+    assert!(String::from_utf8_lossy(&output.stderr).contains("FORBIDDEN"));
+}

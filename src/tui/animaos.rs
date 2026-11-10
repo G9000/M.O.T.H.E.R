@@ -3,6 +3,7 @@
 mod tests;
 use crate::animaos::{Agent, Session};
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+use mother::access::{AccessMode, ClientAccess};
 use mother::error::Result;
 use ratatui::{
     Frame,
@@ -16,6 +17,7 @@ use zeroize::{Zeroize, Zeroizing};
 enum Stage {
     Credentials,
     Agents,
+    Access,
     Confirm,
     Result,
 }
@@ -38,6 +40,9 @@ pub(super) struct Setup {
     exe: std::path::PathBuf,
     workspace: String,
     generation: String,
+    access_mode: AccessMode,
+    records: String,
+    shareable: Vec<(String, String)>,
     scroll: u16,
     pub(super) message: String,
 }
@@ -59,6 +64,9 @@ impl Setup {
             exe: std::env::current_exe().unwrap_or_default(),
             workspace: String::new(),
             generation: String::new(),
+            access_mode: AccessMode::Shared,
+            records: String::new(),
+            shareable: vec![],
             scroll: 0,
             message:
                 "Start AnimaOS, then load your agents. Owner credentials stay only in this session."
@@ -185,8 +193,40 @@ impl Setup {
                         .workspace()?;
                     self.workspace = workspace["id"].as_str().unwrap_or_default().into();
                     self.generation = workspace["generation"].as_str().unwrap_or_default().into();
+                    self.shareable = shareable_records(&self.root)?;
+                    self.records.clear();
+                    self.access_mode = AccessMode::Shared;
+                    self.scroll = 0;
+                    self.stage = Stage::Access;
+                }
+                _ => {}
+            },
+            Stage::Access => match key.code {
+                KeyCode::Esc => self.stage = Stage::Agents,
+                KeyCode::PageDown => self.scroll = self.scroll.saturating_add(8),
+                KeyCode::PageUp => self.scroll = self.scroll.saturating_sub(8),
+                KeyCode::Up | KeyCode::Down | KeyCode::Tab => {
+                    self.access_mode = match self.access_mode {
+                        AccessMode::Shared => AccessMode::Companion,
+                        AccessMode::Companion => AccessMode::Legacy,
+                        AccessMode::Legacy => AccessMode::Shared,
+                    };
+                }
+                KeyCode::Backspace if self.access_mode == AccessMode::Shared => {
+                    self.records.pop();
+                }
+                KeyCode::Enter => {
+                    self.selected_access()?;
                     self.scroll = 0;
                     self.stage = Stage::Confirm;
+                }
+                KeyCode::Char(c)
+                    if self.access_mode == AccessMode::Shared
+                        && !key
+                            .modifiers
+                            .intersects(KeyModifiers::CONTROL | KeyModifiers::ALT) =>
+                {
+                    self.paste(&c.to_string())
                 }
                 _ => {}
             },
@@ -194,12 +234,13 @@ impl Setup {
                 match key.code {
                     KeyCode::Down => self.scroll = self.scroll.saturating_add(1),
                     KeyCode::Up => self.scroll = self.scroll.saturating_sub(1),
-                    KeyCode::Esc => self.stage = Stage::Agents,
+                    KeyCode::Esc => self.stage = Stage::Access,
                     KeyCode::Enter => {
                         let Some(agent) = self.agents.get(self.selected) else {
                             return Ok(false);
                         };
                         let id = agent.id.clone();
+                        let access = self.selected_access()?;
                         let root = self.root.clone();
                         let exe = self.exe.clone();
                         let current = mother::store::Store::open(&root.join("context.sqlite"))?
@@ -219,7 +260,11 @@ impl Setup {
                         self.message="Connecting M.O.T.H.E.R. Keep this window open until the result is known.".into();
                         let sender = self.sender.clone();
                         std::thread::spawn(move || {
-                            let result = session.connect(&id, &root, &exe);
+                            let result = if access.mode == AccessMode::Legacy {
+                                session.connect(&id, &root, &exe)
+                            } else {
+                                session.connect_with_access(&id, &root, &exe, &access)
+                            };
                             let _ = sender.send(Reply::Connected(session, result));
                         });
                     }
@@ -234,6 +279,15 @@ impl Setup {
         Ok(false)
     }
     pub(super) fn paste(&mut self, text: &str) {
+        if !self.busy && self.stage == Stage::Access && self.access_mode == AccessMode::Shared {
+            for c in text.chars().filter(|c| !c.is_control()) {
+                if self.records.len() + c.len_utf8() > 16384 {
+                    break;
+                }
+                self.records.push(c);
+            }
+            return;
+        }
         if self.busy || self.stage != Stage::Credentials {
             return;
         }
@@ -260,10 +314,61 @@ impl Setup {
             Stage::Credentials => {
                 "Tab / arrows field   Ctrl+U clear   Enter load agents   Esc home"
             }
-            Stage::Agents => "↑↓ choose agent   Enter review connection   Esc account",
+            Stage::Agents => "↑↓ choose agent   Enter choose access   Esc account",
+            Stage::Access => {
+                "↑↓ / Tab role   type/paste numbers or UUIDs   PgDn/PgUp scroll   Enter review   Esc back"
+            }
             Stage::Confirm => "↑↓ scroll details   Enter connect this agent   Esc back",
             Stage::Result => "Enter / Esc agent list",
         }
+    }
+    fn selected_access(&self) -> Result<ClientAccess> {
+        let agent = self
+            .agents
+            .get(self.selected)
+            .ok_or_else(|| mother::error::Error::domain("CONNECTION", "Choose an agent first."))?;
+        let mut records = if self.access_mode == AccessMode::Shared {
+            self.records
+                .split(|c: char| c == ',' || c.is_whitespace())
+                .filter(|s| !s.is_empty())
+                .map(|entry| {
+                    if let Ok(number) = entry.parse::<usize>() {
+                        self.shareable
+                            .get(number.wrapping_sub(1))
+                            .map(|(id, _)| id.clone())
+                            .ok_or_else(|| {
+                                mother::error::Error::domain(
+                                    "CONNECTION",
+                                    "Choose a record number from the displayed list.",
+                                )
+                            })
+                    } else {
+                        Ok(entry.to_owned())
+                    }
+                })
+                .collect::<Result<Vec<_>>>()?
+        } else {
+            vec![]
+        };
+        records.sort();
+        records.dedup();
+        for record in &records {
+            if uuid::Uuid::parse_str(record).is_err() {
+                return Err(mother::error::Error::domain(
+                    "CONNECTION",
+                    "Shared record IDs must be UUIDs.",
+                ));
+            }
+        }
+        Ok(ClientAccess {
+            mode: self.access_mode,
+            subject: if self.access_mode == AccessMode::Legacy {
+                None
+            } else {
+                Some(agent.id.clone())
+            },
+            records,
+        })
     }
     pub(super) fn render(&self, frame: &mut Frame, area: Rect) {
         let safe = |s: &str| s.chars().filter(|c| !c.is_control()).collect::<String>();
@@ -319,6 +424,58 @@ impl Setup {
                     );
                 }
             }
+            Stage::Access => {
+                lines.push(format!(
+                    "{} Shared context: selected records only, local personality",
+                    if self.access_mode == AccessMode::Shared {
+                        ">"
+                    } else {
+                        " "
+                    }
+                ));
+                lines.push(format!(
+                    "{} Companion: MOTHER personality and primary durable memory",
+                    if self.access_mode == AccessMode::Companion {
+                        ">"
+                    } else {
+                        " "
+                    }
+                ));
+                lines.push(format!(
+                    "{} Legacy context tools: full context/persona readable, no identity binding",
+                    if self.access_mode == AccessMode::Legacy {
+                        ">"
+                    } else {
+                        " "
+                    }
+                ));
+                lines.push(String::new());
+                lines.push(
+                    "Share record numbers or UUIDs (comma separated; empty means none):".into(),
+                );
+                lines.push("Latest 200 current records, read locally for owner selection:".into());
+                lines.push(if self.records.is_empty() {
+                    "(none)".into()
+                } else {
+                    safe(&self.records)
+                });
+                for (index, (id, title)) in self.shareable.iter().take(6).enumerate() {
+                    lines.push(format!(
+                        "{}. {} [{}]",
+                        index + 1,
+                        safe(title).chars().take(36).collect::<String>(),
+                        safe(id)
+                    ));
+                }
+                if self.shareable.len() > 6 {
+                    lines.push("More records below: use PgDn/PgUp to scroll this page.".into());
+                }
+                lines.push("Companion offline: same chat, configured local personality, unavailable durable memory. No automatic write mirroring or replay.".into());
+                lines.push("Existing grants and bindings are preserved. Disable an old connection explicitly in AnimaOS before replacing it.".into());
+                for (index, (id, title)) in self.shareable.iter().enumerate().skip(6) {
+                    lines.push(format!("{}. {} [{}]", index + 1, safe(title), safe(id)));
+                }
+            }
             Stage::Confirm => {
                 if let Some(agent) = self.agents.get(self.selected) {
                     lines.push(format!(
@@ -337,8 +494,34 @@ impl Setup {
                 lines.push(
                     "Access: read shared context + propose memories for owner review.".into(),
                 );
+                lines.push(format!(
+                    "Role: {:?}; subject: {}",
+                    self.access_mode,
+                    self.agents.get(self.selected).map_or("", |a| &a.id)
+                ));
+                if self.access_mode == AccessMode::Shared {
+                    let records = self
+                        .selected_access()
+                        .map(|a| a.records.join(", "))
+                        .unwrap_or_default();
+                    lines.push(format!(
+                        "Record allowlist: {}",
+                        if records.is_empty() {
+                            "(none)"
+                        } else {
+                            &records
+                        }
+                    ));
+                } else if self.access_mode == AccessMode::Companion {
+                    lines.push("Offline: same chat, complete configured local personality, MOTHER memory unavailable. No write mirroring or replay.".into());
+                } else {
+                    lines.push("Legacy tools expose full context and persona under existing v1 behavior. They do not activate companion identity or primary-memory isolation.".into());
+                }
                 lines.push("M.O.T.H.E.R runs locally using this executable. AnimaOS keeps its own agent permissions.".into());
-                lines.push("Enter creates/reuses a separate grant and starts this agent's local MCP connection.".into());
+                lines.push("Enter creates/reuses a separate role-specific grant and starts this agent's local MCP connection.".into());
+                if self.access_mode != AccessMode::Legacy {
+                    lines.push("Under Automatic tool policy, this also reviews the exact discovered mother_get_context reader for the identity binding; no extra execution grants are created. Review policy keeps manual tool review and grants.".into());
+                }
             }
             Stage::Result => {
                 lines.push("Connection result".into());
@@ -350,7 +533,7 @@ impl Setup {
             Paragraph::new(lines.join("\n"))
                 .wrap(Wrap { trim: false })
                 .scroll((
-                    if self.stage == Stage::Confirm {
+                    if matches!(self.stage, Stage::Confirm | Stage::Access) {
                         self.scroll
                     } else {
                         0
@@ -365,4 +548,15 @@ impl Setup {
             area,
         );
     }
+}
+
+fn shareable_records(root: &std::path::Path) -> Result<Vec<(String, String)>> {
+    let connection = rusqlite::Connection::open_with_flags(
+        root.join("context.sqlite"),
+        rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY,
+    )?;
+    let mut statement = connection.prepare("SELECT id,title FROM records WHERE status NOT IN ('retracted','superseded','cancelled') ORDER BY updated_at DESC,id LIMIT 200")?;
+    Ok(statement
+        .query_map([], |row| Ok((row.get(0)?, row.get(1)?)))?
+        .collect::<std::result::Result<Vec<_>, _>>()?)
 }
