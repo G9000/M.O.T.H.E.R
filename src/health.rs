@@ -489,6 +489,9 @@ mod tests {
             json!({"jsonrpc":"2.0","id":3,"result":{"structuredContent":context}}),
         ]
     }
+    // An upper bound only: each scripted child answers at once, but a cold
+    // PowerShell start on a loaded Windows runner can take several seconds.
+    const REPLY: Duration = Duration::from_secs(25);
     fn script_command(windows: &str, unix: &str) -> Command {
         #[cfg(windows)]
         {
@@ -534,7 +537,7 @@ mod tests {
     fn protocol_projects_only_validated_identity_and_inventory() {
         let mut messages = replies(context());
         messages.insert(0, json!({"jsonrpc":"2.0","method":"notifications/message","params":{"data":"SECRET LOG"}}));
-        let mut session = session(&messages, Duration::from_secs(5));
+        let mut session = session(&messages, REPLY);
         let mut report = HealthReport::new(Path::new("synthetic-mother"));
         assert_eq!(
             check_session(&mut report, &mut session, &workspace()),
@@ -551,7 +554,7 @@ mod tests {
     fn old_context_is_verified_read_but_counts_are_unsupported() {
         let mut value = context();
         value.as_object_mut().unwrap().remove("inventory");
-        let mut session = session(&replies(value), Duration::from_secs(5));
+        let mut session = session(&replies(value), REPLY);
         let mut report = HealthReport::new(Path::new("synthetic"));
         assert_eq!(
             check_session(&mut report, &mut session, &workspace()),
@@ -565,7 +568,7 @@ mod tests {
         for field in ["id", "generation"] {
             let mut value = context();
             value["workspace"][field] = json!("33333333-3333-4333-8333-333333333333");
-            let mut session = session(&replies(value), Duration::from_secs(5));
+            let mut session = session(&replies(value), REPLY);
             let mut report = HealthReport::new(Path::new("synthetic"));
             assert_eq!(
                 check_session(&mut report, &mut session, &workspace()),
@@ -613,7 +616,7 @@ mod tests {
     fn malformed_and_excessive_messages_fail_closed() {
         let messages =
             vec![json!({"jsonrpc":"2.0","method":"notifications/message"}); MAX_MESSAGES + 1];
-        let mut session = session(&messages, Duration::from_secs(5));
+        let mut session = session(&messages, REPLY);
         assert_eq!(
             session.rpc(1, "initialize", json!({})),
             Err("message_limit")
@@ -625,7 +628,7 @@ mod tests {
         );
         let mut session = Session::start_command(
             command,
-            Instant::now() + Duration::from_secs(5),
+            Instant::now() + REPLY,
             Arc::new(AtomicBool::new(false)),
         )
         .unwrap();
@@ -642,7 +645,7 @@ mod tests {
         );
         let mut session = Session::start_command(
             command,
-            Instant::now() + Duration::from_secs(5),
+            Instant::now() + REPLY,
             Arc::new(AtomicBool::new(false)),
         )
         .unwrap();

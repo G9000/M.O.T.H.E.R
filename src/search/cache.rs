@@ -196,7 +196,8 @@ fn decode(partial: bool, count: usize, bytes: &[u8], text: &str) -> Result<Entry
         return Err(invalid());
     }
     let mut vectors = Vec::with_capacity(count);
-    for raw in bytes.chunks_exact(WINDOW_BYTES) {
+    // The length check above guarantees there is no remainder.
+    for raw in bytes.as_chunks::<WINDOW_BYTES>().0 {
         let start = u32::from_le_bytes(raw[0..4].try_into().map_err(|_| invalid())?) as usize;
         let end = u32::from_le_bytes(raw[4..8].try_into().map_err(|_| invalid())?) as usize;
         if start >= end
@@ -207,8 +208,10 @@ fn decode(partial: bool, count: usize, bytes: &[u8], text: &str) -> Result<Entry
             return Err(invalid());
         }
         let values: Vec<f32> = raw[8..]
-            .chunks_exact(4)
-            .map(|b| f32::from_le_bytes([b[0], b[1], b[2], b[3]]))
+            .as_chunks::<4>()
+            .0
+            .iter()
+            .map(|b| f32::from_le_bytes(*b))
             .collect();
         validate_vector(&values)?;
         vectors.push(Vector { start, end, values });

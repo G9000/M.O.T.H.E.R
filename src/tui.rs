@@ -71,11 +71,10 @@ impl Form {
                 if !key
                     .modifiers
                     .intersects(KeyModifiers::CONTROL | KeyModifiers::ALT)
-                    && !c.is_control() =>
+                    && !c.is_control()
+                    && self.active().len() + c.len_utf8() <= 4096 =>
             {
-                if self.active().len() + c.len_utf8() <= 4096 {
-                    self.active().push(c);
-                }
+                self.active().push(c);
             }
             _ => {}
         }
