@@ -1,3 +1,15 @@
+# Balanced context previews and lock release — 11 November 2026
+
+Committed directly to main from `9369de0`, at the owner's request. No schema, grant, stored-record or tool-input change; README title, poem and artwork unchanged.
+
+- **Balanced previews.** An unfiltered `mother_get_context` now lets record categories take turns for the preview limit instead of returning the newest records of any category. The live workspace had reached twelve recallable checkpoints and no recallable memories, and a newest-first list shows only checkpoints once they outnumber the limit. `selection.order`, `selection.returnedByKind` and `selection.omittedByKind` are additive. Requests with a query or kind, and `mother_search_context`, behave as before. The advertised tool description states the new order.
+- **Regression tests** in `tests/balanced_context.rs` failed first: crowding by thirty checkpoints, newest-of-each-category selection with newest-first presentation, unsettled tasks/actions before settled ones, unchanged output within the limit, filtered requests staying newest-first, historical records never previewed, and shared clients balanced within granted records only.
+- **Lock release.** `connection::lock_tests` and several AnimaOS setup tests failed about one run in three on macOS, including at `031a2e6`. An advisory lock was released only when its last descriptor closed, and a child process started by another thread holds a copy of that descriptor until it execs. Both locks now use one guard that unlocks explicitly on drop. A deterministic test holds a duplicate descriptor across the drop; it failed before the change. Twenty-five consecutive runs of the binary's unit tests then passed.
+- Full locked suite on macOS with Rust 1.94.0 and 1.99.1: **197 passed**, two existing optional model tests ignored. Formatting and strict Clippy passed on both.
+
+Not exercised: no connected harness has read the balanced previews in a real conversation, and installed MCP processes still run the previous executable until it is replaced and reconnected.
+
+---
 # Review fixes and continuous integration — 11 November 2026
 
 Committed directly to main from `12af33c`. README title, poem and artwork unchanged. No schema, contract, grant or stored-record change.

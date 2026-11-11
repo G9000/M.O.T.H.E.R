@@ -74,7 +74,7 @@ fn empty_workspace_reports_every_category_as_zero() {
     );
     assert_eq!(
         c["selection"],
-        json!({"query":null,"kind":null,"matchingRecords":0,"returnedRecords":0,"omittedRecords":0})
+        json!({"query":null,"kind":null,"order":"balanced","matchingRecords":0,"returnedRecords":0,"omittedRecords":0,"returnedByKind":zero(),"omittedByKind":zero()})
     );
 }
 #[test]

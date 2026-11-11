@@ -1,7 +1,7 @@
 [
   {
     "name": "mother_get_context",
-    "description": "Read M.O.T.H.E.R shared context across all record categories, including memories, decisions, tasks and checkpoints. Returns workspace-wide category counts, explicit query/kind selection counts, bounded previews and task/action unsettled-work totals. Zero memory-category records does not mean the workspace is empty. Retrieve full records by ID before relying on details.",
+    "description": "Read M.O.T.H.E.R shared context across all record categories, including memories, decisions, tasks and checkpoints. Returns workspace-wide category counts, explicit query/kind selection counts, bounded previews and task/action unsettled-work totals. Zero memory-category records does not mean the workspace is empty. Without a query or kind filter, previews are balanced: categories take turns for the limit, newest first within each, so recent checkpoints do not displace older memories and decisions, and selection.omittedByKind reports what was left out. With a filter, previews are the newest matches. Retrieve full records by ID before relying on details.",
     "inputSchema": {
       "type": "object",
       "properties": {

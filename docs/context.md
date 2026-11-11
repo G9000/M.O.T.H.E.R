@@ -13,12 +13,20 @@ The response separates full-workspace counts from the bounded list returned by t
 | `inventory.recallableRecords` | Records available for ordinary recall, excluding retracted, superseded and cancelled statuses. |
 | `inventory.recallableByKind` | Workspace counts by category for ordinary recall, independent of request filters and limit. |
 | `inventory.excludedRecords` | Retained historical records omitted from ordinary recall. |
-| `selection` | The applied query/kind filters, matching count, returned preview count and omitted matching count. |
+| `selection` | The applied query/kind filters, preview order, matching count, returned preview count and omitted matching count, with returned and omitted counts for each category. |
 | `summary` | A brief description of workspace counts and preview coverage. |
 
 `records` remains a bounded preview list, with the existing `omitted` and per-record `truncated` fields. To read a complete current record, use `mother_get_record` with its ID. Default recall does not emit retracted content. Inventory does not count unreviewed Living Memory proposals as accepted records.
 
 For example, if a workspace has three checkpoints and no memories, a request filtered to `kind: memory` returns no previews, but its inventory still reports three recallable checkpoints. Neither that filter nor `limit: 1` makes the workspace inventory empty. Do not describe a filtered or truncated preview page as the whole workspace.
+
+## Balanced previews
+
+Checkpoints are saved every session, so a newest-first list soon holds nothing else. When a request has no `query` and no `kind`, `selection.order` is `balanced`: categories take turns for the preview limit, in the order checkpoint, task, decision, memory, action, artifact. Within a category the newest record goes first, except that tasks in doing/blocked and actions in pending/unknown go before settled ones. A category with fewer records than its share gives the remaining slots to the others. The returned list is still sorted newest first.
+
+For example, with thirty checkpoints, two memories, one decision and the default limit of twenty, the previews are both memories, the decision and the seventeen newest checkpoints. `selection.returnedByKind` and `selection.omittedByKind` state that split, here thirteen omitted checkpoints. A workspace that fits within the limit is returned exactly as before.
+
+With a `query` or `kind`, `selection.order` is `recent` and previews are the newest matches, as before. Shared clients are balanced within their granted records only. `mother_search_context` is unchanged.
 
 ## Unsettled work
 
@@ -28,6 +36,6 @@ Checkpoint next steps and open questions do not become task records automaticall
 
 ## Compatibility and upgrade
 
-The new inventory and summary fields are additive. Existing context query inputs, preview limits, authorization, record categories, SQLite schema, workspace identity and receipts remain unchanged. CLI context inspection and MCP share the same response.
+The inventory, summary, `selection.order`, `selection.returnedByKind` and `selection.omittedByKind` fields are additive. Balanced order changes which previews an unfiltered request returns only when the workspace has more recallable records than the limit. Existing context query inputs, preview limits, authorization, record categories, SQLite schema, workspace identity and receipts remain unchanged. CLI context inspection and MCP share the same response.
 
 Running MCP processes need the updated executable and a reconnect to serve the new fields and tool description. Discovery or successful installation does not prove a particular model has used those fields correctly. Test it with an unfiltered context read and ask the agent to distinguish category counts from total context.

@@ -32,6 +32,8 @@ Context returns at most 100 record previews, explicit omitted count, per-record 
 
 Recovery hardening: restore publishes schema and imported state in one transaction. Interrupted incomplete files fail to open. Mutations enforce portable capacity before committing, using transactional record/receipt counts and a conservative compact-export byte bound. Update timestamps never move behind the previous record timestamp when the system clock moves backward.
 
+Unfiltered context previews are balanced across record categories, so frequent checkpoints cannot displace older memories and decisions within the preview limit; per-category returned and omitted counts make the split explicit. Filtered requests return their newest matches. See [shared context](context.md).
+
 ## Local retrieval layer (v0.3.0)
 
 The existing search tool and owner CLI share local Candle inference and a disposable SQLite vector sidecar. Canonical SQLite records remain authoritative. Cache keys bind workspace/generation, model/profile, record revision and text digest; search rechecks grants and current canonical state before returning. Hybrid retrieval preserves exact identifiers and adds meaning-based candidates. Missing or busy infrastructure produces explicit literal fallback.

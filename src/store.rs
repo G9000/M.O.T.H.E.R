@@ -149,9 +149,13 @@ pub(crate) fn rebuild_usage(conn: &Connection) -> Result<()> {
     usage.check()?;
     set_metadata(conn, "usage", &serde_json::to_value(usage)?)
 }
+/// Tasks and actions whose outcome is still open.
+const UNSETTLED: &str = "((kind='task' AND status IN ('doing','blocked')) OR (kind='action' AND status IN ('pending','unknown')))";
+fn kind_counts() -> Value {
+    json!({"memory":0,"decision":0,"task":0,"checkpoint":0,"artifact":0,"action":0})
+}
 fn context_inventory(conn: &Connection, access: &ClientAccess) -> Result<Value> {
-    let mut by_kind =
-        json!({"memory":0,"decision":0,"task":0,"checkpoint":0,"artifact":0,"action":0});
+    let mut by_kind = kind_counts();
     let mut recallable_by_kind = by_kind.clone();
     let mut total = 0i64;
     let mut recallable = 0i64;
@@ -466,15 +470,34 @@ impl Store {
             "{} AND status NOT IN ('retracted','superseded','cancelled') AND (?1 IS NULL OR kind=?1) AND (?2 IS NULL OR instr(lower(title || ' ' || content),lower(?2))>0)",
             access.filter()
         );
-        let total: i64 = tx.query_row(
-            &format!("SELECT COUNT(*) FROM records WHERE {filter}"),
-            params![kind, q],
-            |r| r.get(0),
-        )?;
-        let records = {
+        let mut matching_by_kind = kind_counts();
+        let mut total = 0i64;
+        {
             let mut stmt = tx.prepare(&format!(
-                "SELECT payload FROM records WHERE {filter} ORDER BY updated_at DESC,id LIMIT ?3"
+                "SELECT kind,COUNT(*) FROM records WHERE {filter} GROUP BY kind"
             ))?;
+            for row in stmt.query_map(params![kind, q], |r| {
+                Ok((r.get::<_, String>(0)?, r.get::<_, i64>(1)?))
+            })? {
+                let (name, count) = row?;
+                Kind::parse(&name)?;
+                matching_by_kind[&name] = json!(count);
+                total += count;
+            }
+        }
+        // Checkpoints are written every session. Without a filter, categories take
+        // turns for preview slots so older memories and decisions stay visible.
+        let balanced = q.is_none() && kind.is_none();
+        let records = {
+            let mut stmt = tx.prepare(&if balanced {
+                format!(
+                    "SELECT payload FROM (SELECT payload,updated_at,id,ROW_NUMBER() OVER (PARTITION BY kind ORDER BY {UNSETTLED} DESC,updated_at DESC,id) AS turn,CASE kind WHEN 'checkpoint' THEN 0 WHEN 'task' THEN 1 WHEN 'decision' THEN 2 WHEN 'memory' THEN 3 WHEN 'action' THEN 4 ELSE 5 END AS seat FROM records WHERE {filter} ORDER BY turn,seat LIMIT ?3) ORDER BY updated_at DESC,id"
+                )
+            } else {
+                format!(
+                    "SELECT payload FROM records WHERE {filter} ORDER BY updated_at DESC,id LIMIT ?3"
+                )
+            })?;
             let raw = stmt
                 .query_map(
                     params![
@@ -490,16 +513,28 @@ impl Store {
     Ok(json!({"id":r["id"],"kind":r["kind"],"title":r["title"],"status":r["status"],"revision":r["revision"],"actor":r["actor"],"updatedAt":r["updatedAt"],"excerpt":excerpt,"truncated":content.encode_utf16().count()>400}))
    }).collect::<Result<Vec<_>>>()?
         };
-        let unsettled_total: i64 = tx.query_row(&format!("SELECT COUNT(*) FROM records WHERE {} AND ((kind='task' AND status IN ('doing','blocked')) OR (kind='action' AND status IN ('pending','unknown')))",access.filter()), [], |row| row.get(0))?;
+        let unsettled_total: i64 = tx.query_row(
+            &format!(
+                "SELECT COUNT(*) FROM records WHERE {} AND {UNSETTLED}",
+                access.filter()
+            ),
+            [],
+            |row| row.get(0),
+        )?;
         let mut work = {
-            let mut stmt=tx.prepare(&format!("SELECT id,kind,status FROM records WHERE {} AND ((kind='task' AND status IN ('doing','blocked')) OR (kind='action' AND status IN ('pending','unknown'))) ORDER BY updated_at DESC,id LIMIT 21",access.filter()))?;
+            let mut stmt=tx.prepare(&format!("SELECT id,kind,status FROM records WHERE {} AND {UNSETTLED} ORDER BY updated_at DESC,id LIMIT 21",access.filter()))?;
             stmt.query_map([],|r|Ok(json!({"id":r.get::<_,String>(0)?,"kind":r.get::<_,String>(1)?,"status":r.get::<_,String>(2)?})))?.collect::<std::result::Result<Vec<_>,_>>()?
         };
         let truncated = work.len() > 20;
         work.truncate(20);
         let counts = &inventory["recallableByKind"];
+        let order = if balanced {
+            " Previews take turns across categories, newest first within each, so recent checkpoints do not displace older memories and decisions; selection.omittedByKind lists what was left out."
+        } else {
+            ""
+        };
         let summary = format!(
-            "Shared context has {} recallable records: {} memories, {} decisions, {} tasks, {} checkpoints, {} artifacts and {} actions. {} retained historical records are excluded from recall. This request matches {total} records and returns {} previews.",
+            "Shared context has {} recallable records: {} memories, {} decisions, {} tasks, {} checkpoints, {} artifacts and {} actions. {} retained historical records are excluded from recall. This request matches {total} records and returns {} previews.{order}",
             inventory["recallableRecords"],
             counts["memory"],
             counts["decision"],
@@ -510,7 +545,15 @@ impl Store {
             inventory["excludedRecords"],
             records.len()
         );
-        let selection = json!({"query":q,"kind":kind,"matchingRecords":total,"returnedRecords":records.len(),"omittedRecords":total-records.len() as i64});
+        let mut returned_by_kind = kind_counts();
+        let mut omitted_by_kind = matching_by_kind;
+        for record in &records {
+            let name = contracts::string(record, "kind")?;
+            for (counts, step) in [(&mut returned_by_kind, 1), (&mut omitted_by_kind, -1)] {
+                counts[name] = json!(counts[name].as_i64().unwrap_or(0) + step);
+            }
+        }
+        let selection = json!({"query":q,"kind":kind,"order":if balanced {"balanced"} else {"recent"},"matchingRecords":total,"returnedRecords":records.len(),"omittedRecords":total-records.len() as i64,"returnedByKind":returned_by_kind,"omittedByKind":omitted_by_kind});
         let unsettled_summary = json!({"total":unsettled_total,"returned":work.len(),"omitted":unsettled_total-work.len() as i64,"scope":"Workspace-wide tasks in doing/blocked and actions in pending/unknown. Checkpoint next steps and open questions are not counted as unsettled task/action records."});
         let mut result = json!({"workspace":workspace(&tx)?,"access":access.metadata(),"capturedAt":now(),"inventory":inventory,"selection":selection,"summary":summary,"omitted":total-records.len() as i64,"records":records,"unsettledWork":work,"unsettledWorkSummary":unsettled_summary,"unsettledWorkTruncated":truncated,"note":"Inventory counts cover all canonical record categories, independently of this request's query/kind filters and preview limit. Zero memory-category records is not an empty workspace when other categories contain records. Unreviewed inbox proposals are excluded. Excerpts are navigation, not complete records; retrieve IDs before relying on details or editing. Unsettled work counts only the task/action states described in unsettledWorkSummary. A handoff does not pause running jobs."});
         if access.mode != AccessMode::Shared {
