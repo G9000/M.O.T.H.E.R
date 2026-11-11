@@ -10,13 +10,17 @@ mother grant claude-code --scopes read,memory:write,decision:write,task:write,ch
 
 Each command below takes the private config that `mother grant` printed. All of them print setup text for you to paste; none of them edits a harness's own settings. Paths in the output are resolved for this computer, and paths containing quotes, `$`, backticks or `%` are refused for the shell-command formats.
 
+## Handing work between harnesses
+
+Each grant name is also the harness's name for handoffs. A task handed to `codex` with `mother_assign_task` appears at the top of Codex's briefing and under `assignedToYou` in its context the next time it starts. See [handing work to another harness](context.md#handing-work-to-another-harness).
+
 ## Her session briefing
 
 ```powershell
 mother brief --config "C:\path\to\claude-code.private.json"
 ```
 
-prints a short plain-text briefing: an instruction to read `mother_get_context`, her persona, your pinned core, where the last session left off and any unsettled tasks or actions. It stays under 9,000 characters, trimming the persona and long pins first and saying when it did. Saved records are labelled as data, not instructions. If the workspace cannot be read (for example after `mother revoke`), it prints a one-paragraph note saying so, with no private content, and still exits successfully so a harness session is never blocked by it.
+prints a short plain-text briefing: an instruction to read `mother_get_context`, her persona, your pinned core, tasks other harnesses handed to this one, where the last session left off, any unsettled tasks or actions, and the harness names a task can be handed to. It stays under 9,000 characters, trimming the persona and long pins first and saying when it did. Saved records are labelled as data, not instructions. If the workspace cannot be read (for example after `mother revoke`), it prints a one-paragraph note saying so, with no private content, and still exits successfully so a harness session is never blocked by it.
 
 Any harness that can run a command at session start, or that you build yourself, can put this text into its system prompt.
 

@@ -1,7 +1,7 @@
 [
   {
     "name": "mother_get_context",
-    "description": "Read M.O.T.H.E.R shared context across all record categories, including memories, decisions, tasks and checkpoints. Returns workspace-wide category counts, explicit query/kind selection counts, bounded previews and task/action unsettled-work totals. Zero memory-category records does not mean the workspace is empty. Without a query or kind filter, previews are balanced: categories take turns for the limit, newest first within each, so recent checkpoints do not displace older memories and decisions, and selection.omittedByKind reports what was left out. updatedSince and updatedBefore limit previews to records last updated in that window. With any filter, previews are the newest matches. Retrieve full records by ID before relying on details. pinned always lists the owner's pinned core memories and decisions in full, independent of filters and limit.",
+    "description": "Read M.O.T.H.E.R shared context across all record categories, including memories, decisions, tasks and checkpoints. Returns workspace-wide category counts, explicit query/kind selection counts, bounded previews and task/action unsettled-work totals. Zero memory-category records does not mean the workspace is empty. Without a query or kind filter, previews are balanced: categories take turns for the limit, newest first within each, so recent checkpoints do not displace older memories and decisions, and selection.omittedByKind reports what was left out. updatedSince and updatedBefore limit previews to records last updated in that window. With any filter, previews are the newest matches. Retrieve full records by ID before relying on details. pinned always lists the owner's pinned core memories and decisions in full, independent of filters and limit. assignedToYou lists open tasks another harness handed to this one; harnesses names the harnesses a task can be handed to with mother_assign_task.",
     "inputSchema": {
       "type": "object",
       "properties": {
@@ -1293,6 +1293,42 @@
       "required": [
         "id",
         "pinned"
+      ],
+      "$schema": "http://json-schema.org/draft-07/schema#",
+      "additionalProperties": false
+    },
+    "annotations": {
+      "readOnlyHint": false,
+      "destructiveHint": false,
+      "idempotentHint": true,
+      "openWorldHint": false
+    },
+    "execution": {
+      "taskSupport": "forbidden"
+    }
+  },
+  {
+    "name": "mother_assign_task",
+    "description": "Hand an open task (todo, doing or blocked) to another harness by name, move it to a different one, or pass assignee null to clear it. Harness names are listed in mother_get_context under harnesses. The receiving harness finds the task under assignedToYou when it next reads context, does the work under its own permissions, and moves the task through its normal statuses with mother_write_record. Nothing runs automatically. Hand off only work the owner wants done there. Requires task:write; repeating a request is harmless.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "format": "uuid",
+          "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+        },
+        "assignee": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "maxLength": 80
+        }
+      },
+      "required": [
+        "id",
+        "assignee"
       ],
       "$schema": "http://json-schema.org/draft-07/schema#",
       "additionalProperties": false

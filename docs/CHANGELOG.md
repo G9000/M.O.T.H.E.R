@@ -2,6 +2,7 @@
 
 ## 11 November 2026
 
+- Documented addressed handoffs between harnesses in the shared-context guide, harness guide, setup tool table, session instructions and design notes.
 - Added the harness guide covering `mother brief` and setup for Claude Code, Codex, Hermes, OpenClaw, ChatGPT, AnimaOS and other MCP clients, and linked it from the README and setup guide.
 - Documented pinned core memories in the shared-context guide, setup tool table, session instructions and design notes.
 - Version 0.5.0. Documented balanced context previews, checkpoint supersession, record history and `updatedSince`/`updatedBefore` windows in the shared-context guide, setup tool table, session instructions, search guide and design notes. The setup tool table now also lists the two proposal tools. The AnimaOS guide states that `localhost` is accepted. Validation entries record each change and what was not exercised.

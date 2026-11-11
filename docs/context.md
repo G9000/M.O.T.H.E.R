@@ -20,6 +20,16 @@ The response separates full-workspace counts from the bounded list returned by t
 
 For example, if a workspace has three checkpoints and no memories, a request filtered to `kind: memory` returns no previews, but its inventory still reports three recallable checkpoints. Neither that filter nor `limit: 1` makes the workspace inventory empty. Do not describe a filtered or truncated preview page as the whole workspace.
 
+## Handing work to another harness
+
+Each harness is known to M.O.T.H.E.R by the name of its grant, such as `claude-code`, `codex` or `hermes`. `mother_get_context` lists the current ones under `harnesses` (shared-access clients do not receive this list).
+
+`mother_assign_task` with `{"id": ..., "assignee": "codex"}` hands an open task (todo, doing or blocked) to that harness; another name moves it, and `"assignee": null` clears it. The receiving harness sees it under `assignedToYou` in every context read, and at the top of its `mother brief`, with who handed it over and when. `assignedToYouSummary` gives the total; up to ten are listed, oldest handoff first.
+
+The receiving harness does the work under its own model and permissions and records progress with the ordinary task statuses through `mother_write_record`; a done or cancelled task leaves `assignedToYou`. Nothing runs automatically, and a harness only finds its work when it next reads context. A task can only go to a harness with a current grant that can read it. Handing off needs `task:write`.
+
+Assignments are stored in their own table, so an executable older than 0.5.0 still reads the workspace; it simply does not show them, and its exports leave them out. Exports from 0.5.0 carry them. Grants are never exported, so after a restore, granting the same harness name again picks its waiting work back up.
+
 ## Pinned core
 
 Some things should never fall out of a first read: your name, what matters most to you, a decision you want kept. `mother_pin_record` with `{"id": ..., "pinned": true}` pins a memory or decision; `"pinned": false` unpins it. Every `mother_get_context` response then includes it under `pinned`, whatever the query, kind, time window or preview limit:

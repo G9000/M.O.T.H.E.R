@@ -553,7 +553,7 @@ fn connected_harnesses_observe_owner_soul_updates_without_restarting() {
                 .as_array()
                 .unwrap()
                 .len(),
-            10
+            11
         );
     }
     let saved = a.call(
@@ -818,6 +818,45 @@ fn a_memory_pinned_in_one_harness_is_in_every_harness_first_read() {
     assert_eq!(context["pinned"][0]["content"], "Call me Leo");
     assert_eq!(context["pinned"][0]["pinnedBy"], "harness-a");
     let bad = b.result("mother_pin_record", json!({"id":name["id"]}));
+    assert_eq!(bad["isError"], true);
+    assert_eq!(bad["structuredContent"]["error"]["code"], "INVALID_INPUT");
+}
+#[test]
+fn one_harness_hands_a_task_to_another_which_finds_it_and_finishes_it() {
+    let f = Fixture::new();
+    let mut a = Client::connect(&f.a_config);
+    let mut b = Client::connect(&f.b_config);
+    let names = a.call("mother_get_context", json!({}))["harnesses"].clone();
+    assert_eq!(names, json!(["harness-a", "harness-b"]));
+    let job = a.call(
+        "mother_write_record",
+        f.request(json!({"kind":"task","title":"Summarize the week","content":"Synthetic handoff","status":"todo"})),
+    )["record"]
+        .clone();
+    let handed = a.call(
+        "mother_assign_task",
+        json!({"id":job["id"],"assignee":"harness-b"}),
+    );
+    assert_eq!(handed["assignee"], "harness-b");
+    let waiting = b.call("mother_get_context", json!({}))["assignedToYou"].clone();
+    assert_eq!(waiting[0]["title"], "Summarize the week");
+    assert_eq!(waiting[0]["assignedBy"], "harness-a");
+    b.call(
+        "mother_write_record",
+        f.update(
+            json!({"kind":"task","title":"Summarize the week","content":"Synthetic handoff","status":"done"}),
+            &job["id"],
+            1,
+        ),
+    );
+    assert_eq!(
+        b.call("mother_get_context", json!({}))["assignedToYou"],
+        json!([])
+    );
+    let bad = a.result(
+        "mother_assign_task",
+        json!({"id":job["id"],"assignee":"nobody"}),
+    );
     assert_eq!(bad["isError"], true);
     assert_eq!(bad["structuredContent"]["error"]["code"], "INVALID_INPUT");
 }

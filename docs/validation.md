@@ -1,3 +1,17 @@
+# Addressed handoffs — 11 November 2026
+
+Committed directly to main from `e425fdb`, at the owner's request. Still version 0.5.0. No change to the v1 record, receipt or core SQLite tables; README title, poem and artwork unchanged.
+
+- New MCP tool `mother_assign_task` (and `Store::assign`) hands an open task to a harness named by its grant, moves it, or clears it with `null`. It requires `task:write`, an open task and a current receiving grant that can read the task; repeats report `changed: false`.
+- Every context read includes `assignedToYou` (open tasks handed to the caller, up to ten, with who assigned them and when) and `assignedToYouSummary`; non-shared clients also receive `harnesses`, the active grant names. `mother brief` gains a "Waiting for you" section and the harness list. Done and cancelled tasks leave `assignedToYou`. Nothing is executed.
+- Assignments live in an additive `assignments` table. Exports carry an optional `assignments` array validated against the bundle's task records; bundles without it still restore.
+- `tests/handoffs.rs` (ten tests) and a two-process stdio test failed first. The pinned tool count in the soul-update stdio test moved from 10 to 11.
+- With synthetic data, a `planner` MCP process handed a task to `hermes`; a separate `hermes` process saw it under `assignedToYou`, its brief listed it under "Waiting for you", and the real 0.4.0 executable still read the same workspace's context without error.
+- Full locked suite on macOS with Rust 1.94.0 and 1.99.1: **249 passed**, two existing optional model tests ignored. Formatting and strict Clippy passed on both.
+
+Not exercised: a real model choosing to hand work to another harness in conversation. A receiving harness only finds its work when it next starts or reads context; nothing wakes it.
+
+---
 # Harness setup and session briefing — 11 November 2026
 
 Committed directly to main from `d9df9c6`, at the owner's request. Still version 0.5.0. No store, schema, tool or grant change; README title, poem and artwork unchanged (one link added to the link row).

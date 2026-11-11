@@ -42,6 +42,8 @@ Context and search accept an optional half-open window on each record's last upd
 
 Pinned core records live in an additive `pins` table keyed by record ID, created on first use and ignored by older executables. Every context read returns the visible, still-active pinned records in full up to a per-record bound, outside the preview limit; the workspace holds at most twelve pins. Pinning requires the record kind's write scope and is idempotent. Exports carry pins as an optional extension validated against the bundle's records.
 
+Addressed handoffs name a receiving harness by its client ID in an additive `assignments` table keyed by task ID. Assigning requires `task:write`, an open task and a current receiving grant that can read it. Context returns the caller's open assigned tasks outside the preview limit, plus the active client names for non-shared clients. M.O.T.H.E.R still runs nothing: the receiving harness acts under its own permissions and reports through ordinary task revisions.
+
 ## Local retrieval layer (v0.3.0)
 
 The existing search tool and owner CLI share local Candle inference and a disposable SQLite vector sidecar. Canonical SQLite records remain authoritative. Cache keys bind workspace/generation, model/profile, record revision and text digest; search rechecks grants and current canonical state before returning. Hybrid retrieval preserves exact identifiers and adds meaning-based candidates. Missing or busy infrastructure produces explicit literal fallback.

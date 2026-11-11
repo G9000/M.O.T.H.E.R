@@ -65,6 +65,7 @@ fn validate(mut v: Value) -> Result<Value> {
             "omittedExternalSources",
             "inbox",
             "pins",
+            "assignments",
         ],
     )?;
     integer(&v, "schemaVersion", 1, 1)?;
@@ -175,6 +176,9 @@ fn validate(mut v: Value) -> Result<Value> {
     if let Some(pins) = v.get("pins") {
         crate::pins::validate(pins, &records)?;
     }
+    if let Some(assignments) = v.get("assignments") {
+        crate::handoffs::validate(assignments, &records)?;
+    }
     let omitted = bundle_sources(&records, &operations, v.get("inbox"))?;
     let supplied = array(&v, "omittedExternalSources", usize::MAX)?
         .iter()
@@ -229,6 +233,9 @@ impl Store {
         if let Some(pins) = crate::pins::export(&tx)? {
             bundle["pins"] = pins;
         }
+        if let Some(assignments) = crate::handoffs::export(&tx)? {
+            bundle["assignments"] = assignments;
+        }
         let bundle = validate(bundle)?;
         tx.commit()?;
         Ok(bundle)
@@ -262,6 +269,9 @@ impl Store {
             }
             if let Some(pins) = bundle.get("pins") {
                 crate::pins::restore(conn, pins)?;
+            }
+            if let Some(assignments) = bundle.get("assignments") {
+                crate::handoffs::restore(conn, assignments)?;
             }
             crate::inbox::check_capacity(conn)?;
             Ok(())

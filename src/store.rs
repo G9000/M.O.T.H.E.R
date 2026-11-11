@@ -565,6 +565,13 @@ impl Store {
         let (pinned, pinned_summary) = crate::pins::context(&tx, &access)?;
         result["pinned"] = pinned;
         result["pinnedSummary"] = pinned_summary;
+        let (assigned, assigned_summary) =
+            crate::handoffs::assigned_to(&tx, &auth.client_id, &access)?;
+        result["assignedToYou"] = assigned;
+        result["assignedToYouSummary"] = assigned_summary;
+        if let Some(names) = crate::handoffs::harnesses(&tx, &access)? {
+            result["harnesses"] = names;
+        }
         if access.mode != AccessMode::Shared {
             result["persona"] = persona(&tx)?;
         } else {

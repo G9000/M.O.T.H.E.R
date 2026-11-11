@@ -129,6 +129,7 @@ For your first real handoff, use synthetic material: save a tea preference and a
 | mother_write_record | Create or revise a typed record | matching kind:write |
 | mother_checkpoint | Save a continuation checkpoint | checkpoint:write |
 | mother_pin_record | Pin or unpin a memory or decision in the always-included core | matching kind:write |
+| mother_assign_task | Hand an open task to another harness by name, or clear it | task:write |
 | mother_propose_memory | Submit a memory, decision or task for owner review | context:propose or matching kind:write |
 | mother_get_proposal | Read a submitted proposal and its review outcome | read |
 
