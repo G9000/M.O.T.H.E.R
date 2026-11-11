@@ -14,6 +14,10 @@ Each command below takes the private config that `mother grant` printed. All of 
 
 Each grant name is also the harness's name for handoffs. A task handed to `codex` with `mother_assign_task` appears at the top of Codex's briefing and under `assignedToYou` in its context the next time it starts. See [handing work to another harness](context.md#handing-work-to-another-harness).
 
+## Starting a harness on a handoff
+
+`mother launch <task> --launcher <name>` starts a harness on an open task through a launcher you declared, and records the run. See [the hearth](hearth.md).
+
 ## Her session briefing
 
 ```powershell

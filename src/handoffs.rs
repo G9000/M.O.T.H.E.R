@@ -151,6 +151,62 @@ pub(crate) fn restore(conn: &Connection, assignments: &Value) -> Result<()> {
     Ok(())
 }
 
+/// Validate and apply an assignment inside the caller's transaction; true if it changed.
+///
+/// The caller has already checked its own authority. `by` is recorded as the assigner.
+pub(crate) fn set(tx: &Connection, id: &str, assignee: Option<&str>, by: &str) -> Result<bool> {
+    let (record, _) = store::read_record(tx, id)?;
+    if record["kind"] != "task" {
+        return Err(invalid("Only tasks can be handed to a harness"));
+    }
+    if let Some(name) = assignee {
+        if !matches!(
+            record["status"].as_str(),
+            Some("todo" | "doing" | "blocked")
+        ) {
+            return Err(invalid(
+                "Only open tasks (todo, doing or blocked) can be handed off",
+            ));
+        }
+        let revoked: Option<i64> = tx
+            .query_row("SELECT revoked FROM clients WHERE id=?", [name], |r| {
+                r.get(0)
+            })
+            .optional()?;
+        if revoked != Some(0) {
+            return Err(invalid(
+                "No current harness has that name; use one listed in context",
+            ));
+        }
+        if !access::load(tx, name)?.allows(id) {
+            return Err(invalid("That harness is not allowed to read this task"));
+        }
+    }
+    tx.execute_batch(SCHEMA)?;
+    let current: Option<String> = tx
+        .query_row(
+            "SELECT assignee FROM assignments WHERE record_id=?",
+            [id],
+            |r| r.get(0),
+        )
+        .optional()?;
+    let changed = current.as_deref() != assignee;
+    if changed {
+        match assignee {
+            Some(name) => {
+                tx.execute(
+                    "INSERT INTO assignments VALUES (?1,?2,?3,?4) ON CONFLICT(record_id) DO UPDATE SET assignee=excluded.assignee,assigned_by=excluded.assigned_by,assigned_at=excluded.assigned_at",
+                    params![id, name, by, store::now()],
+                )?;
+            }
+            None => {
+                tx.execute("DELETE FROM assignments WHERE record_id=?", [id])?;
+            }
+        }
+    }
+    Ok(changed)
+}
+
 impl Store {
     /// Hand an open task to a named harness, move it to another, or clear it with `null`.
     ///
@@ -174,55 +230,7 @@ impl Store {
             .transaction_with_behavior(TransactionBehavior::Immediate)?;
         store::authorize(&tx, auth, "task:write")?;
         access::load(&tx, &auth.client_id)?.require(id)?;
-        let (record, _) = store::read_record(&tx, id)?;
-        if record["kind"] != "task" {
-            return Err(invalid("Only tasks can be handed to a harness"));
-        }
-        if let Some(name) = &assignee {
-            if !matches!(
-                record["status"].as_str(),
-                Some("todo" | "doing" | "blocked")
-            ) {
-                return Err(invalid(
-                    "Only open tasks (todo, doing or blocked) can be handed off",
-                ));
-            }
-            let revoked: Option<i64> = tx
-                .query_row("SELECT revoked FROM clients WHERE id=?", [name], |r| {
-                    r.get(0)
-                })
-                .optional()?;
-            if revoked != Some(0) {
-                return Err(invalid(
-                    "No current harness has that name; use one listed in context",
-                ));
-            }
-            if !access::load(&tx, name)?.allows(id) {
-                return Err(invalid("That harness is not allowed to read this task"));
-            }
-        }
-        tx.execute_batch(SCHEMA)?;
-        let current: Option<String> = tx
-            .query_row(
-                "SELECT assignee FROM assignments WHERE record_id=?",
-                [id],
-                |r| r.get(0),
-            )
-            .optional()?;
-        let changed = current != assignee;
-        if changed {
-            match &assignee {
-                Some(name) => {
-                    tx.execute(
-                        "INSERT INTO assignments VALUES (?1,?2,?3,?4) ON CONFLICT(record_id) DO UPDATE SET assignee=excluded.assignee,assigned_by=excluded.assigned_by,assigned_at=excluded.assigned_at",
-                        params![id, name, auth.client_id, store::now()],
-                    )?;
-                }
-                None => {
-                    tx.execute("DELETE FROM assignments WHERE record_id=?", [id])?;
-                }
-            }
-        }
+        let changed = set(&tx, id, assignee.as_deref(), &auth.client_id)?;
         tx.commit()?;
         Ok(json!({"id":id,"assignee":assignee,"changed":changed}))
     }

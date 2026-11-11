@@ -4,7 +4,7 @@ This is the owner's personal workspace, independent of AnimaOS. Preserve the REA
 
 Use the independent Cargo package and locked dependencies. Run `cargo fmt --all -- --check`, `cargo test --locked`, `cargo build --release --locked`, and `cargo clippy --locked --all-targets --all-features -- -D warnings`. CI runs the same four commands on Linux, macOS and Windows. Tests use synthetic context and owned temporary directories. The executable needs no Bun, Node or AnimaOS runtime.
 
-Keep personal records, tokens, private exports and runtime databases out of Git. The default private data directory is outside this repository. Do not import real conversations, modify live harness settings, or start external actions as a test. tests/fixtures contains clearly synthetic compatibility data only.
+Keep personal records, tokens, private exports and runtime databases out of Git. The default private data directory is outside this repository. Do not import real conversations, modify live harness settings, or start external actions as a test. Launches run only owner-declared launchers from the owner CLI, never from MCP input; tests launch synthetic commands only. tests/fixtures contains clearly synthetic compatibility data only.
 
 The domain contract is src/contracts.rs; contracts/mcp-tools.json preserves the advertised v1 tool schemas. MCP mutations go through Store::write and its SQLite transaction. Preserve atomic revision checks and receipts. Client identity comes from private configuration, never tool arguments. Owner CLI grant/restore operations are not MCP tools.
 

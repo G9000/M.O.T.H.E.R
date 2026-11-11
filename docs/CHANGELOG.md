@@ -2,6 +2,7 @@
 
 ## 11 November 2026
 
+- Added the hearth guide for owner-declared launchers and `mother launch`, recorded the decision to allow owner-triggered launches in the design notes and contributor guide, and linked it from the harness guide.
 - Documented addressed handoffs between harnesses in the shared-context guide, harness guide, setup tool table, session instructions and design notes.
 - Added the harness guide covering `mother brief` and setup for Claude Code, Codex, Hermes, OpenClaw, ChatGPT, AnimaOS and other MCP clients, and linked it from the README and setup guide.
 - Documented pinned core memories in the shared-context guide, setup tool table, session instructions and design notes.

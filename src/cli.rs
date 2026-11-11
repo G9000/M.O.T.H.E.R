@@ -132,6 +132,27 @@ enum Command {
         #[command(subcommand)]
         command: ModelCommand,
     },
+    /// Start a harness on an open task through a launcher you declared.
+    ///
+    /// Launchers live in hearth/launchers.json in the private data folder. The
+    /// task is handed to the launcher's harness, the run is recorded as an
+    /// action, and its output goes to a private log.
+    Launch {
+        /// The task to work on.
+        #[arg(required_unless_present = "list")]
+        task: Option<String>,
+        /// The launcher to use.
+        #[arg(long, required_unless_present = "list")]
+        launcher: Option<String>,
+        /// List declared launchers and whether each is ready.
+        #[arg(long, conflicts_with_all = ["task", "launcher", "retry_unknown"])]
+        list: bool,
+        /// Launch again although an earlier launch of this task is pending or unknown.
+        #[arg(long)]
+        retry_unknown: bool,
+        #[arg(long)]
+        db: Option<PathBuf>,
+    },
     /// Print a short briefing for a harness to load at session start.
     ///
     /// Always exits successfully: if the workspace cannot be read, it prints a
@@ -582,6 +603,66 @@ fn execute(command: Command) -> Result<()> {
                 ModelCommand::Install => embedding::install(&dir)?,
                 ModelCommand::Status => embedding::status(&dir)?,
             })
+        }
+        Command::Launch {
+            task,
+            launcher,
+            list,
+            retry_unknown,
+            db,
+        } => {
+            use mother::launch;
+            let path = launch::launchers_path()?;
+            let launchers = launch::load(&path)?;
+            if list {
+                let rows: Vec<Value> = launchers
+                    .iter()
+                    .map(|(name, l)| {
+                        let problem = l.problem();
+                        json!({"name":name,"harness":l.harness,"command":l.command,"ready":problem.is_none(),"problem":problem})
+                    })
+                    .collect();
+                return print_json(json!({"launchersFile":path,"launchers":rows}));
+            }
+            let (Some(task), Some(name)) = (task, launcher) else {
+                unreachable!("clap requires a task and a launcher without --list")
+            };
+            let chosen = launchers.get(&name).ok_or_else(|| {
+                Error::domain(
+                    "INVALID_INPUT",
+                    format!("No launcher named {name} in {}", path.display()),
+                )
+            })?;
+            if let Some(problem) = chosen.problem() {
+                return Err(Error::domain(
+                    "INVALID_INPUT",
+                    format!("Launcher {name} cannot run: {problem}"),
+                ));
+            }
+            let mut store = Store::open(&db_path(db)?)?;
+            let action = store.begin_launch(&task, &name, chosen, retry_unknown)?;
+            let action_id = action["id"].as_str().unwrap_or_default().to_owned();
+            let log = launch::log_path(&action_id)?;
+            let outcome = launch::run(chosen, &task, &log)?;
+            store.finish_launch(&action, &outcome, &log)?;
+            print_json(
+                json!({"action":action_id,"task":task,"launcher":name,"harness":chosen.harness,"status":outcome.status,"exitCode":outcome.exit_code,"seconds":outcome.seconds,"log":log}),
+            )?;
+            if outcome.status == "succeeded" {
+                Ok(())
+            } else {
+                Err(Error::domain(
+                    "LAUNCH",
+                    format!(
+                        "The launch {}; see its log and action record.",
+                        if outcome.status == "unknown" {
+                            "hit its timeout and its outcome is unknown"
+                        } else {
+                            "failed"
+                        }
+                    ),
+                ))
+            }
         }
         Command::Brief { config } => {
             let brief = (|| -> Result<String> {

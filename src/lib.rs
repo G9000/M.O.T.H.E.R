@@ -8,6 +8,7 @@ pub mod error;
 mod handoffs;
 mod history;
 mod inbox;
+pub mod launch;
 pub mod limits;
 mod pins;
 mod portability;

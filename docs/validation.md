@@ -1,3 +1,17 @@
+# The hearth, stage 1: owner-triggered launches — 11 November 2026
+
+Committed directly to main from `d485ebb`, at the owner's request after reviewing the proposal. Still version 0.5.0. No MCP tool, schema, record-shape or grant change; README title, poem and artwork unchanged. This deliberately relaxes the original "runs nothing" rule for the owner CLI only, recorded in the design notes and contributor guide.
+
+- `mother launch <task> --launcher <name>` runs only launchers declared in the private `hearth/launchers.json`: absolute command, fixed arguments with `{prompt}` and `{task}`, optional working folder, timeout (default 1,800 s, at most 86,400), no shell. `mother launch --list` reports each launcher's readiness and problem.
+- A launch checks the task is open, refuses while an earlier launch of it is pending or unknown (unless `--retry-unknown`), hands the task to the launcher's harness through the same checks as `mother_assign_task`, records a pending `action` by `@owner-launch` referencing the task, runs the command with output to a private log under `hearth/runs/`, and records `succeeded`, `failed` or `unknown` (stopped at its timeout) as the action's next revision. The prompt is fixed text naming the task ID only.
+- The assignment checks were moved into `handoffs::set` so the tool and launches share them; the handoff tests are unchanged and pass.
+- `tests/launch.rs` (six tests, two Unix-only) failed first. They cover a successful launch with its action, assignment and log; a failing command; a timeout recorded as unknown that blocks a blind relaunch until `--retry-unknown`; a prompt that carries the task ID and not a hostile task title; refusals that record and run nothing (missing file, unknown or relative launcher, unknown harness, closed task, bad ID); and the readiness list.
+- With synthetic data, a declared launcher started the real executable as a stand-in harness; the run succeeded, its log held that harness's briefing, and the runs folder was created owner-only.
+- Full locked suite on macOS with Rust 1.94.0 and 1.99.1: **255 passed**, two existing optional model tests ignored. Formatting and strict Clippy passed on both.
+
+Not exercised: launching a real Claude Code, Codex, Hermes or OpenClaw run, and Windows launches outside CI. The example launcher arguments in docs/hearth.md (`claude -p`, `codex exec`) should be checked against each harness's current CLI. Output logs are not size-limited.
+
+---
 # Addressed handoffs — 11 November 2026
 
 Committed directly to main from `e425fdb`, at the owner's request. Still version 0.5.0. No change to the v1 record, receipt or core SQLite tables; README title, poem and artwork unchanged.

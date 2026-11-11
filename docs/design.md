@@ -44,6 +44,12 @@ Pinned core records live in an additive `pins` table keyed by record ID, created
 
 Addressed handoffs name a receiving harness by its client ID in an additive `assignments` table keyed by task ID. Assigning requires `task:write`, an open task and a current receiving grant that can read it. Context returns the caller's open assigned tasks outside the preview limit, plus the active client names for non-shared clients. M.O.T.H.E.R still runs nothing: the receiving harness acts under its own permissions and reports through ordinary task revisions.
 
+## Owner-triggered launches (decision, 11 November 2026)
+
+The first release ran nothing: no agent loop, no tool execution. That still holds for the MCP server and every client. As a deliberate change, the owner CLI can now start a harness through `mother launch`, using only launchers the owner declared in a private file: an absolute command, fixed arguments with `{prompt}` and `{task}` placeholders, an optional working folder and a timeout, run without a shell. The prompt names the task by ID only. Each launch hands the task to the launcher's harness and is recorded as an `action` by `@owner-launch`, pending before the command starts and settled after it ends; a timeout is recorded as `unknown`, and an unresolved launch blocks another launch of the same task until the owner retries explicitly. The launched harness acts under its own grant and permissions.
+
+M.O.T.H.E.R choosing launches herself (proposals for approval, then launches within owner-set budgets) is a later stage and requires its own decision. See [the hearth](hearth.md).
+
 ## Local retrieval layer (v0.3.0)
 
 The existing search tool and owner CLI share local Candle inference and a disposable SQLite vector sidecar. Canonical SQLite records remain authoritative. Cache keys bind workspace/generation, model/profile, record revision and text digest; search rechecks grants and current canonical state before returning. Hybrid retrieval preserves exact identifiers and adds meaning-based candidates. Missing or busy infrastructure produces explicit literal fallback.
