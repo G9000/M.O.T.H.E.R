@@ -167,6 +167,56 @@ pub(crate) fn timestamp(s: &str) -> Result<DateTime<Utc>> {
         .map(|t| t.with_timezone(&Utc))
         .map_err(|_| invalid("Invalid timestamp"))
 }
+/// Parse an optional `updatedSince`/`updatedBefore` bound into the stored
+/// timestamp form (UTC, whole milliseconds), so bounds compare as plain text.
+///
+/// Accepts RFC 3339 with any offset, or a calendar date meaning midnight UTC.
+/// Extra precision rounds up: stored times are whole milliseconds, so this keeps
+/// "at or after" and "before" exact.
+fn time_bound(v: &Value, key: &str) -> Result<Option<String>> {
+    let Some(raw) = v.get(key) else {
+        return Ok(None);
+    };
+    let text = raw
+        .as_str()
+        .filter(|s| s.len() <= 40)
+        .ok_or_else(|| invalid(format!("Invalid {key}")))?;
+    let instant = if text.len() == 10 {
+        chrono::NaiveDate::parse_from_str(text, "%Y-%m-%d")
+            .ok()
+            .and_then(|d| d.and_hms_opt(0, 0, 0))
+            .map(|t| t.and_utc())
+    } else {
+        DateTime::parse_from_rfc3339(text)
+            .ok()
+            .map(|t| t.with_timezone(&Utc))
+    }
+    .ok_or_else(|| {
+        invalid(format!(
+            "{key} must be an RFC 3339 time or a YYYY-MM-DD date"
+        ))
+    })?;
+    let extra = i64::from(instant.timestamp_subsec_nanos() % 1_000_000);
+    let instant = if extra == 0 {
+        instant
+    } else {
+        instant + chrono::Duration::nanoseconds(1_000_000 - extra)
+    };
+    Ok(Some(
+        instant.to_rfc3339_opts(chrono::SecondsFormat::Millis, true),
+    ))
+}
+/// An optional half-open window on `updatedAt`: since inclusive, before exclusive.
+pub(crate) fn time_window(v: &Value) -> Result<(Option<String>, Option<String>)> {
+    let since = time_bound(v, "updatedSince")?;
+    let before = time_bound(v, "updatedBefore")?;
+    if let (Some(s), Some(b)) = (&since, &before)
+        && s >= b
+    {
+        return Err(invalid("updatedSince must be earlier than updatedBefore"));
+    }
+    Ok((since, before))
+}
 pub(crate) fn normalize_draft(mut v: Value) -> Result<Value> {
     let kind = Kind::parse(string(&v, "kind")?)?;
     let mut allowed = vec![

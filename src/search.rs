@@ -48,10 +48,23 @@ struct Query {
     kind: Option<String>,
     limit: usize,
     mode: Mode,
+    updated_since: Option<String>,
+    updated_before: Option<String>,
 }
 impl Query {
     fn parse(v: Value) -> Result<Self> {
-        contracts::strict(&v, &["query", "kind", "limit", "mode"])?;
+        contracts::strict(
+            &v,
+            &[
+                "query",
+                "kind",
+                "limit",
+                "mode",
+                "updatedSince",
+                "updatedBefore",
+            ],
+        )?;
+        let (updated_since, updated_before) = contracts::time_window(&v)?;
         let text = contracts::normalize_search_query(contracts::string(&v, "query")?)?;
         let kind = v
             .get("kind")
@@ -81,12 +94,24 @@ impl Query {
             kind,
             limit,
             mode,
+            updated_since,
+            updated_before,
         })
     }
     fn includes(&self, r: &Record) -> bool {
+        // Stored and bound times share one fixed-width UTC form, so text order is time order.
+        let updated = r.value["updatedAt"].as_str().unwrap_or_default();
         self.kind
             .as_ref()
             .is_none_or(|k| r.value["kind"].as_str() == Some(k))
+            && self
+                .updated_since
+                .as_deref()
+                .is_none_or(|since| updated >= since)
+            && self
+                .updated_before
+                .as_deref()
+                .is_none_or(|before| updated < before)
     }
 }
 #[derive(Debug)]
@@ -239,6 +264,8 @@ impl Snapshot {
         self.base["records"] = json!(records);
         self.base["omitted"] = json!(omitted);
         self.base["search"] = metadata;
+        self.base["search"]["updatedSince"] = json!(query.updated_since);
+        self.base["search"]["updatedBefore"] = json!(query.updated_before);
         if self.base["access"]["mode"] == "shared" {
             self.base["search"]["scope"] = json!("granted_records");
         }

@@ -162,6 +162,47 @@ fn nothing_to_index_is_not_reported_as_an_incomplete_index() {
     assert_eq!(result["search"]["semanticUsed"], false);
 }
 #[test]
+fn a_time_window_limits_search_candidates_and_is_reported() {
+    let (d, mut s, a) = fixture();
+    let old = write(&mut s, &a, "Synthetic tea note", None, "active");
+    std::thread::sleep(std::time::Duration::from_millis(5));
+    let recent = write(&mut s, &a, "Synthetic tea plan", None, "active");
+    let search = Search::new(d.path().join("missing-model"));
+    let result = search
+        .search(
+            &mut s,
+            &a,
+            json!({"query":"tea","mode":"literal","updatedSince":recent["updatedAt"]}),
+        )
+        .unwrap();
+    let ids: Vec<&Value> = result["records"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|r| &r["id"])
+        .collect();
+    assert_eq!(ids, [&recent["id"]]);
+    assert_eq!(result["search"]["eligibleRecords"], 1);
+    assert_eq!(result["search"]["updatedSince"], recent["updatedAt"]);
+    assert_eq!(result["search"]["updatedBefore"], Value::Null);
+    let result = search
+        .search(
+            &mut s,
+            &a,
+            json!({"query":"tea","mode":"literal","updatedBefore":recent["updatedAt"]}),
+        )
+        .unwrap();
+    assert_eq!(result["records"][0]["id"], old["id"]);
+    assert_eq!(result["records"].as_array().unwrap().len(), 1);
+    assert_eq!(
+        search
+            .search(&mut s, &a, json!({"query":"tea","updatedSince":"soon"}))
+            .unwrap_err()
+            .code(),
+        "INVALID_INPUT"
+    );
+}
+#[test]
 fn similarity_floor_excludes_unrelated_vectors_and_validates_query_vectors() {
     let (_d, mut s, a) = fixture();
     write(&mut s, &a, "A record", None, "active");

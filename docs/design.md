@@ -38,6 +38,8 @@ A checkpoint write can name the earlier active checkpoint it replaces. The store
 
 Record history is a read-only projection of retained mutation receipts, each of which already holds the complete record it produced. It needs the read scope and full-context access, and adds no table, column or write path.
 
+Context and search accept an optional half-open window on each record's last update time. Bounds are normalized to the stored UTC millisecond form, so they compare as text against the existing `updated_at` column and index; no schema change is needed.
+
 ## Local retrieval layer (v0.3.0)
 
 The existing search tool and owner CLI share local Candle inference and a disposable SQLite vector sidecar. Canonical SQLite records remain authoritative. Cache keys bind workspace/generation, model/profile, record revision and text digest; search rechecks grants and current canonical state before returning. Hybrid retrieval preserves exact identifiers and adds meaning-based candidates. Missing or busy infrastructure produces explicit literal fallback.

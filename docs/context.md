@@ -26,7 +26,15 @@ Checkpoints are saved every session, so a newest-first list soon holds nothing e
 
 For example, with thirty checkpoints, two memories, one decision and the default limit of twenty, the previews are both memories, the decision and the seventeen newest checkpoints. `selection.returnedByKind` and `selection.omittedByKind` state that split, here thirteen omitted checkpoints. A workspace that fits within the limit is returned exactly as before.
 
-With a `query` or `kind`, `selection.order` is `recent` and previews are the newest matches, as before. Shared clients are balanced within their granted records only. `mother_search_context` is unchanged.
+With a `query`, `kind` or time window, `selection.order` is `recent` and previews are the newest matches, as before. Shared clients are balanced within their granted records only. `mother_search_context` is unchanged.
+
+## Time windows
+
+`updatedSince` and `updatedBefore` limit previews to records last updated in that window: at or after `updatedSince`, and strictly before `updatedBefore`. Either can be used alone. Each accepts RFC 3339 with an offset, such as `2026-11-11T09:30:00Z` or `2026-11-11T11:30:00+02:00`, or a plain date, `2026-11-11`, meaning midnight UTC. A time without an offset is rejected rather than guessed. Bounds are converted to UTC with whole milliseconds, rounding extra precision up, and echoed in `selection` in that form.
+
+A window narrows `selection` and `records` only. Inventory and unsettled work stay workspace-wide, so "nothing this week" is never read as an empty workspace. `mother_search_context` accepts the same two fields and reports them under `search`.
+
+The window is on the time a record was last saved, not on dates written inside it. A memory saved today about last year matches today.
 
 ## Earlier revisions
 

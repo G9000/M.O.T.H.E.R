@@ -1,3 +1,15 @@
+# Time windows for context and search — 11 November 2026
+
+Committed directly to main from `7806e90`, at the owner's request. No SQLite schema, grant, stored-record, receipt or export change; README title, poem and artwork unchanged.
+
+- `mother_get_context` and `mother_search_context` accept optional `updatedSince` (inclusive) and `updatedBefore` (exclusive). Each takes RFC 3339 with an offset or a `YYYY-MM-DD` date (midnight UTC). Bounds are normalized to UTC whole milliseconds, rounding extra precision up so comparisons against stored times stay exact, and echoed in `selection` or `search`. An unparseable value, a time without an offset, or a since that is not before the before is `INVALID_INPUT`.
+- A window narrows previews and search candidates only; inventory and unsettled work stay workspace-wide. Any window makes context order `recent`, like a query or kind.
+- `tests/time_window.rs` (five tests) and a search unit test failed first. They cover inclusive and exclusive bounds, combination with kind and query, normalization of dates, offsets and sub-millisecond input, empty windows, and malformed input. The exact-shape selection test gained the two new keys.
+- Full locked suite on macOS with Rust 1.94.0 and 1.99.1: **220 passed**, two existing optional model tests ignored. Formatting and strict Clippy passed on both.
+
+Not exercised: no model in a connected harness has used a window in a real conversation. The `mother search` and `mother context` CLI commands do not take window flags. An executable older than this change rejects either field as unknown.
+
+---
 # Record history — 11 November 2026
 
 Committed directly to main from `ceb74a7`, at the owner's request. No SQLite schema, grant, stored-record, receipt or export change; README title, poem and artwork unchanged.
