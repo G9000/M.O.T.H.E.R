@@ -1,5 +1,9 @@
 # Documentation changes
 
+## 11 November 2026
+
+- Described the artwork for screen readers, named the runtime in one line and linked the semantic search, client access, connection health, design, validation and changes guides from the README. Title, poem and artwork are unchanged.
+
 ## 10 November 2026
 
 - Refined the poem's opening to echo its sheltering imagery and linked the shared-context guide from the README.

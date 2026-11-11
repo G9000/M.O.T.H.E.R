@@ -25,7 +25,7 @@
 
 <hr>
 
-![MOTHER](assets/mother.png)
+![A veiled, six-winged figure in white holds a red-haired maiden in a dark robe, beneath wisteria beside still water.](assets/mother.png)
 
 <p align="center">
   A personal context layer for your AI companion, across harnesses.
@@ -37,6 +37,16 @@
 </p>
 
 <p align="center">
+  One Rust executable and one SQLite file, on your own machine.<br>
+  Each harness connects over local MCP with its own grant.
+</p>
+
+<p align="center">
   <a href="docs/setup.md">Make it yours</a> &middot; <a href="docs/terminal.md">Open her terminal</a> &middot; <a href="docs/living-memory.md">Keep what matters</a><br>
-  <a href="docs/context.md">Read her context</a> &middot; <a href="docs/chatgpt.md">Bring her to ChatGPT</a> &middot; <a href="docs/animaos.md">Connect AnimaOS</a>
+  <a href="docs/context.md">Read her context</a> &middot; <a href="docs/chatgpt.md">Bring her to ChatGPT</a> &middot; <a href="docs/animaos.md">Connect AnimaOS</a><br>
+  <a href="docs/semantic-search.md">Search by meaning</a> &middot; <a href="docs/client-access.md">Choose what each client sees</a> &middot; <a href="docs/health.md">Check her connection</a>
+</p>
+
+<p align="center">
+  <sub><a href="docs/design.md">Design</a> &middot; <a href="docs/validation.md">Validation</a> &middot; <a href="docs/CHANGELOG.md">Changes</a></sub>
 </p>
