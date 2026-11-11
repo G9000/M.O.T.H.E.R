@@ -2,6 +2,7 @@ mod animaos;
 mod cli;
 mod connection;
 mod health;
+mod lock;
 mod mcp;
 mod tui;
 

@@ -684,7 +684,7 @@ pub fn disconnect() -> Result<Status> {
     Ok(after)
 }
 struct OperationLock {
-    _file: fs::File,
+    _lock: crate::lock::FileLock,
 }
 impl OperationLock {
     fn acquire() -> Result<Self> {
@@ -694,7 +694,7 @@ impl OperationLock {
     }
     fn acquire_at(path: &Path) -> Result<Self> {
         use std::io::Read;
-        let mut file = match mother::config::create_private_file(path) {
+        let file = match mother::config::create_private_file(path) {
             Ok(file) => {
                 drop(file);
                 fs::OpenOptions::new().read(true).write(true).open(path)
@@ -710,10 +710,11 @@ impl OperationLock {
             Err(_) => return Err(failure("Cannot create connection lock.")),
         }
         .map_err(|_| failure("Cannot open connection lock."))?;
-        fs2::FileExt::try_lock_exclusive(&file)
+        let mut lock = crate::lock::FileLock::try_exclusive(file)
             .map_err(|_| failure("Another connection operation is active."))?;
+        let file = lock.file();
         let mut content = String::new();
-        std::io::Read::by_ref(&mut file)
+        std::io::Read::by_ref(file)
             .take(128)
             .read_to_string(&mut content)
             .map_err(|_| failure("Cannot inspect connection lock."))?;
@@ -726,7 +727,7 @@ impl OperationLock {
             file.write_all(b"MOTHER connection operation lock v1\n")?;
             file.sync_all()?;
         }
-        Ok(Self { _file: file })
+        Ok(Self { _lock: lock })
     }
 }
 /// Enable or disable explicit Windows sign-in startup without storing keys.

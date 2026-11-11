@@ -1,5 +1,4 @@
 //! Optional owner-authorized connection to a loopback AnimaOS daemon.
-use fs2::FileExt;
 use mother::{
     access::{AccessMode, ClientAccess},
     config::{create_private_file, load_config, read_json},
@@ -163,7 +162,7 @@ struct BindingConnection {
 }
 
 struct Local {
-    _lock: fs::File,
+    _lock: crate::lock::FileLock,
     binding_path: PathBuf,
     config_path: PathBuf,
     binding: Binding,
@@ -230,7 +229,11 @@ impl Local {
                 .open(&lock_path)
                 .map_err(|_| failure("Cannot open the AnimaOS connection lock."))?,
         };
-        lock.try_lock_exclusive().map_err(|_|failure("This agent is already being connected from MOTHER. Wait for that attempt to finish."))?;
+        let lock = crate::lock::FileLock::try_exclusive(lock).map_err(|_| {
+            failure(
+                "This agent is already being connected from MOTHER. Wait for that attempt to finish.",
+            )
+        })?;
         let config_path = clients.join(format!("{name}.private.json"));
         let binding_path = clients.join(format!("{name}.binding.json"));
         let mut store = Store::open(&database)
