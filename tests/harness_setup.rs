@@ -172,12 +172,14 @@ fn connection(w: &Workspace, format: &str) -> String {
         &["connection", "--config", w.config(), "--format", format],
     )
 }
+/// A resolved path as setup output shows it: without Windows' `\\?\` prefix.
+fn plain(path: &Path) -> String {
+    let resolved = std::fs::canonicalize(path).unwrap();
+    let text = resolved.to_str().unwrap();
+    text.strip_prefix(r"\\?\").unwrap_or(text).to_owned()
+}
 fn exe() -> String {
-    std::fs::canonicalize(env!("CARGO_BIN_EXE_mother"))
-        .unwrap()
-        .to_str()
-        .unwrap()
-        .to_owned()
+    plain(Path::new(env!("CARGO_BIN_EXE_mother")))
 }
 /// The first `{` … last `}` block in a setup printout, parsed as JSON.
 fn json_block(out: &str) -> Value {
@@ -189,8 +191,7 @@ fn json_block(out: &str) -> Value {
 fn claude_code_setup_registers_her_and_briefs_every_session() {
     let w = Workspace::new("Synthetic persona");
     let out = connection(&w, "claude-code");
-    let config = std::fs::canonicalize(&w.config).unwrap();
-    let config = config.to_str().unwrap();
+    let config = plain(&w.config);
     assert!(
         out.contains(&format!(
             "claude mcp add --transport stdio --scope user mother -- \"{}\" mcp --config \"{config}\"",
@@ -215,7 +216,7 @@ fn claude_code_setup_registers_her_and_briefs_every_session() {
 #[test]
 fn hermes_openclaw_and_generic_setup_launch_the_same_server() {
     let w = Workspace::new("Synthetic persona");
-    let config = std::fs::canonicalize(&w.config).unwrap();
+    let config = plain(&w.config);
     let args = json!(["mcp", "--config", config]);
     let hermes = connection(&w, "hermes");
     assert!(hermes.contains("mcp_servers:\n  mother:\n"), "{hermes}");
@@ -252,7 +253,7 @@ fn hermes_openclaw_and_generic_setup_launch_the_same_server() {
 #[test]
 fn setup_refuses_paths_a_shell_would_misread() {
     let w = Workspace::new("Synthetic persona");
-    let odd = w.dir.path().join("clients/quote\"name.private.json");
+    let odd = w.dir.path().join("clients/dollar$name.private.json");
     text(
         w.dir.path(),
         &[
