@@ -1,3 +1,16 @@
+# Checkpoint supersession — 11 November 2026
+
+Committed directly to main from `8d3d842`, at the owner's request. No SQLite schema, grant, stored-record or receipt-shape change; README title, poem and artwork unchanged.
+
+- `mother_checkpoint` and `mother_write_record` accept an optional `supersedes` object with the ID and expected revision of an earlier active checkpoint. Saving the new checkpoint and retiring the earlier one commit in one transaction. The retirement is a normal revision attributed to the writing client, with its own receipt under a server-generated operation ID. The advertised tool schemas, descriptions, server instructions and harness session instructions state this.
+- Rejected without writing anything: a stale target revision or an already superseded target (`CONFLICT`), a missing target (`NOT_FOUND`), a target that is not a checkpoint (`KIND_MISMATCH`), and `supersedes` on a non-checkpoint record, with malformed fields or naming the record being revised (`INVALID_INPUT`). A retry of the same operation returns the same receipt and retires nothing further; the same operation ID with a different target is `OPERATION_REUSED`.
+- `tests/supersede.rs` covers each of those, plus export and restore of a workspace containing a retirement. The tests failed first.
+- A synthetic stdio session against the built executable saved a checkpoint, saved a second one superseding it, and read context showing one recallable checkpoint and one retained historical record.
+- Full locked suite on macOS with Rust 1.94.0 and 1.99.1: **204 passed**, two existing optional model tests ignored. Formatting and strict Clippy passed on both.
+
+Not exercised: no model in a connected harness has chosen to pass `supersedes` in a real conversation. Checkpoints that are already active are not retired retroactively. An executable older than this change rejects a request containing `supersedes` as an unknown field, so update every installed copy before relying on it.
+
+---
 # Balanced context previews and lock release — 11 November 2026
 
 Committed directly to main from `9369de0`, at the owner's request. No schema, grant, stored-record or tool-input change; README title, poem and artwork unchanged.

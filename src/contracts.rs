@@ -268,6 +268,7 @@ impl Write {
                 "id",
                 "expectedRevision",
                 "record",
+                "supersedes",
             ],
         )?;
         for key in ["workspaceId", "generation", "operationId"] {
@@ -285,10 +286,21 @@ impl Write {
                 .cloned()
                 .ok_or_else(|| invalid("Missing record"))?,
         )?;
-        Ok(Self {
-            kind: Kind::parse(string(&v["record"], "kind")?)?,
-            value: v,
-        })
+        let kind = Kind::parse(string(&v["record"], "kind")?)?;
+        if let Some(target) = v.get("supersedes") {
+            strict(target, &["id", "expectedRevision"])?;
+            let target_id = string(target, "id")?;
+            id(target_id)?;
+            let revision = integer(target, "expectedRevision", 1, 9007199254740991)?;
+            if kind != Kind::Checkpoint {
+                return Err(invalid("Only a checkpoint can supersede a checkpoint"));
+            }
+            if v.get("id").and_then(Value::as_str) == Some(target_id) {
+                return Err(invalid("A checkpoint cannot supersede itself"));
+            }
+            v["supersedes"] = serde_json::json!({"id":target_id,"expectedRevision":revision});
+        }
+        Ok(Self { kind, value: v })
     }
 }
 pub(crate) fn parse_record(v: Value) -> Result<Value> {

@@ -28,6 +28,12 @@ For example, with thirty checkpoints, two memories, one decision and the default
 
 With a `query` or `kind`, `selection.order` is `recent` and previews are the newest matches, as before. Shared clients are balanced within their granted records only. `mother_search_context` is unchanged.
 
+## Replacing a checkpoint
+
+A checkpoint stays `active`, and so stays in recall, until something marks it `superseded`. When saving a checkpoint that replaces an earlier one, pass `supersedes: {"id": ..., "expectedRevision": ...}` using the ID and revision shown in that checkpoint's preview. Both changes commit together: the new checkpoint is saved and the earlier one becomes `superseded`, which moves it from recallable to retained history. If the earlier checkpoint changed, is already superseded, is missing or is not a checkpoint, nothing is saved.
+
+Only one checkpoint can be named per save, and only by a checkpoint. Existing checkpoints are not retired automatically; an older pile can be cleared by superseding them one at a time or by revising their status with `mother_write_record`.
+
 ## Unsettled work
 
 `unsettledWork` tracks tasks in doing/blocked states and actions in pending/unknown states. `unsettledWorkSummary` reports the workspace-wide total, returned count, omitted count and that scope. The existing `unsettledWorkTruncated` flag remains available.

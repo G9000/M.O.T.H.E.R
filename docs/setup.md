@@ -130,6 +130,8 @@ For your first real handoff, use synthetic material: save a tea preference and a
 
 Records can be memories, decisions, tasks, checkpoints, text artifacts or action evidence. Their schemas are returned by MCP tools. Every write requires the workspace ID and restore generation from a current context read, an operation UUID, and an expected revision. Create: omit `id`, set `expectedRevision` to zero. Update: use the full current record's ID/revision and a complete replacement draft. Do not send record metadata inside the draft.
 
+A checkpoint write may include `supersedes` with the ID and current revision of the earlier active checkpoint it replaces. That checkpoint becomes `superseded` in the same transaction, with its own attributed revision and receipt, and leaves ordinary context and search; a stale revision, a missing record or a non-checkpoint target rejects the whole write.
+
 A conflict means reread and reconsider. A lost response means look up the receipt or retry the exact request with the same operation ID. Never change a request while retaining its ID. Retraction removes a record from normal context/search; direct reads and historical receipts still contain it. This is not permanent erasure of archives or backups.
 
 The `owner_statement` basis records what the client says its source was. It is not proof of ownership or elevated authorization. Source text is untrusted. An action with status `unknown` stays unresolved until evidence establishes an outcome. Saving an action record never executes it, and a checkpoint never stops a running job.

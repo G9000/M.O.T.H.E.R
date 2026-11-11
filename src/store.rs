@@ -697,7 +697,42 @@ pub(crate) fn write_transaction(
         params![actor, generation, op, fingerprint, receipt.to_string()],
     )?;
     crate::inbox::check_capacity(tx)?;
+    if let Some(target) = v.get("supersedes") {
+        supersede(tx, actor, v, target)?;
+    }
     Ok(receipt)
+}
+/// Retire the checkpoint a new one replaces, inside the caller's transaction.
+///
+/// The retirement is an ordinary attributed revision with its own receipt, so a
+/// failure here rolls back the new checkpoint as well.
+fn supersede(tx: &Connection, actor: &str, v: &Value, target: &Value) -> Result<()> {
+    let id = contracts::string(target, "id")?;
+    let (current, _) = read_record(tx, id)?;
+    if current["kind"] != "checkpoint" {
+        return Err(Error::domain(
+            "KIND_MISMATCH",
+            "Only a checkpoint can be superseded by a checkpoint.",
+        ));
+    }
+    if current["revision"] != target["expectedRevision"] || current["status"] != "active" {
+        return Err(Error::domain(
+            "CONFLICT",
+            "The checkpoint to supersede changed or is no longer active; read current context before saving.",
+        ));
+    }
+    let mut draft = current;
+    if let Some(fields) = draft.as_object_mut() {
+        for key in ["id", "revision", "actor", "createdAt", "updatedAt"] {
+            fields.remove(key);
+        }
+    }
+    draft["status"] = json!("superseded");
+    let retirement = contracts::Write::parse(
+        json!({"workspaceId":v["workspaceId"],"generation":v["generation"],"operationId":uuid::Uuid::new_v4().to_string(),"id":id,"expectedRevision":target["expectedRevision"],"record":draft}),
+    )?;
+    write_transaction(tx, actor, &retirement)?;
+    Ok(())
 }
 
 #[cfg(test)]

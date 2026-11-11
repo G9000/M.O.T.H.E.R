@@ -152,7 +152,7 @@
   },
   {
     "name": "mother_write_record",
-    "description": "Create or replace a complete memory, decision, task, text artifact, action-evidence record or checkpoint. Requires matching workspace/generation, operation UUID, and expected revision. Omit id and use revision 0 to create. Updates require the current ID/revision. Action records report evidence only and do not execute actions. Sources and owner_statement are client-attributed assertions, not verified authority.",
+    "description": "Create or replace a complete memory, decision, task, text artifact, action-evidence record or checkpoint. Requires matching workspace/generation, operation UUID, and expected revision. Omit id and use revision 0 to create. Updates require the current ID/revision. Action records report evidence only and do not execute actions. Sources and owner_statement are client-attributed assertions, not verified authority. supersedes is accepted only when the record is a checkpoint.",
     "inputSchema": {
       "type": "object",
       "properties": {
@@ -640,6 +640,27 @@
               "additionalProperties": false
             }
           ]
+        },
+        "supersedes": {
+          "type": "object",
+          "description": "For a checkpoint only: the earlier active checkpoint this one replaces. It is marked superseded in the same transaction; a stale revision rejects the whole save.",
+          "properties": {
+            "id": {
+              "type": "string",
+              "format": "uuid",
+              "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+            },
+            "expectedRevision": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 9007199254740991
+            }
+          },
+          "required": [
+            "id",
+            "expectedRevision"
+          ],
+          "additionalProperties": false
         }
       },
       "required": [
@@ -664,7 +685,7 @@
   },
   {
     "name": "mother_checkpoint",
-    "description": "Save an explicit continuation checkpoint after settling or pausing work. Record completed work, open questions, next step and canonical references. This tool does not stop jobs or transfer permissions.",
+    "description": "Save an explicit continuation checkpoint after settling or pausing work. Record completed work, open questions, next step and canonical references. This tool does not stop jobs or transfer permissions. To replace an earlier checkpoint, pass supersedes with its id and current revision from mother_get_context; it leaves ordinary recall in the same transaction, so only the current handoff is recalled.",
     "inputSchema": {
       "type": "object",
       "properties": {
@@ -1152,6 +1173,27 @@
               "additionalProperties": false
             }
           ]
+        },
+        "supersedes": {
+          "type": "object",
+          "description": "For a checkpoint only: the earlier active checkpoint this one replaces. It is marked superseded in the same transaction; a stale revision rejects the whole save.",
+          "properties": {
+            "id": {
+              "type": "string",
+              "format": "uuid",
+              "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+            },
+            "expectedRevision": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 9007199254740991
+            }
+          },
+          "required": [
+            "id",
+            "expectedRevision"
+          ],
+          "additionalProperties": false
         }
       },
       "required": [
