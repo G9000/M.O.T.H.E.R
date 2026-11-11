@@ -21,7 +21,7 @@ When ready, ask the AnimaOS agent:
 
 Discovery verifies that AnimaOS reached the MCP server and listed the required tools. A real conversation read/proposal is a separate acceptance step. Setup never claims that it ran a model or saved a personal memory merely because discovery passed.
 
-The address must be a numeric loopback HTTP address. Redirects and remote addresses are rejected, so owner credentials stay on this computer. No tunnel is needed for this local connection. AnimaOS remains an optional external harness; M.O.T.H.E.R's database, persona, inbox and MCP work independently.
+The address must be a plain loopback HTTP address: `127.0.0.1`, `[::1]`, or `localhost`, which is rewritten to `127.0.0.1`. Redirects and remote addresses are rejected, so owner credentials stay on this computer. No tunnel is needed for this local connection. AnimaOS remains an optional external harness; M.O.T.H.E.R's database, persona, inbox and MCP work independently.
 
 If a connection request times out, the TUI reports uncertainty. Returning to Connect first retrieves existing server state and reconciles an exact matching entry. It does not blindly create another server or replace different launch settings. Credentials are not saved; reopening setup requires entering them again.
 

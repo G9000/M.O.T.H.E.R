@@ -182,7 +182,8 @@ impl Drop for StagingDirectory {
 ///
 /// # Errors
 /// Reports a sanitized failure for inaccessible destinations, failed downloads, mismatched
-/// assets, or an existing invalid installation. Each download has a five-minute deadline.
+/// assets, or an existing invalid installation. Each download has a five-minute deadline
+/// and fails sooner if the connection stalls for a minute.
 pub fn install(dir: &Path) -> Result<Value> {
     if !dir.is_absolute() {
         return Err(install_error("Model directory must be absolute"));
@@ -207,7 +208,9 @@ pub fn install(dir: &Path) -> Result<Value> {
         .max_redirects(5)
         .timeout_global(Some(Duration::from_secs(300)))
         .timeout_connect(Some(Duration::from_secs(30)))
-        .timeout_recv_body(Some(Duration::from_secs(60)))
+        // A stall limit, restarted on every read. A total body budget here would
+        // cap the 91 MB asset at one minute and fail on ordinary connections.
+        .timeout_per_read(Some(Duration::from_secs(60)))
         .build()
         .new_agent();
     for asset in &ASSETS {

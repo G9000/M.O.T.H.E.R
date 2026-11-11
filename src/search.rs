@@ -248,12 +248,26 @@ impl Snapshot {
 // A short matched sentence may depend on its neighbour. Include whole adjacent
 // sentences only when the resulting navigation excerpt still fits its UTF-16 budget.
 fn context_span(text: &str, start: usize, end: usize) -> (usize, usize) {
+    // A run of terminators (".\n", "?!", "...") ends one sentence. A segment
+    // without any word would otherwise stand in for the neighbouring sentence.
     let mut boundaries = vec![0];
-    boundaries.extend(
-        text.char_indices()
-            .filter(|(_, c)| matches!(c, '.' | '!' | '?' | '\n' | '\r' | '。' | '！' | '？'))
-            .map(|(i, c)| i + c.len_utf8()),
-    );
+    let mut close = |at: usize| {
+        let last = boundaries.len() - 1;
+        if text[boundaries[last]..at]
+            .chars()
+            .any(char::is_alphanumeric)
+        {
+            boundaries.push(at);
+        } else if last > 0 {
+            boundaries[last] = at;
+        }
+    };
+    for (i, c) in text.char_indices() {
+        if matches!(c, '.' | '!' | '?' | '\n' | '\r' | '。' | '！' | '？') {
+            close(i + c.len_utf8());
+        }
+    }
+    close(text.len());
     if boundaries.last().copied() != Some(text.len()) {
         boundaries.push(text.len());
     }
@@ -441,7 +455,9 @@ fn semantic_response(
             });
         }
     }
-    if indexed == 0 {
+    // With no eligible records there is nothing left to index, so the empty
+    // result below is complete rather than a fallback.
+    if indexed == 0 && eligible > 0 {
         let reason = if progress.capacity {
             "index_capacity"
         } else if unembeddable > 0 {

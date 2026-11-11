@@ -605,7 +605,13 @@ fn perform_once(
         Ok(_) => {}
     }
     let after = inspect()?;
-    if after.state == ConnectionState::Ready {
+    // The command succeeded and inspection matched this connection's own running
+    // runtime, so the effect is known even while it is still becoming ready.
+    // Keeping the marker here would block every connect after that runtime stops.
+    if matches!(
+        after.state,
+        ConnectionState::Ready | ConnectionState::Unhealthy
+    ) {
         clear_pending(pending)?;
     }
     Ok(after)
@@ -1040,6 +1046,39 @@ mod execution_tests {
         assert_eq!(result.state, ConnectionState::Unknown);
         assert!(result.detail.contains("authorization"));
         assert!(!result.detail.contains("synthetic-secret"));
+    }
+    fn succeeded() -> Result<process::Output> {
+        Ok(process::Output {
+            stdout: vec![],
+            stderr: String::new(),
+            uncertain: false,
+            success: true,
+        })
+    }
+    #[test]
+    fn verified_runtime_resolves_marker_before_it_reports_ready() {
+        for state in [ConnectionState::Ready, ConnectionState::Unhealthy] {
+            let dir = tempfile::tempdir().unwrap();
+            let marker = dir.path().join("pending");
+            let result =
+                perform_once(&marker, succeeded, || Ok(Status::new(state, "synthetic"))).unwrap();
+            assert_eq!(result.state, state);
+            assert!(
+                !marker.exists(),
+                "a started, verified runtime must not block a later connect"
+            );
+        }
+    }
+    #[test]
+    fn unverified_outcome_after_successful_command_keeps_marker() {
+        for state in [ConnectionState::Stopped, ConnectionState::Unknown] {
+            let dir = tempfile::tempdir().unwrap();
+            let marker = dir.path().join("pending");
+            let result =
+                perform_once(&marker, succeeded, || Ok(Status::new(state, "synthetic"))).unwrap();
+            assert_eq!(result.state, state);
+            assert!(marker.is_file());
+        }
     }
 }
 

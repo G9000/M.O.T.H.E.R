@@ -18,25 +18,29 @@ pub(super) struct Output {
     pub uncertain: bool,
     pub success: bool,
 }
+// The tunnel-client launches `mother mcp`, which resolves its data and model
+// directories from this environment.
+const PRESERVED: [&str; 14] = [
+    "SYSTEMROOT",
+    "WINDIR",
+    "USERPROFILE",
+    "LOCALAPPDATA",
+    "APPDATA",
+    "TEMP",
+    "TMP",
+    "HOME",
+    "PATH",
+    "LANG",
+    "DBUS_SESSION_BUS_ADDRESS",
+    "XDG_RUNTIME_DIR",
+    "MOTHER_HOME",
+    "MOTHER_MODEL_DIR",
+];
 fn preserved_environment() -> Vec<(OsString, OsString)> {
-    [
-        "SYSTEMROOT",
-        "WINDIR",
-        "USERPROFILE",
-        "LOCALAPPDATA",
-        "APPDATA",
-        "TEMP",
-        "TMP",
-        "HOME",
-        "PATH",
-        "LANG",
-        "DBUS_SESSION_BUS_ADDRESS",
-        "XDG_RUNTIME_DIR",
-        "MOTHER_HOME",
-    ]
-    .into_iter()
-    .filter_map(|key| std::env::var_os(key).map(|value| (OsString::from(key), value)))
-    .collect()
+    PRESERVED
+        .into_iter()
+        .filter_map(|key| std::env::var_os(key).map(|value| (OsString::from(key), value)))
+        .collect()
 }
 fn build_command(settings: &Settings, args: &[String], key: Option<&str>) -> Command {
     let mut cmd = Command::new(&settings.tunnel_client);
@@ -179,5 +183,11 @@ mod tests {
         assert_eq!(env["LOG_HTTP_RAW_UNSAFE"].as_deref(), Some("false"));
         assert_eq!(env["HEALTH_LISTEN_ADDR"].as_deref(), Some("127.0.0.1:0"));
         assert!(!env.contains_key("OPENAI_API_KEY"));
+    }
+    #[test]
+    fn tunnelled_server_keeps_the_owner_data_and_model_directories() {
+        for key in ["MOTHER_HOME", "MOTHER_MODEL_DIR"] {
+            assert!(PRESERVED.contains(&key), "{key} must reach the MCP child");
+        }
     }
 }

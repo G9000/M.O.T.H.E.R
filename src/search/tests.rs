@@ -143,6 +143,25 @@ fn ranking_keeps_exact_hits_and_reports_partial_coverage_and_offsets() {
     );
 }
 #[test]
+fn nothing_to_index_is_not_reported_as_an_incomplete_index() {
+    let (_d, mut s, a) = fixture();
+    let q = Query::parse(json!({"query":"anything"})).unwrap();
+    let snapshot = Snapshot::capture(&mut s, &a, &q).unwrap();
+    let result =
+        semantic_response(snapshot, &q, &HashMap::new(), &axis(), &Progress::default()).unwrap();
+    assert_eq!(result["search"]["eligibleRecords"], 0);
+    assert_eq!(result["search"]["unindexedRecords"], 0);
+    assert_eq!(result["search"]["reason"], Value::Null);
+    assert!(result["records"].as_array().unwrap().is_empty());
+    // Records that exist but are not indexed yet still fall back with a reason.
+    write(&mut s, &a, "A record", None, "active");
+    let snapshot = Snapshot::capture(&mut s, &a, &q).unwrap();
+    let result =
+        semantic_response(snapshot, &q, &HashMap::new(), &axis(), &Progress::default()).unwrap();
+    assert_eq!(result["search"]["reason"], "index_incomplete");
+    assert_eq!(result["search"]["semanticUsed"], false);
+}
+#[test]
 fn similarity_floor_excludes_unrelated_vectors_and_validates_query_vectors() {
     let (_d, mut s, a) = fixture();
     write(&mut s, &a, "A record", None, "active");
@@ -208,6 +227,40 @@ fn short_match_keeps_bounded_neighbouring_sentence_context() {
     assert_eq!(&long[from..to], "End.");
 }
 
+#[test]
+fn neighbouring_context_survives_line_breaks_and_repeated_punctuation() {
+    for separator in [".\n", ".\r\n", ".\n\n", "?! ", "... "] {
+        let text = format!(
+            "Header\nMembership may be terminated by written notice{separator}Further monthly fees then cease."
+        );
+        let start = text.find("Further").unwrap();
+        let (from, to) = context_span(&text, start, text.len());
+        assert!(
+            text[from..to].contains("written notice"),
+            "{separator:?} lost the previous sentence"
+        );
+        assert_eq!(to, text.len());
+        let end = text.find("notice").unwrap() + "notice".len() + 1;
+        let start = text.find("Membership").unwrap();
+        let (from, to) = context_span(&text, start, end);
+        assert!(
+            text[from..to].ends_with("then cease."),
+            "{separator:?} lost the next sentence"
+        );
+        assert!(text[from..to].starts_with("Header"));
+    }
+    let text = "Is it done?! Yes it is... Then stop.";
+    let start = text.find("Yes").unwrap();
+    let (from, to) = context_span(text, start, text.find(" Then").unwrap());
+    assert_eq!(&text[from..to], text);
+    // Text without any words still yields an in-bounds span.
+    for text in ["!!!", "\n\n", "... ?"] {
+        let (from, to) = context_span(text, 0, text.len());
+        assert!(from <= to && to <= text.len());
+        let (from, to) = context_span(text, text.len(), text.len());
+        assert!(from <= to && to <= text.len());
+    }
+}
 #[test]
 fn owner_persona_change_during_search_returns_the_new_snapshot() {
     let (_dir, mut s, auth) = fixture();
