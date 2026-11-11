@@ -223,7 +223,7 @@ fn launchers_can_be_listed_with_their_problems() {
     let h = Home::new();
     h.launchers(json!({
         "codex":{"harness":"codex","command":mother(),"args":["exec","{prompt}"]},
-        "broken":{"harness":"codex","command":"/no/such/program","args":[]},
+        "broken":{"harness":"codex","command":h.path().join("no-such-program"),"args":[]},
     }));
     let list = ok(h.path(), &["launch", "--list"]);
     let launchers = list["launchers"].as_array().unwrap();
