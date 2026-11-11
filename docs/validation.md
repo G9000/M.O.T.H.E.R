@@ -1,3 +1,19 @@
+# Review fixes and continuous integration — 11 November 2026
+
+Committed directly to main from `12af33c`. README title, poem and artwork unchanged. No schema, contract, grant or stored-record change.
+
+- **Connect marker.** A `runtimes connect` that exits successfully and is then inspected as this connection's own running runtime now clears the reconciliation marker even when that runtime is not ready yet. Previously the marker stayed unless the immediate inspection was already ready, so once that runtime later stopped, every `mother connect chatgpt` (including the Windows sign-in launcher) was refused until an explicit disconnect. Timeouts, failed commands and stopped or unknown inspections still keep the marker.
+- **Model directory.** `MOTHER_MODEL_DIR` is now preserved in the tunnel-client environment beside `MOTHER_HOME`, so the tunnelled MCP server finds a model installed outside the default directory.
+- **Model download.** The one-minute limit was a total budget for each response body, which capped the 91 MB asset at roughly 12 Mbit/s. It is now a per-read stall limit; the documented five-minute deadline per download is unchanged.
+- **Search.** A search with no eligible records no longer reports `index_incomplete`; it matches `mother index`, which already reported that state as complete. Neighbouring-sentence context now survives line breaks, CRLF and repeated punctuation instead of being replaced by an empty segment.
+- **Docs.** The AnimaOS guide now states that `localhost` is accepted and rewritten to `127.0.0.1`, as the adapter already did.
+- **CI.** `.github/workflows/ci.yml` runs formatting, the locked test suite, strict Clippy and the locked release build on Linux, macOS and Windows for pushes to main and pull requests.
+
+Each code fix has a regression test that failed first. Full locked suite on macOS: **189 passed**, two existing optional model tests ignored. Formatting, strict Clippy and the locked release build passed there. A synthetic owner walk-through on macOS in a temporary `MOTHER_HOME` (init, grant, context, connection, doctor, export, restore) succeeded with owner-only file modes.
+
+Not exercised: no tunnel-client was run and no model was downloaded, so the marker and download changes rest on their unit tests and the pinned ureq 3.5.1 timeout semantics. Windows and Linux results come only from CI. Open review notes, not changed here: the generated tunnel profile `<alias>.yaml` is checked with a JSON parser, which is only correct if tunnel-client writes JSON there; an interrupted model install can leave a `.mother-model-install-*` staging directory behind; tunnel-client paths are accepted without checking the execute bit on Unix.
+
+---
 # Connection health and installed rollout — 10 November 2026
 
 Feature branch `g9000/connection-health`, based on main `2cee6df`. Independent M.O.T.H.E.R implementation; README poem and artwork unchanged. This section supersedes older deployment-pending notes below.
