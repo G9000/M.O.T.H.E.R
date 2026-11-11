@@ -1,3 +1,17 @@
+# Harness setup and session briefing — 11 November 2026
+
+Committed directly to main from `d9df9c6`, at the owner's request. Still version 0.5.0. No store, schema, tool or grant change; README title, poem and artwork unchanged (one link added to the link row).
+
+- `mother brief --config <file>` prints a plain-text session briefing: read-context instruction, persona, pinned core, latest checkpoint and next step, unsettled tasks and actions, and category counts. Saved records are framed as data. It stays under 9,000 characters (Claude Code caps hook output at 10,000), trimming the persona and long pins first and saying so. An unreadable workspace prints a short note with the error code and no private content, and exits successfully.
+- `mother connection --format` gains `claude-code` (a `claude mcp add --scope user` command plus a SessionStart hook running `mother brief`), `hermes` (`mcp_servers` YAML), `openclaw` (`openclaw mcp set` JSON) and `mcp-servers` (generic `mcpServers` JSON). Paths are canonicalized, with Windows verbatim prefixes removed; paths with quotes, `$`, backticks or `%` are refused for shell-command formats. Existing `json` and `codex` output is unchanged. Nothing edits a harness's own settings.
+- Setup shapes come from each harness's documentation: Claude Code hooks and MCP pages, the Hermes Agent MCP guide (`mcp_servers` with `command` and `args`, `/reload-mcp`) and the OpenClaw MCP registry page (`openclaw mcp set <name> <json>`, Gateway stopped, `openclaw mcp doctor --probe`).
+- `tests/harness_setup.rs` (seven tests) failed first. They cover briefing content, the size bound with a 30,800-character persona and twelve 5,000-character pins, revoked and shared clients, each setup format parsed back to the same command and arguments, and refusal of a config path containing a quote.
+- The generated SessionStart command, run with `/bin/sh` in an empty environment from another directory, exited 0 and printed a 1,270-character briefing containing the pinned synthetic memory.
+- Full locked suite on macOS with Rust 1.94.0 and 1.99.1: **238 passed**, two existing optional model tests ignored. Formatting and strict Clippy passed on both.
+
+Not exercised: Claude Code loading the hook in a real session (the local `claude` CLI was not signed in), and any real Hermes, OpenClaw or Codex installation. The Codex global AGENTS.md location in the guide is from memory and should be checked against Codex's own docs.
+
+---
 # Pinned core memories — 11 November 2026
 
 Committed directly to main from `dc8a816`, at the owner's request. Still version 0.5.0. No change to the v1 record, receipt or SQLite core tables; README title, poem and artwork unchanged.

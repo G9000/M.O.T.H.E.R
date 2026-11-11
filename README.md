@@ -43,7 +43,7 @@
 
 <p align="center">
   <a href="docs/setup.md">Make it yours</a> &middot; <a href="docs/terminal.md">Open her terminal</a> &middot; <a href="docs/living-memory.md">Keep what matters</a><br>
-  <a href="docs/context.md">Read her context</a> &middot; <a href="docs/chatgpt.md">Bring her to ChatGPT</a> &middot; <a href="docs/animaos.md">Connect AnimaOS</a><br>
+  <a href="docs/context.md">Read her context</a> &middot; <a href="docs/chatgpt.md">Bring her to ChatGPT</a> &middot; <a href="docs/animaos.md">Connect AnimaOS</a> &middot; <a href="docs/harnesses.md">Bring her to every harness</a><br>
   <a href="docs/semantic-search.md">Search by meaning</a> &middot; <a href="docs/client-access.md">Choose what each client sees</a> &middot; <a href="docs/health.md">Check her connection</a>
 </p>
 

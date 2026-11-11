@@ -97,7 +97,7 @@ Codex's documented local MCP configuration uses a command and arguments in `conf
 
 All clients must point to the same database path. Each launches its own lightweight server process, and SQLite coordinates their writes. When you switch machines, use export/restore and reconnect; this release does not synchronize multiple database copies over the network.
 
-For another harness, enter the generated command and arguments in its supported MCP configuration and use [the session instructions](../adapters/session.md). A host without local MCP stdio needs an additional adapter. No claim is made that every harness supports these settings. For ChatGPT, use the [private tunnel guide](chatgpt.md): OpenAI's tunnel client connects the existing stdio server without adding a public HTTP endpoint to M.O.T.H.E.R.
+For Claude Code, Hermes, OpenClaw, Claude Desktop and similar clients, `mother connection --format claude-code|hermes|openclaw|mcp-servers` prints ready-to-paste setup, and `mother brief` prints a session-start briefing; see [bring her to every harness](harnesses.md). For another harness, enter the generated command and arguments in its supported MCP configuration and use [the session instructions](../adapters/session.md). A host without local MCP stdio needs an additional adapter. No claim is made that every harness supports these settings. For ChatGPT, use the [private tunnel guide](chatgpt.md): OpenAI's tunnel client connects the existing stdio server without adding a public HTTP endpoint to M.O.T.H.E.R.
 
 ## Local semantic retrieval
 

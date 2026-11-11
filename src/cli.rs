@@ -132,6 +132,14 @@ enum Command {
         #[command(subcommand)]
         command: ModelCommand,
     },
+    /// Print a short briefing for a harness to load at session start.
+    ///
+    /// Always exits successfully: if the workspace cannot be read, it prints a
+    /// short note saying so instead of private content.
+    Brief {
+        #[arg(long)]
+        config: PathBuf,
+    },
     /// Print token-free harness connection configuration.
     Connection {
         #[arg(long)]
@@ -200,8 +208,18 @@ enum ModelCommand {
 
 #[derive(Debug, Clone, Copy, ValueEnum)]
 enum Format {
+    /// The command and arguments, as JSON.
     Json,
+    /// A Codex config.toml entry.
     Codex,
+    /// A `claude mcp add` command and a SessionStart hook that runs `mother brief`.
+    ClaudeCode,
+    /// An entry for `mcp_servers` in ~/.hermes/config.yaml.
+    Hermes,
+    /// An `openclaw mcp set` command.
+    Openclaw,
+    /// An `mcpServers` JSON block, as used by Claude Desktop and many other clients.
+    McpServers,
 }
 
 /// Parse the owner CLI and dispatch the native stdio service when requested.
@@ -303,6 +321,66 @@ fn read_soul(path: &Path) -> Result<String> {
         ));
     }
     Ok(content)
+}
+/// A resolved path for harness configuration, without Windows' verbatim `\\?\` prefix.
+fn stable_path(path: &Path) -> Result<String> {
+    let resolved = fs::canonicalize(path)?;
+    let text = resolved
+        .to_str()
+        .ok_or_else(|| Error::domain("INVALID_INPUT", "The path must be valid Unicode."))?;
+    Ok(match text.strip_prefix(r"\\?\") {
+        Some(rest) if rest.as_bytes().get(1) == Some(&b':') => rest.to_owned(),
+        _ => text.to_owned(),
+    })
+}
+/// Refuse paths that would change meaning inside a pasted shell command.
+fn shell_safe(path: &str) -> Result<&str> {
+    if path
+        .chars()
+        .any(|c| c.is_control() || matches!(c, '"' | '\'' | '$' | '`' | '%'))
+    {
+        return Err(Error::domain(
+            "INVALID_INPUT",
+            "This path contains characters a shell would misread (quotes, $, `, % or control characters). Move the executable or client config to a plain path and try again.",
+        ));
+    }
+    Ok(path)
+}
+const STANDING_INSTRUCTION: &str = "At the start of each session, call mother_get_context and treat its pinned records as the owner's core context.";
+fn print_harness_setup(format: Format, config_path: &Path) -> Result<()> {
+    let exe = stable_path(&std::env::current_exe()?)?;
+    let config = stable_path(config_path)?;
+    let args = json!(["mcp", "--config", config]);
+    match format {
+        Format::ClaudeCode => {
+            let (exe, config) = (shell_safe(&exe)?, shell_safe(&config)?);
+            let hook = json!({"hooks":{"SessionStart":[{"hooks":[{"type":"command","command":format!("\"{exe}\" brief --config \"{config}\""),"timeout":30}]}]}});
+            println!(
+                "# 1. Register M.O.T.H.E.R for every project (run once in a terminal):\nclaude mcp add --transport stdio --scope user mother -- \"{exe}\" mcp --config \"{config}\"\n\n# 2. Have her brief every session before the first message. Merge this into\n#    the \"hooks\" section of ~/.claude/settings.json:\n{}\n\n# Then start a new session and check with /mcp that \"mother\" is connected.",
+                serde_json::to_string_pretty(&hook)?
+            );
+        }
+        Format::Hermes => {
+            println!(
+                "# Add under mcp_servers in ~/.hermes/config.yaml, then run /reload-mcp in a session.\n# Standing instruction for Hermes: {STANDING_INSTRUCTION}\nmcp_servers:\n  mother:\n    command: {}\n    args: {}",
+                serde_json::to_string(&exe)?,
+                serde_json::to_string(&args)?
+            );
+        }
+        Format::Openclaw => {
+            shell_safe(&exe)?;
+            shell_safe(&config)?;
+            println!(
+                "# With the OpenClaw Gateway stopped, run:\nopenclaw mcp set mother '{}'\n# Then start the Gateway and check with: openclaw mcp doctor --probe\n# Standing instruction for OpenClaw: {STANDING_INSTRUCTION}",
+                serde_json::to_string(&json!({"command":exe,"args":args}))?
+            );
+        }
+        Format::McpServers => {
+            print_json(json!({"mcpServers":{"mother":{"command":exe,"args":args}}}))?
+        }
+        Format::Json | Format::Codex => unreachable!("handled by the connection command"),
+    }
+    Ok(())
 }
 fn execute(command: Command) -> Result<()> {
     match command {
@@ -505,10 +583,25 @@ fn execute(command: Command) -> Result<()> {
                 ModelCommand::Status => embedding::status(&dir)?,
             })
         }
+        Command::Brief { config } => {
+            let brief = (|| -> Result<String> {
+                let config = load_config(&absolute(&config)?)?;
+                let mut store = Store::open(&config.database_path)?;
+                mother::brief::compose(&mut store, &config.auth())
+            })();
+            match brief {
+                Ok(text) => print!("{text}"),
+                Err(error) => print!("{}", mother::brief::unavailable(error.code())),
+            }
+            Ok(())
+        }
         Command::Connection { config, format } => {
             let config_path = absolute(&config)?;
             let config = load_config(&config_path)?;
             Store::open(&config.database_path)?.authorize(&config.auth(), "read")?;
+            if !matches!(format, Format::Json | Format::Codex) {
+                return print_harness_setup(format, &config_path);
+            }
             let command = std::env::current_exe()?;
             let args = json!(["mcp", "--config", config_path]);
             match format {
@@ -521,6 +614,7 @@ fn execute(command: Command) -> Result<()> {
                     );
                     Ok(())
                 }
+                _ => unreachable!("harness setup formats are handled above"),
             }
         }
         Command::Export { db, out } => {
