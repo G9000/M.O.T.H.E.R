@@ -553,7 +553,7 @@ fn connected_harnesses_observe_owner_soul_updates_without_restarting() {
                 .as_array()
                 .unwrap()
                 .len(),
-            8
+            9
         );
     }
     let saved = a.call(
@@ -764,4 +764,35 @@ fn version_two_mcp_rejects_missing_policy_at_startup_and_after_connection() {
     assert!(!output.status.success());
     assert!(output.stdout.is_empty());
     assert!(String::from_utf8_lossy(&output.stderr).contains("FORBIDDEN"));
+}
+#[test]
+fn a_second_harness_reads_what_a_record_said_before_it_was_corrected() {
+    let f = Fixture::new();
+    let mut a = Client::connect(&f.a_config);
+    let mut b = Client::connect(&f.b_config);
+    let first = a.call("mother_write_record", f.request(memory("Green tea")))["record"].clone();
+    b.call(
+        "mother_write_record",
+        f.update(memory("Oolong"), &first["id"], 1),
+    );
+    let history = a.call("mother_get_record_history", json!({"id":first["id"]}));
+    assert_eq!(history["currentRevision"], 2);
+    assert_eq!(history["revisions"][0]["actor"], "harness-b");
+    assert_eq!(history["revisions"][0]["changed"], json!(["content"]));
+    assert_eq!(history["revisions"][1]["excerpt"], "Green tea");
+    let old = a.call(
+        "mother_get_record_history",
+        json!({"id":first["id"],"revision":1}),
+    );
+    assert_eq!(old["record"], first);
+    assert_eq!(old["current"], false);
+    let denied = a.result(
+        "mother_get_record_history",
+        json!({"id":first["id"],"limit":"all"}),
+    );
+    assert_eq!(denied["isError"], true);
+    assert_eq!(
+        denied["structuredContent"]["error"]["code"],
+        "INVALID_INPUT"
+    );
 }

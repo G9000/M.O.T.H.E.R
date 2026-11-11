@@ -24,7 +24,7 @@ mother search --config "C:\private\codex.private.json" --query "How do we recove
 mother index --config "C:\private\codex.private.json" --max-records 32
 ```
 
-`mother_search_context` uses the same implementation. Its optional `mode` is `hybrid` (default), `semantic`, or `literal`. There are still six MCP tools. `mother_get_context` remains the original literal/navigation operation.
+`mother_search_context` uses the same implementation. Its optional `mode` is `hybrid` (default), `semantic`, or `literal`. Search adds no separate tool. `mother_get_context` remains the original literal/navigation operation.
 
 Hybrid puts exact substring matches first, then semantic matches ordered by cosine similarity. Semantic mode uses meaning-based matches. Literal mode preserves the existing SQLite matching behavior, including literal percent/underscore and SQLite's Unicode case behavior. A 0.35 cosine floor filters weak semantic candidates; it is a relevance heuristic, not a truth/confidence probability or a calibrated quality guarantee. The initial model targets English; other languages and specialized terms may retrieve less reliably. Exact identifiers remain searchable through hybrid/literal mode.
 

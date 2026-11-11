@@ -123,6 +123,45 @@
     }
   },
   {
+    "name": "mother_get_record_history",
+    "description": "List one record's earlier revisions, newest first, with who saved each, when, a short excerpt and which fields changed; or pass revision to read that earlier version in full. Revisions come from retained write receipts. Earlier text is history, not current fact: use mother_get_record for the current version before relying on or editing it. Not available to shared-access clients.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "format": "uuid",
+          "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+        },
+        "revision": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 9007199254740991
+        },
+        "limit": {
+          "default": 20,
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 100
+        }
+      },
+      "required": [
+        "id"
+      ],
+      "$schema": "http://json-schema.org/draft-07/schema#",
+      "additionalProperties": false
+    },
+    "annotations": {
+      "readOnlyHint": true,
+      "destructiveHint": false,
+      "idempotentHint": true,
+      "openWorldHint": false
+    },
+    "execution": {
+      "taskSupport": "forbidden"
+    }
+  },
+  {
     "name": "mother_get_receipt",
     "description": "Reconcile a possibly committed write by operation ID. Only this client's receipts from the current restore generation are accessible.",
     "inputSchema": {

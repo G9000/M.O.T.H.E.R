@@ -124,9 +124,12 @@ For your first real handoff, use synthetic material: save a tea preference and a
 | mother_get_context | Workspace, persona, previews, unsettled work | read |
 | mother_search_context | Local hybrid, semantic or literal search with explicit coverage | read |
 | mother_get_record | Full current record, including retracted records | read |
+| mother_get_record_history | Earlier revisions of one record, or one earlier revision in full | read (not shared-access clients) |
 | mother_get_receipt | This client's committed operation outcome | read |
 | mother_write_record | Create or revise a typed record | matching kind:write |
 | mother_checkpoint | Save a continuation checkpoint | checkpoint:write |
+| mother_propose_memory | Submit a memory, decision or task for owner review | context:propose or matching kind:write |
+| mother_get_proposal | Read a submitted proposal and its review outcome | read |
 
 Records can be memories, decisions, tasks, checkpoints, text artifacts or action evidence. Their schemas are returned by MCP tools. Every write requires the workspace ID and restore generation from a current context read, an operation UUID, and an expected revision. Create: omit `id`, set `expectedRevision` to zero. Update: use the full current record's ID/revision and a complete replacement draft. Do not send record metadata inside the draft.
 

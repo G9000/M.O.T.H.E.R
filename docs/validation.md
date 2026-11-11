@@ -1,3 +1,18 @@
+# Record history — 11 November 2026
+
+Committed directly to main from `ceb74a7`, at the owner's request. No SQLite schema, grant, stored-record, receipt or export change; README title, poem and artwork unchanged.
+
+- New read-only MCP tool `mother_get_record_history` (and `Store::history`). It lists a record's revisions newest first with actor, commit time, status, excerpt and the client-chosen fields changed from the revision before, or returns one earlier revision in full. Revisions are read from the receipts every write already stores.
+- Requires the read scope; shared-access clients receive `FORBIDDEN`, since earlier revisions may hold text outside their grant. Revocation is checked on every call. Revisions from before a restore are marked `currentGeneration: false`. A revision with no retained receipt is listed in `missingRevisions` and never reconstructed.
+- `tests/history.rs` (nine tests) and a stdio test in `tests/mcp.rs` failed first. They cover cross-client attribution, full reads of an earlier revision, bounded lists, records that only reference the target, superseded checkpoints, a deleted receipt, restore across generations, shared and revoked clients, and malformed requests. The pinned tool count in the soul-update stdio test moved from 8 to 9.
+- The AnimaOS adapter's required-tool list is unchanged, so connecting through an older executable still works; the new tool is simply available where present.
+- Full locked suite on macOS with Rust 1.94.0 and 1.99.1: **214 passed**, two existing optional model tests ignored. Formatting and strict Clippy passed on both.
+
+Each call scans the receipts table with a text prefilter. Against a synthetic table at the 100,000-receipt capacity limit (147 MB), the query took about 145 ms on an Apple Silicon Mac, so no index was added.
+
+Not exercised: no model in a connected harness has called the tool in a real conversation.
+
+---
 # Checkpoint supersession — 11 November 2026
 
 Committed directly to main from `8d3d842`, at the owner's request. No SQLite schema, grant, stored-record or receipt-shape change; README title, poem and artwork unchanged.

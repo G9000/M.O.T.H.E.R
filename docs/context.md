@@ -28,6 +28,12 @@ For example, with thirty checkpoints, two memories, one decision and the default
 
 With a `query` or `kind`, `selection.order` is `recent` and previews are the newest matches, as before. Shared clients are balanced within their granted records only. `mother_search_context` is unchanged.
 
+## Earlier revisions
+
+`mother_get_record_history` lists one record's revisions newest first: who saved each, when, its status, a 400-unit excerpt and which client-chosen fields changed from the revision before. Pass `revision` to read that version in full, or `limit` (1 to 100, default 20) to bound the list. Revisions are read from the receipts every write already keeps, so nothing new is stored and retracted or superseded records keep their history.
+
+`currentGeneration: false` marks a revision committed before the workspace was last restored. `missingRevisions` lists any revision with no retained receipt; it is reported, never reconstructed. Shared-access clients cannot use this tool, because earlier revisions may contain text the owner did not grant them.
+
 ## Replacing a checkpoint
 
 A checkpoint stays `active`, and so stays in recall, until something marks it `superseded`. When saving a checkpoint that replaces an earlier one, pass `supersedes: {"id": ..., "expectedRevision": ...}` using the ID and revision shown in that checkpoint's preview. Both changes commit together: the new checkpoint is saved and the earlier one becomes `superseded`, which moves it from recallable to retained history. If the earlier checkpoint changed, is already superseded, is missing or is not a checkpoint, nothing is saved.
