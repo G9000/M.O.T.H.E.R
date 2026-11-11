@@ -562,6 +562,9 @@ impl Store {
         let selection = json!({"query":q,"kind":kind,"updatedSince":since,"updatedBefore":before,"order":if balanced {"balanced"} else {"recent"},"matchingRecords":total,"returnedRecords":records.len(),"omittedRecords":total-records.len() as i64,"returnedByKind":returned_by_kind,"omittedByKind":omitted_by_kind});
         let unsettled_summary = json!({"total":unsettled_total,"returned":work.len(),"omitted":unsettled_total-work.len() as i64,"scope":"Workspace-wide tasks in doing/blocked and actions in pending/unknown. Checkpoint next steps and open questions are not counted as unsettled task/action records."});
         let mut result = json!({"workspace":workspace(&tx)?,"access":access.metadata(),"capturedAt":now(),"inventory":inventory,"selection":selection,"summary":summary,"omitted":total-records.len() as i64,"records":records,"unsettledWork":work,"unsettledWorkSummary":unsettled_summary,"unsettledWorkTruncated":truncated,"note":"Inventory counts cover all canonical record categories, independently of this request's query/kind filters and preview limit. Zero memory-category records is not an empty workspace when other categories contain records. Unreviewed inbox proposals are excluded. Excerpts are navigation, not complete records; retrieve IDs before relying on details or editing. Unsettled work counts only the task/action states described in unsettledWorkSummary. A handoff does not pause running jobs."});
+        let (pinned, pinned_summary) = crate::pins::context(&tx, &access)?;
+        result["pinned"] = pinned;
+        result["pinnedSummary"] = pinned_summary;
         if access.mode != AccessMode::Shared {
             result["persona"] = persona(&tx)?;
         } else {

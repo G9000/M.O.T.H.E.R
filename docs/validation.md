@@ -1,3 +1,19 @@
+# Pinned core memories — 11 November 2026
+
+Committed directly to main from `dc8a816`, at the owner's request. Still version 0.5.0. No change to the v1 record, receipt or SQLite core tables; README title, poem and artwork unchanged.
+
+- New MCP tool `mother_pin_record` (and `Store::pin`) pins or unpins a memory or decision. Every `mother_get_context` response includes `pinned` (visible, still-active pinned records with content up to 2,000 UTF-16 units, who pinned them and when) and `pinnedSummary`, independent of query, kind, time window and preview limit. At most 12 pins; the 13th is `RESOURCE_LIMIT`.
+- Pins live in an additive `pins` table created on first pin. An executable without pin support opens the workspace unchanged, since the record payloads carry no new field. Exports include an optional `pins` array validated against the bundle's records; bundles without it still restore.
+- Pinning requires the record kind's write scope; shared-access clients see only granted pins and cannot pin. Checkpoints and other kinds, retracted records and unknown IDs are rejected. Repeated requests report `changed: false`.
+- Server instructions, the tool description and harness session instructions say to treat pinned records as the owner's core context and to pin only what the owner asks to be always remembered.
+- `tests/pins.rs` (ten tests) and a two-process stdio test failed first. The pinned tool count in the soul-update stdio test moved from 9 to 10.
+- Full locked suite on macOS with Rust 1.94.0 and 1.99.1: **231 passed**, two existing optional model tests ignored. Formatting and strict Clippy passed on both.
+
+- Checked against the real 0.4.0 executable built from `031a2e6`: after 0.5.0 pinned a synthetic memory, 0.4.0 read context, wrote a record and exported the same workspace without error, and 0.5.0 still showed the pin afterwards. An export made by 0.4.0 does not contain pins.
+
+Not exercised: no model in a connected harness has pinned a memory in a real conversation, and the owner terminal does not yet show or manage pins.
+
+---
 # Version 0.5.0 — 11 November 2026
 
 Version bumped from 0.4.0 to 0.5.0 in `Cargo.toml` and its own `Cargo.lock` entry; no dependency changed. 0.5.0 contains the review fixes, CI, balanced context previews, lock release, checkpoint supersession, record history and time windows recorded below. `mother --version`, the MCP `serverInfo` version and `mother doctor`'s `serverVersion` report 0.5.0, so a doctor check now distinguishes an installed 0.4.0 executable from this build. A 0.4.0 executable rejects `supersedes`, `updatedSince` and `updatedBefore` as unknown fields and lacks `mother_get_record_history`, so every installed copy should be replaced together.

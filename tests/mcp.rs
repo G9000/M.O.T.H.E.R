@@ -553,7 +553,7 @@ fn connected_harnesses_observe_owner_soul_updates_without_restarting() {
                 .as_array()
                 .unwrap()
                 .len(),
-            9
+            10
         );
     }
     let saved = a.call(
@@ -795,4 +795,29 @@ fn a_second_harness_reads_what_a_record_said_before_it_was_corrected() {
         denied["structuredContent"]["error"]["code"],
         "INVALID_INPUT"
     );
+}
+#[test]
+fn a_memory_pinned_in_one_harness_is_in_every_harness_first_read() {
+    let f = Fixture::new();
+    let mut a = Client::connect(&f.a_config);
+    let mut b = Client::connect(&f.b_config);
+    let name = a.call(
+        "mother_write_record",
+        f.request(json!({"kind":"memory","title":"Preferred name","content":"Call me Leo","basis":"owner_statement","status":"active"})),
+    )["record"]
+        .clone();
+    for n in 0..25 {
+        a.call(
+            "mother_write_record",
+            f.request(memory(&format!("Note {n}"))),
+        );
+    }
+    let pinned = a.call("mother_pin_record", json!({"id":name["id"],"pinned":true}));
+    assert_eq!(pinned["pinned"], true);
+    let context = b.call("mother_get_context", json!({"limit":3}));
+    assert_eq!(context["pinned"][0]["content"], "Call me Leo");
+    assert_eq!(context["pinned"][0]["pinnedBy"], "harness-a");
+    let bad = b.result("mother_pin_record", json!({"id":name["id"]}));
+    assert_eq!(bad["isError"], true);
+    assert_eq!(bad["structuredContent"]["error"]["code"], "INVALID_INPUT");
 }

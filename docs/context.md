@@ -20,6 +20,19 @@ The response separates full-workspace counts from the bounded list returned by t
 
 For example, if a workspace has three checkpoints and no memories, a request filtered to `kind: memory` returns no previews, but its inventory still reports three recallable checkpoints. Neither that filter nor `limit: 1` makes the workspace inventory empty. Do not describe a filtered or truncated preview page as the whole workspace.
 
+## Pinned core
+
+Some things should never fall out of a first read: your name, what matters most to you, a decision you want kept. `mother_pin_record` with `{"id": ..., "pinned": true}` pins a memory or decision; `"pinned": false` unpins it. Every `mother_get_context` response then includes it under `pinned`, whatever the query, kind, time window or preview limit:
+
+| Field | Meaning |
+| --- | --- |
+| `pinned` | Each pinned, still-active record with its current title, revision and content (up to 2,000 characters, with `truncated`), plus who pinned it and when. |
+| `pinnedSummary` | `total` pins, how many are `shown`, how many are `inactive` because the record was retracted or superseded, and the `limit` of 12. |
+
+A pin follows its record, so a corrected memory shows its newest text. A retracted pinned record drops out of `pinned` but still counts toward the limit until it is unpinned. Pinning needs the same write scope as editing that kind of record. Shared-access clients see only pins on records they were granted and cannot pin. Pins are carried in exports and restored with them.
+
+Pins are kept in their own table rather than on the record, so an executable older than 0.5.0 ignores them and can still read the workspace. An export made by such an executable leaves pins out.
+
 ## Balanced previews
 
 Checkpoints are saved every session, so a newest-first list soon holds nothing else. When a request has no `query` and no `kind`, `selection.order` is `balanced`: categories take turns for the preview limit, in the order checkpoint, task, decision, memory, action, artifact. Within a category the newest record goes first, except that tasks in doing/blocked and actions in pending/unknown go before settled ones. A category with fewer records than its share gives the remaining slots to the others. The returned list is still sorted newest first.

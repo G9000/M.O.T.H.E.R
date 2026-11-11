@@ -64,6 +64,7 @@ fn validate(mut v: Value) -> Result<Value> {
             "operations",
             "omittedExternalSources",
             "inbox",
+            "pins",
         ],
     )?;
     integer(&v, "schemaVersion", 1, 1)?;
@@ -171,6 +172,9 @@ fn validate(mut v: Value) -> Result<Value> {
     if let Some(inbox) = v.get("inbox") {
         crate::inbox::validate(inbox, &v["workspace"], &records, &operations)?;
     }
+    if let Some(pins) = v.get("pins") {
+        crate::pins::validate(pins, &records)?;
+    }
     let omitted = bundle_sources(&records, &operations, v.get("inbox"))?;
     let supplied = array(&v, "omittedExternalSources", usize::MAX)?
         .iter()
@@ -222,6 +226,9 @@ impl Store {
         if let Some(inbox) = inbox {
             bundle["inbox"] = inbox;
         }
+        if let Some(pins) = crate::pins::export(&tx)? {
+            bundle["pins"] = pins;
+        }
         let bundle = validate(bundle)?;
         tx.commit()?;
         Ok(bundle)
@@ -252,6 +259,9 @@ impl Store {
             store::rebuild_usage(conn)?;
             if let Some(inbox) = bundle.get("inbox") {
                 crate::inbox::restore(conn, inbox)?;
+            }
+            if let Some(pins) = bundle.get("pins") {
+                crate::pins::restore(conn, pins)?;
             }
             crate::inbox::check_capacity(conn)?;
             Ok(())

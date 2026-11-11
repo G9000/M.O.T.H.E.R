@@ -40,6 +40,8 @@ Record history is a read-only projection of retained mutation receipts, each of 
 
 Context and search accept an optional half-open window on each record's last update time. Bounds are normalized to the stored UTC millisecond form, so they compare as text against the existing `updated_at` column and index; no schema change is needed.
 
+Pinned core records live in an additive `pins` table keyed by record ID, created on first use and ignored by older executables. Every context read returns the visible, still-active pinned records in full up to a per-record bound, outside the preview limit; the workspace holds at most twelve pins. Pinning requires the record kind's write scope and is idempotent. Exports carry pins as an optional extension validated against the bundle's records.
+
 ## Local retrieval layer (v0.3.0)
 
 The existing search tool and owner CLI share local Candle inference and a disposable SQLite vector sidecar. Canonical SQLite records remain authoritative. Cache keys bind workspace/generation, model/profile, record revision and text digest; search rechecks grants and current canonical state before returning. Hybrid retrieval preserves exact identifiers and adds meaning-based candidates. Missing or busy infrastructure produces explicit literal fallback.

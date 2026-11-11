@@ -1,7 +1,7 @@
 [
   {
     "name": "mother_get_context",
-    "description": "Read M.O.T.H.E.R shared context across all record categories, including memories, decisions, tasks and checkpoints. Returns workspace-wide category counts, explicit query/kind selection counts, bounded previews and task/action unsettled-work totals. Zero memory-category records does not mean the workspace is empty. Without a query or kind filter, previews are balanced: categories take turns for the limit, newest first within each, so recent checkpoints do not displace older memories and decisions, and selection.omittedByKind reports what was left out. updatedSince and updatedBefore limit previews to records last updated in that window. With any filter, previews are the newest matches. Retrieve full records by ID before relying on details.",
+    "description": "Read M.O.T.H.E.R shared context across all record categories, including memories, decisions, tasks and checkpoints. Returns workspace-wide category counts, explicit query/kind selection counts, bounded previews and task/action unsettled-work totals. Zero memory-category records does not mean the workspace is empty. Without a query or kind filter, previews are balanced: categories take turns for the limit, newest first within each, so recent checkpoints do not displace older memories and decisions, and selection.omittedByKind reports what was left out. updatedSince and updatedBefore limit previews to records last updated in that window. With any filter, previews are the newest matches. Retrieve full records by ID before relying on details. pinned always lists the owner's pinned core memories and decisions in full, independent of filters and limit.",
     "inputSchema": {
       "type": "object",
       "properties": {
@@ -1268,6 +1268,38 @@
     "annotations": {
       "readOnlyHint": false,
       "destructiveHint": true,
+      "idempotentHint": true,
+      "openWorldHint": false
+    },
+    "execution": {
+      "taskSupport": "forbidden"
+    }
+  },
+  {
+    "name": "mother_pin_record",
+    "description": "Pin or unpin a memory or decision as part of the owner's core context. Every mother_get_context read includes pinned records in full (up to 2,000 characters each) in pinned, whatever the filters or preview limit. At most 12 can be pinned. Pin only what the owner has said should always be remembered, such as their name or what matters most to them; do not pin your own inferences. Requires the write scope for the record's kind. Repeating a request is harmless.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "format": "uuid",
+          "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+        },
+        "pinned": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "id",
+        "pinned"
+      ],
+      "$schema": "http://json-schema.org/draft-07/schema#",
+      "additionalProperties": false
+    },
+    "annotations": {
+      "readOnlyHint": false,
+      "destructiveHint": false,
       "idempotentHint": true,
       "openWorldHint": false
     },

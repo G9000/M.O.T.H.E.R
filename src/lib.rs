@@ -7,6 +7,7 @@ pub mod error;
 mod history;
 mod inbox;
 pub mod limits;
+mod pins;
 mod portability;
 pub mod search;
 pub mod store;
