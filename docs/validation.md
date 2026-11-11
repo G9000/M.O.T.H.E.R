@@ -1,3 +1,8 @@
+# Version 0.5.0 — 11 November 2026
+
+Version bumped from 0.4.0 to 0.5.0 in `Cargo.toml` and its own `Cargo.lock` entry; no dependency changed. 0.5.0 contains the review fixes, CI, balanced context previews, lock release, checkpoint supersession, record history and time windows recorded below. `mother --version`, the MCP `serverInfo` version and `mother doctor`'s `serverVersion` report 0.5.0, so a doctor check now distinguishes an installed 0.4.0 executable from this build. A 0.4.0 executable rejects `supersedes`, `updatedSince` and `updatedBefore` as unknown fields and lacks `mother_get_record_history`, so every installed copy should be replaced together.
+
+---
 # Time windows for context and search — 11 November 2026
 
 Committed directly to main from `7806e90`, at the owner's request. No SQLite schema, grant, stored-record, receipt or export change; README title, poem and artwork unchanged.

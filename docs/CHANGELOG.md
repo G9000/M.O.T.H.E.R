@@ -2,6 +2,7 @@
 
 ## 11 November 2026
 
+- Version 0.5.0. Documented balanced context previews, checkpoint supersession, record history and `updatedSince`/`updatedBefore` windows in the shared-context guide, setup tool table, session instructions, search guide and design notes. The setup tool table now also lists the two proposal tools. The AnimaOS guide states that `localhost` is accepted. Validation entries record each change and what was not exercised.
 - Described the artwork for screen readers, named the runtime in one line and linked the semantic search, client access, connection health, design, validation and changes guides from the README. Title, poem and artwork are unchanged.
 
 ## 10 November 2026
