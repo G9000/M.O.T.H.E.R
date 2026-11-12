@@ -1,5 +1,9 @@
 # Documentation changes
 
+## 12 November 2026
+
+- Added the memory garden design reference: a standalone mockup with invented data under docs/mockups and a short spec. It is not built into the executable.
+
 ## 11 November 2026
 
 - Added the hearth guide for owner-declared launchers and `mother launch`, recorded the decision to allow owner-triggered launches in the design notes and contributor guide, and linked it from the harness guide.

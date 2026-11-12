@@ -1,0 +1,1670 @@
+<!doctype html>
+<!-- Design mockup only: invented example data, not wired to a real workspace. See docs/superpowers/specs/2026-11-12-memory-garden.md. Needs a network connection to load Three.js r128 from its pinned CDN files. -->
+<html lang="en">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta charset="utf-8">
+<title>Memory Garden</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,600;1,500;1,600&family=Figtree:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<style>
+/* Layout: a full-screen sunlit flower field, with a thin top bar, a time scrubber at the bottom, and a record card that slides in from the right (a bottom sheet on phones). One deliberate daylight look: blue sky, green meadow, light glass panels with dark ink. */
+:root {
+  color-scheme: light;
+  --bg: #9cc4ea;
+  --glass: rgba(255, 255, 255, .8);
+  --line: rgba(52, 40, 96, .2);
+  --fg: #231d36;
+  --muted: #524b6b;
+  --faint: #655e80;
+  --accent: #6a48c8;
+  --candle: #8a5200;
+  --warn: #8a5200;
+  --bad: #b0304a;
+  --k-memory: #c6abf2;
+  --k-decision: #86d4c0;
+  --k-task: #f2a66e;
+  --k-checkpoint: #8db6f2;
+  --k-artifact: #e3cf7d;
+  --k-action: #ef93ae;
+  --display: "Cormorant Garamond", "Iowan Old Style", Georgia, serif;
+  --body: "Figtree", "Segoe UI", system-ui, sans-serif;
+  --mono: "IBM Plex Mono", ui-monospace, Menlo, monospace;
+}
+* { box-sizing: border-box; }
+html, body { height: 100%; }
+body { margin: 0; overflow: hidden; background: var(--bg); color: var(--fg); font-family: var(--body); font-size: 15px; line-height: 1.5; }
+button, input, select { font: inherit; color: inherit; }
+:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+#scene { position: fixed; inset: 0; display: block; width: 100%; height: 100%; touch-action: none; }
+#scene.hovering { cursor: pointer; }
+#vignette { position: fixed; inset: 0; pointer-events: none; z-index: 1; background: linear-gradient(to bottom, rgba(255, 255, 255, .34), transparent 15%, transparent 82%, rgba(255, 255, 255, .22)); }
+
+.bar { position: fixed; left: 0; right: 0; z-index: 3; display: flex; flex-wrap: wrap; align-items: center; gap: 10px 14px; padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px)); pointer-events: none; }
+.bar > * { pointer-events: auto; }
+.top { top: 0; padding-top: calc(env(safe-area-inset-top, 0px) + 14px); }
+.bottom { bottom: 0; padding-bottom: calc(env(safe-area-inset-bottom, 0px) + 14px); }
+.brand { display: flex; align-items: baseline; gap: 10px; pointer-events: none; }
+.brand .acr { font-family: var(--mono); font-size: 11px; letter-spacing: .24em; color: var(--muted); }
+.brand h1 { margin: 0; font-family: var(--display); font-style: italic; font-weight: 600; font-size: 30px; line-height: 1; text-shadow: 0 1px 12px rgba(255,255,255,.8); }
+.example { font-size: 12px; color: var(--candle); border: 1px solid rgba(138,82,0,.45); border-radius: 999px; padding: 1px 9px; background: rgba(255,255,255,.75); }
+.spacer { flex: 1; }
+.glass { background: var(--glass); border: 1px solid var(--line); border-radius: 12px; backdrop-filter: blur(14px) saturate(1.2); -webkit-backdrop-filter: blur(14px) saturate(1.2); box-shadow: 0 8px 30px rgba(30, 40, 80, .16); }
+.search { padding: 0; width: min(280px, 100%); }
+.search input { width: 100%; background: transparent; border: 0; padding: 8px 12px; outline: none; }
+.search input::placeholder { color: var(--faint); }
+.btn { border: 1px solid var(--line); background: var(--glass); border-radius: 10px; padding: 7px 12px; cursor: pointer; backdrop-filter: blur(14px) saturate(1.2); -webkit-backdrop-filter: blur(14px) saturate(1.2); white-space: nowrap; }
+.btn[aria-pressed="true"] { border-color: var(--accent); }
+.time { display: flex; align-items: center; gap: 12px; padding: 8px 12px; flex: 1 1 360px; max-width: 640px; min-width: 0; }
+.time button { border: 0; background: rgba(106,72,200,.16); width: 34px; height: 34px; border-radius: 50%; cursor: pointer; flex: none; display: grid; place-items: center; }
+.time input[type="range"] { flex: 1; min-width: 0; accent-color: var(--accent); }
+.time output { font-family: var(--mono); font-size: 12.5px; color: var(--muted); white-space: nowrap; font-variant-numeric: tabular-nums; }
+select.btn { appearance: none; padding-right: 28px; background-image: linear-gradient(45deg, transparent 50%, var(--muted) 50%), linear-gradient(135deg, var(--muted) 50%, transparent 50%); background-position: calc(100% - 15px) 52%, calc(100% - 10px) 52%; background-size: 5px 5px; background-repeat: no-repeat; }
+select.btn option { background: #ffffff; color: #231d36; }
+
+#labels { position: fixed; inset: 0; pointer-events: none; z-index: 2; overflow: hidden; }
+.label { position: absolute; transform: translate(-50%, -100%); white-space: nowrap; font-size: 13px; padding: 2px 9px; border-radius: 999px; background: rgba(255,255,255,.88); border: 1px solid var(--line); color: var(--fg); box-shadow: 0 2px 10px rgba(30,40,80,.18); }
+.label.pin { border-color: rgba(138,82,0,.55); }
+.label.bed { display: inline-flex; align-items: center; gap: 6px; padding: 1px 10px 2px 8px; font-family: var(--display); font-style: italic; font-weight: 600; font-size: 17px; transform: translate(-50%, -50%); background: rgba(255,255,255,.78); }
+.label.bed .dot { width: 9px; height: 9px; }
+
+.card { position: fixed; z-index: 4; right: max(16px, env(safe-area-inset-right, 0px)); top: calc(env(safe-area-inset-top, 0px) + 72px); width: min(360px, calc(100% - 32px)); max-height: calc(100% - 170px); overflow: auto; padding: 18px; display: grid; gap: 12px; }
+.card[hidden] { display: none; }
+.card .close { position: absolute; top: 10px; right: 10px; border: 0; background: none; width: 32px; height: 32px; border-radius: 8px; cursor: pointer; color: var(--muted); font-size: 20px; line-height: 1; }
+.pills { display: flex; flex-wrap: wrap; gap: 6px; padding-right: 28px; }
+.pill { font-size: 12px; border-radius: 999px; padding: 1px 9px; border: 1px solid var(--line); color: var(--muted); }
+.pill.kind { color: #14101c; border-color: rgba(35,29,54,.25); font-weight: 600; }
+.pill.pinned { color: var(--candle); border-color: rgba(138,82,0,.5); }
+.pill.warn { color: var(--warn); border-color: rgba(138,82,0,.5); }
+.pill.bad { color: var(--bad); border-color: rgba(176,48,74,.5); }
+.card h2 { margin: 0; font-family: var(--display); font-weight: 600; font-size: 28px; line-height: 1.1; text-wrap: balance; }
+.sub { margin: -6px 0 0; font-family: var(--mono); font-size: 12px; color: var(--faint); }
+.content { margin: 0; overflow-wrap: anywhere; }
+.note { background: rgba(106,72,200,.09); border-radius: 10px; padding: 9px 11px; font-size: 14px; }
+.note b { display: block; font-family: var(--mono); font-size: 11px; letter-spacing: .14em; text-transform: uppercase; color: var(--faint); font-weight: 500; }
+.rel { display: grid; gap: 6px; }
+.rel h3 { margin: 0; font-family: var(--mono); font-size: 11px; letter-spacing: .14em; text-transform: uppercase; color: var(--faint); font-weight: 500; }
+.chips { display: flex; flex-wrap: wrap; gap: 6px; }
+.chip { display: inline-flex; align-items: center; gap: 6px; border: 1px solid var(--line); background: rgba(255,255,255,.7); border-radius: 999px; padding: 3px 10px; font-size: 13px; cursor: pointer; }
+.chip:hover { border-color: var(--accent); }
+.chip.near { border-style: dashed; }
+.dot { width: 8px; height: 8px; border-radius: 50%; flex: none; box-shadow: 0 0 0 1px rgba(35,29,54,.3); }
+details summary { cursor: pointer; font-size: 13.5px; color: var(--muted); }
+.hist { display: grid; gap: 6px; margin-top: 8px; font-size: 13px; }
+.hist div { display: grid; grid-template-columns: 42px minmax(0,1fr); gap: 8px; }
+.hist .r { font-family: var(--mono); color: var(--faint); }
+.hist .x { color: var(--muted); }
+.panel { position: fixed; z-index: 4; left: max(16px, env(safe-area-inset-left, 0px)); top: calc(env(safe-area-inset-top, 0px) + 72px); width: min(320px, calc(100% - 32px)); max-height: calc(100% - 170px); overflow: auto; padding: 14px; }
+.panel[hidden] { display: none; }
+.panel h3 { margin: 10px 0 4px; font-family: var(--mono); font-size: 11px; letter-spacing: .14em; text-transform: uppercase; color: var(--faint); font-weight: 500; }
+.panel h3:first-child { margin-top: 0; }
+.panel .item { display: flex; align-items: center; gap: 8px; width: 100%; border: 0; background: none; padding: 4px; border-radius: 6px; cursor: pointer; text-align: left; }
+.panel .item:hover { background: rgba(106,72,200,.1); }
+.panel .item.off { color: var(--faint); }
+.key { display: grid; gap: 8px; font-size: 13.5px; color: var(--muted); }
+.key p { margin: 0; }
+.key b { color: var(--fg); font-weight: 500; }
+.fallback { position: fixed; inset: 0; display: grid; place-items: center; text-align: center; padding: 24px; color: var(--muted); }
+@media (max-width: 700px) {
+  .brand h1 { font-size: 24px; }
+  .search { order: 5; width: 100%; }
+  .card { left: max(16px, env(safe-area-inset-left, 0px)); right: max(16px, env(safe-area-inset-right, 0px)); top: auto; bottom: calc(env(safe-area-inset-bottom, 0px) + 128px); width: auto; max-height: 48%; }
+  .panel { max-height: 50%; }
+  .label.bed { font-size: 13px; padding: 0 7px 1px 6px; gap: 4px; background: rgba(255,255,255,.7); }
+  .label.bed .dot { width: 7px; height: 7px; }
+}
+</style>
+
+<canvas id="scene" aria-label="A sunlit 3D flower field, where each large flower is an example record"></canvas>
+<div id="vignette" aria-hidden="true"></div>
+<div id="labels" aria-hidden="true"></div>
+
+<header class="bar top">
+  <div class="brand"><span class="acr">M.O.T.H.E.R</span><h1>Memory garden</h1></div>
+  <span class="example">Example data</span>
+  <span class="spacer"></span>
+  <label class="glass search"><span hidden>Search the garden</span><input id="q" type="search" placeholder="Search" autocomplete="off"></label>
+  <button class="btn" id="listBtn" aria-pressed="false" aria-controls="list">List</button>
+  <button class="btn" id="keyBtn" aria-pressed="false" aria-controls="key">Key</button>
+</header>
+
+<div class="bar bottom">
+  <div class="glass time">
+    <button id="play" aria-label="Replay the week"><svg width="14" height="14" viewBox="0 0 14 14" aria-hidden="true"><path id="playIcon" d="M3 1.5v11l9-5.5z" fill="currentColor"/></svg></button>
+    <label for="t" hidden>Time</label>
+    <input id="t" type="range" min="0" max="1000" value="1000">
+    <output id="tLabel" for="t">Now</output>
+  </div>
+  <select class="btn" id="who" aria-label="Show one harness"><option value="">Everyone</option></select>
+  <button class="btn" id="home">Overview</button>
+</div>
+
+<aside class="card glass" id="card" hidden aria-live="polite"></aside>
+<aside class="panel glass" id="list" hidden aria-label="All records"></aside>
+<aside class="panel glass key" id="key" hidden aria-label="Key">
+  <p>Drag to look around, scroll or pinch to move closer, and click a flower to visit it.</p>
+  <p>The records are the <b>large blooms</b> standing above the wild flowers, each catching a glint of sun. They grow in six loose drifts, one per kind, and each kind is its own flower: lilac <b>daisies</b> are memories, mint <b>tulips</b> decisions, orange <b>poppies</b> tasks, blue <b>bellflowers</b> checkpoints, golden <b>sunflowers</b> artifacts and pink <b>roses</b> actions. Taller stems have been revised more often.</p>
+  <p>The small wild flowers, grass and butterflies are only the field. Near each drift the wild flowers lean towards its colour.</p>
+  <p>The <b>lotuses</b> on the pond around the candle are the pinned core, which every harness reads first.</p>
+  <p>A bloom that slowly swells, with a ring opening around it, is a task that is in progress or blocked, or an action whose outcome is pending or unknown. Faded nodding buds are retracted, superseded or cancelled.</p>
+  <p>A solid white thread is a saved link. A dotted one means two records are similar in meaning.</p>
+  <p>The slider replays the week. Everything here is invented example data, and the field is read-only.</p>
+</aside>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js" integrity="sha384-CI3ELBVUz9XQO+97x6nwMDPosPR5XvsxW2ua7N1Xeygeh1IxtgqtCkGfQY9WWdHu" crossorigin="anonymous"></script>
+<script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/OrbitControls.js" integrity="sha384-wagZhIFgY4hD+7awjQjR4e2E294y6J2HSnd8eTNc15ZubTeQeVRZwhQJ+W6hnBsf" crossorigin="anonymous"></script>
+<script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/objects/Reflector.js" integrity="sha384-jkP574SRjAnu7PthvXiz1y2NxetUt9fJ501g38gkUkheZFDNGBoZ/1MnhzS/fKlK" crossorigin="anonymous"></script>
+<script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/shaders/CopyShader.js" integrity="sha384-nhO9toQuMo5osCuA0l+YFpSqscZWxDu251Bnho2gD3kSPv1neEwHg0LyEmrA+mPj" crossorigin="anonymous"></script>
+<script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/shaders/LuminosityHighPassShader.js" integrity="sha384-mY+ii969jnDCI2HjRHftH2NZVkIO5ZGUkcnGCg3oVJ3kVstWQXwerYWBg+nbUG4R" crossorigin="anonymous"></script>
+<script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/postprocessing/EffectComposer.js" integrity="sha384-GkidzTYmQg24v13sa3xhBBbvOLbVLO1QxfyKLdOWweQqNqS/iWwUst2T1fER2Xrg" crossorigin="anonymous"></script>
+<script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/postprocessing/RenderPass.js" integrity="sha384-2EpLreWSFuZsk4hcSplXLhlHd/wzvDNF907bTGIXSXM0SlhJNzy4YK0DhBFvkFEs" crossorigin="anonymous"></script>
+<script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/postprocessing/ShaderPass.js" integrity="sha384-I3lsvPeDJYFrEAzn/TA0yhc/SCYKwpyfyq8lKzHYKohu43H9f7xc/Q9ZWgSVUDl3" crossorigin="anonymous"></script>
+<script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/postprocessing/UnrealBloomPass.js" integrity="sha384-aVQ2QnWkoxhOefDB0YZB64OPVzujvccydpcC7UqMDJUK0ChwA382zOHmrWHGDRRa" crossorigin="anonymous"></script>
+<script>
+(() => {
+  const KINDS = ["memory", "decision", "task", "checkpoint", "artifact", "action"];
+  const BED = { memory: "Memories", decision: "Decisions", task: "Tasks", checkpoint: "Checkpoints", artifact: "Artifacts", action: "Actions" };
+  const HEX = { memory: 0xc6abf2, decision: 0x86d4c0, task: 0xf2a66e, checkpoint: 0x8db6f2, artifact: 0xe3cf7d, action: 0xef93ae };
+  const CANDLE = 0xf3c47e;
+  const RETIRED = new Set(["retracted", "superseded", "cancelled"]);
+  const UNSETTLED = r => (r.kind === "task" && (r.status === "doing" || r.status === "blocked")) || (r.kind === "action" && (r.status === "pending" || r.status === "unknown"));
+  const reduced = matchMedia("(prefers-reduced-motion: reduce)").matches;
+  const small = Math.min(innerWidth, innerHeight) < 700;
+  // Phones and tablets skip the glow pass and edge smoothing; a small window on a laptop only thins the planting.
+  const touch = matchMedia("(pointer: coarse)").matches;
+
+  // Example records. History entries: [revision, harness, time, changed fields, text at that revision].
+  const R = [
+    { id: "4c1e9a07", kind: "memory", status: "active", title: "Preferred name", content: "Call me Sol. Use it instead of the account name.", pinned: "claude-code",
+      h: [[1, "claude-code", "2026-11-08T21:14", null, "Call me Solomon."], [2, "chatgpt", "2026-11-09T09:02", ["content"], ""]] },
+    { id: "a82f13d5", kind: "memory", status: "active", title: "What matters most", content: "Being remembered between sessions matters more than speed. Keep continuity when switching tools.", pinned: "claude-code",
+      h: [[1, "claude-code", "2026-11-08T21:20", null, ""]] },
+    { id: "0d5b7c62", kind: "memory", status: "active", title: "Evening tea", content: "Green tea after 21:00. Oolong on long nights.",
+      h: [[1, "codex", "2026-11-09T22:41", null, "Green tea."], [2, "hermes", "2026-11-10T23:05", ["content"], "Oolong."], [3, "hermes", "2026-11-11T21:30", ["content"], ""]] },
+    { id: "e93a4410", kind: "memory", status: "active", title: "Works late", content: "Best focus between 22:00 and 02:00. Keep plans light in the morning.",
+      h: [[1, "chatgpt", "2026-11-09T10:12", null, ""]] },
+    { id: "7f20c8be", kind: "memory", status: "active", title: "Miso the cat", content: "A cat named Miso who sits on the keyboard during long sessions.",
+      h: [[1, "animaos", "2026-11-10T19:44", null, ""]] },
+    { id: "b6d2e015", kind: "memory", status: "active", title: "Plans before work", content: "Tell me the plan in one paragraph before starting anything bigger than a small edit.", pinned: "claude-code",
+      h: [[1, "codex", "2026-11-08T22:03", null, "Share a plan first."], [2, "claude-code", "2026-11-11T20:10", ["content"], ""]] },
+    { id: "31c9f7a8", kind: "memory", status: "active", title: "Plain words", content: "No motivational filler. Short, direct sentences.",
+      h: [[1, "codex", "2026-11-09T23:18", null, ""]] },
+    { id: "92ab05e4", kind: "memory", status: "retracted", title: "Old address", content: "Withdrawn at the owner's request.",
+      h: [[1, "chatgpt", "2026-11-08T14:00", null, "(address)"], [2, "@owner-review", "2026-11-09T08:30", ["status", "content"], ""]] },
+    { id: "58e1d3c0", kind: "memory", status: "active", title: "Reading this month", content: "Reading about local-first software and CRDTs.",
+      h: [[1, "chatgpt", "2026-11-10T12:22", null, ""]] },
+    { id: "c4f07b19", kind: "decision", status: "confirmed", title: "Keep everything local", content: "One SQLite file on this machine. No cloud copies of memory.", pinned: "claude-code", refs: ["a82f13d5"],
+      h: [[1, "claude-code", "2026-11-08T21:31", null, ""]] },
+    { id: "26a9e8d4", kind: "decision", status: "confirmed", title: "Rust for the store", content: "Replace the Bun prototype with a single Rust executable.",
+      h: [[1, "codex", "2026-11-08T16:00", null, "Port to Rust."], [2, "claude-code", "2026-11-09T11:40", ["content"], ""]] },
+    { id: "f81c2a6b", kind: "decision", status: "proposed", title: "Garden is read-only first", content: "Show everything before letting the garden change anything.", refs: ["d07e6b31"],
+      h: [[1, "claude-code", "2026-11-12T10:02", null, ""]] },
+    { id: "6b3e90f2", kind: "decision", status: "superseded", title: "Use the Bun runtime", content: "Superseded by the Rust store.", refs: ["26a9e8d4"],
+      h: [[1, "codex", "2026-11-08T12:10", null, "Bun for speed of iteration."], [2, "claude-code", "2026-11-09T11:41", ["status", "content"], ""]] },
+    { id: "1e5d8c47", kind: "task", status: "todo", title: "Install 0.5.0 everywhere", content: "Replace each installed copy together, then run mother doctor on each config.",
+      h: [[1, "claude-code", "2026-11-11T18:20", null, ""]] },
+    { id: "9a7c3e21", kind: "task", status: "doing", title: "Refactor the search cache", content: "Split cache pruning from indexing.", refs: ["26a9e8d4"], assigned: ["codex", "claude-code", "2026-11-11T15:00"],
+      h: [[1, "claude-code", "2026-11-11T14:55", null, ""], [2, "codex", "2026-11-11T15:12", ["status"], ""]] },
+    { id: "d07e6b31", kind: "task", status: "doing", title: "Mock up the memory garden", content: "A garden you can walk through, with example data, before any Rust.", assigned: ["claude-code", "chatgpt", "2026-11-12T09:40"],
+      h: [[1, "chatgpt", "2026-11-12T09:38", null, ""], [2, "claude-code", "2026-11-12T09:55", ["status"], ""]] },
+    { id: "5c8a0f93", kind: "task", status: "blocked", title: "Confirm Codex instructions file", content: "Check where Codex reads global AGENTS.md before the guide says so.", assigned: ["codex", "claude-code", "2026-11-11T16:30"],
+      h: [[1, "claude-code", "2026-11-11T16:29", null, ""], [2, "codex", "2026-11-11T17:05", ["status"], ""]] },
+    { id: "2f41b7d8", kind: "task", status: "done", title: "Write release notes", content: "Notes for 0.5.0.",
+      h: [[1, "hermes", "2026-11-11T19:00", null, ""], [2, "hermes", "2026-11-11T20:45", ["status"], ""]] },
+    { id: "ab90e3c5", kind: "task", status: "cancelled", title: "Plan Sunday", content: "Dropped.",
+      h: [[1, "chatgpt", "2026-11-09T09:30", null, ""], [2, "chatgpt", "2026-11-10T08:00", ["status"], ""]] },
+    { id: "e07d4a1c", kind: "checkpoint", status: "active", title: "Evening handoff", content: "Pins reviewed with Sol. Garden mockup next.", next: "Show Sol the garden and agree the look.", refs: ["4c1e9a07", "a82f13d5", "d07e6b31"],
+      h: [[1, "claude-code", "2026-11-12T10:20", null, ""]] },
+    { id: "73b5f0e8", kind: "checkpoint", status: "superseded", title: "Morning handoff", content: "Release notes drafted.", next: "Review pins.", refs: ["2f41b7d8"],
+      h: [[1, "hermes", "2026-11-11T09:00", null, ""], [2, "claude-code", "2026-11-12T10:20", ["status"], ""]] },
+    { id: "c9e2a6d0", kind: "checkpoint", status: "superseded", title: "ChatGPT session", content: "Tea preference corrected.", refs: ["0d5b7c62"],
+      h: [[1, "chatgpt", "2026-11-10T09:10", null, ""], [2, "hermes", "2026-11-11T09:00", ["status"], ""]] },
+    { id: "48f1c3b9", kind: "checkpoint", status: "active", title: "Codex run summary", content: "Cache split half done; tests green.", next: "Finish moving pruning into its own module.", refs: ["9a7c3e21"],
+      h: [[1, "codex", "2026-11-11T18:02", null, ""]] },
+    { id: "a1d6f8e2", kind: "artifact", status: "active", title: "Garden sketch notes", content: "Beds by kind, a candle on the pond, walk from flower to flower.", refs: ["d07e6b31", "f81c2a6b"],
+      h: [[1, "claude-code", "2026-11-12T10:05", null, ""]] },
+    { id: "3e9b2c71", kind: "artifact", status: "active", title: "Release notes draft", content: "0.5.0: pinned core, handoffs, the hearth.", refs: ["2f41b7d8"],
+      h: [[1, "hermes", "2026-11-11T20:40", null, ""]] },
+    { id: "f5a20d84", kind: "action", status: "succeeded", title: "Launch codex: cache refactor", content: "Finished: succeeded, exit code 0, after 312 seconds.", refs: ["9a7c3e21"],
+      h: [[1, "@owner-launch", "2026-11-11T15:01", null, ""], [2, "@owner-launch", "2026-11-11T15:06", ["status", "content"], ""]] },
+    { id: "0b8e7d26", kind: "action", status: "unknown", title: "Launch codex: instructions check", content: "Stopped at its timeout after 1800 seconds; what it did before stopping is unknown.", refs: ["5c8a0f93"],
+      h: [[1, "@owner-launch", "2026-11-11T16:31", null, ""], [2, "@owner-launch", "2026-11-11T17:01", ["status", "content"], ""]] },
+    { id: "6d3f1a9c", kind: "action", status: "pending", title: "Publish release notes", content: "Waiting for the owner to approve the draft.", refs: ["3e9b2c71"],
+      h: [[1, "hermes", "2026-11-11T20:50", null, ""]] },
+  ];
+  const NEAR = [["0d5b7c62", "e93a4410"], ["31c9f7a8", "b6d2e015"], ["c4f07b19", "a82f13d5"], ["d07e6b31", "a1d6f8e2"], ["9a7c3e21", "48f1c3b9"], ["7f20c8be", "e93a4410"], ["f81c2a6b", "a1d6f8e2"]];
+
+  const byId = new Map(R.map(r => [r.id, r]));
+  const ms = s => new Date(s + ":00").getTime();
+  R.forEach(r => { r.refs = r.refs || []; r.times = r.h.map(e => ms(e[2])); });
+  const T0 = Math.min(...R.map(r => r.times[0])) - 3600e3;
+  const T1 = Math.max(...R.flatMap(r => r.times)) + 600e3;
+  const refBy = id => R.filter(r => r.refs.includes(id)).map(r => r.id);
+  const near = id => NEAR.filter(p => p.includes(id)).map(p => (p[0] === id ? p[1] : p[0]));
+  const harnesses = [...new Set(R.flatMap(r => r.h.map(e => e[1])))].sort((a, b) => (a[0] === "@") - (b[0] === "@") || a.localeCompare(b));
+  const esc = s => String(s).replace(/[&<>"]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+  const when = t => new Date(ms(t)).toLocaleDateString("en-GB", { weekday: "short", day: "numeric", month: "short" }) + " " + t.slice(11, 16);
+  const css = k => `var(--k-${k})`;
+  // Deterministic randomness so the garden grows the same way every visit.
+  let seed = 7;
+  const rand = () => { seed = (seed * 16807) % 2147483647; return (seed - 1) / 2147483646; };
+  const between = (a, b) => a + (b - a) * rand();
+
+  function fail(msg) { const d = document.createElement("div"); d.className = "fallback"; d.textContent = msg; document.body.appendChild(d); }
+  if (!window.THREE || !THREE.OrbitControls) return fail("The garden could not load. Check your connection and reload.");
+  let renderer;
+  try { renderer = new THREE.WebGLRenderer({ canvas: document.getElementById("scene"), antialias: true, powerPreference: "high-performance" }); }
+  catch (e) { return fail("This browser cannot draw 3D graphics, so the garden cannot open here."); }
+
+  // ---- Scene, camera and the shared light ------------------------------------
+  // Everything is drawn with a few small hand-written shaders that share one set of uniforms: a high summer sun,
+  // sky and ground ambient, soft cloud shadows that drift over the land, the candle's small warmth, a wind that
+  // travels across the field in gusts, and a pale blue haze over distance.
+  const RAD = Math.PI / 180, TAU = Math.PI * 2;
+  const col = h => new THREE.Color(h);
+  const rgb = (r, g, b) => new THREE.Color(r, g, b);
+  const V3 = (x, y, z) => new THREE.Vector3(x, y, z);
+  const place = (r, deg, y = 0) => { const a = deg * RAD; return V3(r * Math.cos(a), y, -r * Math.sin(a)); };
+  const pick1 = list => list[Math.floor(rand() * list.length) % list.length];
+
+  const scene = new THREE.Scene();
+  scene.background = col(0x9cc4ea);
+  const camera = new THREE.PerspectiveCamera(50, 1, 0.3, 11000);
+  const HOME = { pos: V3(0, 14, 54), target: V3(0, 5, 0) };
+  camera.position.copy(HOME.pos);
+  camera.layers.enable(1); // layer 1 holds the wild flowers, which the pond's mirror does not need to draw
+  const controls = new THREE.OrbitControls(camera, renderer.domElement);
+  controls.target.copy(HOME.target);
+  Object.assign(controls, { enableDamping: true, dampingFactor: 0.08, minDistance: 4, maxDistance: 260, maxPolarAngle: Math.PI / 2 - 0.06, autoRotate: !reduced, autoRotateSpeed: 0.22 });
+  let anim = null;
+  controls.addEventListener("start", () => { controls.autoRotate = false; anim = null; });
+
+  // The sun stands high over the viewer's left shoulder, so the blooms, which face the way in, are fully lit.
+  const SUN_DIR = V3(-0.5, 0.76, 0.4).normalize();
+  // The long valley and its lake lie this way from the garden.
+  const VALE_X = -0.1726, VALE_Z = -0.985;
+  const U = {
+    uTime: { value: 0 },
+    uSunDir: { value: SUN_DIR },
+    uSunCol: { value: rgb(0.9, 0.83, 0.66) },
+    uSkyCol: { value: rgb(0.34, 0.44, 0.6) },
+    uGroundCol: { value: rgb(0.25, 0.3, 0.2) },
+    uCandlePos: { value: V3(0, 2.0, 0) },
+    uCandleCol: { value: rgb(0.5, 0.3, 0.12) },
+    uFogCol: { value: rgb(0.6, 0.75, 0.93) },
+    uFogCol2: { value: rgb(0.85, 0.9, 0.95) },
+    uFogDen: { value: 0.004 },
+    uFogNear: { value: 28 },
+  };
+  const NOISE_WIND = `
+    float hash(vec2 p){ return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453); }
+    float vnoise(vec2 p){ vec2 i = floor(p), f = fract(p); f = f * f * (3.0 - 2.0 * f);
+      return mix(mix(hash(i), hash(i + vec2(1.0, 0.0)), f.x), mix(hash(i + vec2(0.0, 1.0)), hash(i + vec2(1.0, 1.0)), f.x), f.y); }
+    // Wind: a steady sway, with slow gusts that travel across the field so that grass and flowers ripple in waves.
+    vec2 windAt(vec2 p){
+      float gust = 0.3 + 1.0 * vnoise(p * 0.045 + vec2(uTime * 0.22, uTime * 0.1));
+      return vec2(sin(uTime * 1.6 + p.x * 0.31 + p.y * 0.23) + 0.6 * sin(uTime * 0.7 + p.y * 0.13), 0.7 * cos(uTime * 1.2 + p.x * 0.17)) * gust;
+    }`;
+  const LIGHTS = `
+    uniform float uTime; uniform vec3 uSunDir; uniform vec3 uSunCol; uniform vec3 uSkyCol; uniform vec3 uGroundCol;
+    uniform vec3 uCandlePos; uniform vec3 uCandleCol;
+    uniform vec3 uFogCol; uniform vec3 uFogCol2; uniform float uFogDen; uniform float uFogNear;` + NOISE_WIND + `
+    // Soft shadows of clouds, drifting slowly over the land.
+    float cloudShade(vec3 P){
+      float n = vnoise(P.xz * 0.011 + vec2(uTime * 0.012, 4.0)) * 0.65 + vnoise(P.xz * 0.0037 + vec2(7.0, uTime * 0.005)) * 0.35;
+      return 0.6 + 0.4 * smoothstep(0.34, 0.54, n);
+    }
+    // The candle's light: faint by day. k = 1 ignores the surface direction (for soft, leafy things).
+    vec3 warm(vec3 P, vec3 N, float k){
+      vec3 L = uCandlePos - P; float d2 = dot(L, L);
+      return uCandleCol * min(1.0 / (1.0 + d2 * 0.05), 0.5) * clamp(dot(N, L * inversesqrt(d2)) * (1.0 - k) + k, 0.0, 1.0);
+    }
+    // Ambient from sky and ground, plus wrapped sunlight under the passing clouds.
+    vec3 lit(vec3 P, vec3 N, float wrap){
+      vec3 c = mix(uGroundCol, uSkyCol, N.y * 0.5 + 0.5);
+      float d = clamp((dot(N, uSunDir) + wrap) / (1.0 + wrap), 0.0, 1.0);
+      d = mix(d, smoothstep(0.15, 0.7, d), 0.35);
+      return c + uSunCol * d * cloudShade(P) + warm(P, N, 0.35);
+    }
+    vec3 fogged(vec3 c, vec3 P){
+      vec3 v = P - cameraPosition; float dist = length(v);
+      float od = min(max(dist - uFogNear, 0.0), 60.0) * uFogDen * (1.3 - 0.6 * clamp(P.y / 16.0, 0.0, 1.0)) + dist * 0.00027 * exp(-max(P.y, 0.0) / 520.0);
+      float f = 1.0 - exp(-od);
+      float toward = pow(clamp(dot(v / dist, uSunDir) * 0.5 + 0.5, 0.0, 1.0), 3.0);
+      return mix(c, mix(uFogCol, uFogCol2, toward), f);
+    }`;
+  const WORLD_VS = "uniform float uTime;" + NOISE_WIND + `
+    varying vec3 vW; varying vec3 vN; varying vec3 vC; varying vec2 vUv;
+    #ifdef FLORA
+      attribute float aGlow; varying float vG;
+    #endif
+    uniform vec3 uColor;
+    void main(){
+      mat4 m = modelMatrix;
+      #ifdef USE_INSTANCING
+        m = modelMatrix * instanceMatrix;
+      #endif
+      vec4 w = m * vec4(position, 1.0);
+      #ifdef WIND
+        float ht = max(w.y - m[3].y, 0.0);
+        vec2 gust = windAt(m[3].xz) * ht * WIND;
+        w.x += gust.x; w.z += gust.y;
+      #endif
+      vW = w.xyz;
+      vec3 s2 = vec3(dot(m[0].xyz, m[0].xyz), dot(m[1].xyz, m[1].xyz), dot(m[2].xyz, m[2].xyz));
+      vN = normalize(mat3(m) * (normal / s2));
+      vC = uColor;
+      #ifdef USE_COLOR
+        vC *= color;
+      #endif
+      #ifdef USE_INSTANCING_COLOR
+        vC *= instanceColor;
+      #endif
+      #ifdef FLORA
+        vG = aGlow;
+      #endif
+      vUv = uv;
+      gl_Position = projectionMatrix * viewMatrix * w;
+    }`;
+  // Rock, bark and foliage masses: faintly mottled, with a soft sunlit rim.
+  const PAINT_FS = LIGHTS + `
+    varying vec3 vW; varying vec3 vN; varying vec3 vC;
+    uniform float uDab; uniform float uDabScale; uniform float uDabHard; uniform float uRim; uniform vec3 uEmit; uniform float uOpacity;
+    void main(){
+      vec3 N = normalize(vN); vec3 V = normalize(cameraPosition - vW);
+      #ifdef DOUBLE_SIDED
+        if (dot(N, V) < 0.0) N = -N;
+      #endif
+      float n = vnoise(vW.xz * uDabScale + vW.y * 1.9) * 0.65 + vnoise(vW.zy * uDabScale * 2.3 + vW.x * 1.3) * 0.35;
+      n = mix(n, smoothstep(0.36, 0.64, n), uDabHard);
+      vec3 alb = vC * (1.0 + uDab * (n - 0.5) * 2.0);
+      vec3 c = alb * lit(vW, N, 0.5);
+      float rim = pow(1.0 - clamp(dot(N, V), 0.0, 1.0), 3.0);
+      c += (alb * 0.5 + 0.15) * uSunCol * rim * uRim * 0.45 * (0.3 + clamp(dot(-V, uSunDir), 0.0, 1.0)) * (0.55 + 0.45 * N.y);
+      c += uEmit;
+      gl_FragColor = vec4(fogged(c, vW), uOpacity);
+    }`;
+  // Petals and leaves: thin, so sunlight comes through them. uSat deepens the colour of the record blooms.
+  const FLORA_FS = LIGHTS + `
+    varying vec3 vW; varying vec3 vN; varying vec3 vC; varying vec2 vUv; varying float vG;
+    uniform float uOpacity; uniform float uGlow; uniform float uTrans; uniform float uSat;
+    void main(){
+      vec3 N = normalize(vN); vec3 V = normalize(cameraPosition - vW);
+      if (dot(N, V) < 0.0) N = -N;
+      vec3 alb = vC * (0.95 + 0.07 * sin(vUv.x * 31.4) * vG * vUv.y);
+      alb = max(mix(vec3(dot(alb, vec3(0.299, 0.587, 0.114))), alb, uSat), 0.0);
+      vec3 c = alb * lit(vW, N, 0.6) * 0.8;
+      c += alb * uSunCol * clamp(dot(-N, uSunDir), 0.0, 1.0) * uTrans * 0.6 * cloudShade(vW);
+      vec3 L = uCandlePos - vW; float d2 = dot(L, L);
+      c += alb * uCandleCol * min(1.0 / (1.0 + d2 * 0.02), 0.5) * clamp(dot(-N, L * inversesqrt(d2)), 0.0, 1.0) * uTrans * 0.6;
+      float rim = pow(1.0 - clamp(dot(N, V), 0.0, 1.0), 2.5);
+      c += (alb * 0.6 + 0.15) * uSunCol * rim * 0.22 * (0.35 + clamp(dot(-V, uSunDir), 0.0, 1.0));
+      c += alb * uGlow * vG;
+      gl_FragColor = vec4(fogged(c, vW), uOpacity);
+    }`;
+  function paint(o = {}) {
+    return new THREE.ShaderMaterial({
+      uniforms: Object.assign({ uColor: { value: col(o.color === undefined ? 0xffffff : o.color) }, uDab: { value: o.dab === undefined ? 0.14 : o.dab }, uDabScale: { value: o.dabScale || 1.6 }, uDabHard: { value: o.hard || 0 }, uRim: { value: o.rim === undefined ? 0.6 : o.rim }, uEmit: { value: col(o.emit || 0) }, uOpacity: { value: 1 } }, U),
+      vertexShader: WORLD_VS, fragmentShader: PAINT_FS, vertexColors: !!o.vertexColors, side: o.side || THREE.FrontSide, defines: o.defines || {},
+    });
+  }
+  function flora(o = {}) {
+    return new THREE.ShaderMaterial({
+      uniforms: Object.assign({ uColor: { value: col(o.color === undefined ? 0xffffff : o.color) }, uOpacity: { value: 1 }, uGlow: { value: o.glow || 0 }, uTrans: { value: o.trans === undefined ? 0.6 : o.trans }, uSat: { value: o.sat || 1 } }, U),
+      vertexShader: WORLD_VS, fragmentShader: FLORA_FS, vertexColors: true, side: THREE.DoubleSide, transparent: !!o.transparent, defines: Object.assign({ FLORA: 1 }, o.defines || {}),
+    });
+  }
+
+  function canvasTexture(w, h, draw) { const c = document.createElement("canvas"); c.width = w; c.height = h; draw(c.getContext("2d"), w, h); return new THREE.CanvasTexture(c); }
+  const GLOW = canvasTexture(128, 128, (g, s) => {
+    const grd = g.createRadialGradient(s / 2, s / 2, 0, s / 2, s / 2, s / 2);
+    grd.addColorStop(0, "rgba(255,255,255,1)"); grd.addColorStop(0.2, "rgba(255,255,255,.5)"); grd.addColorStop(0.55, "rgba(255,255,255,.12)"); grd.addColorStop(1, "rgba(255,255,255,0)");
+    g.fillStyle = grd; g.fillRect(0, 0, s, s);
+  });
+  const halo = (color, size, opacity) => {
+    const s = new THREE.Sprite(new THREE.SpriteMaterial({ map: GLOW, color, transparent: true, opacity, depthWrite: false, blending: THREE.AdditiveBlending }));
+    s.scale.set(size, size, 1);
+    return s;
+  };
+  // Many copies of one shape, each with its own place, turn, size and colour.
+  const dummy = new THREE.Object3D();
+  function inst(geo, mat, items) {
+    const mesh = new THREE.InstancedMesh(geo, mat, Math.max(1, items.length));
+    mesh.count = items.length;
+    items.forEach((o, i) => {
+      dummy.position.set(o.p[0], o.p[1], o.p[2]);
+      if (o.q) dummy.quaternion.copy(o.q); else if (o.r) dummy.rotation.set(o.r[0], o.r[1], o.r[2]); else dummy.rotation.set(0, 0, 0);
+      dummy.scale.set(o.s[0], o.s[1], o.s[2]);
+      dummy.updateMatrix();
+      mesh.setMatrixAt(i, dummy.matrix);
+      mesh.setColorAt(i, o.c);
+    });
+    mesh.frustumCulled = false;
+    scene.add(mesh);
+    return mesh;
+  }
+  // A lumpy ball: rocks and tree crowns. Its corners are welded, so the surface shades as one smooth skin.
+  function lumpy(detail, amount, phase, rough = 0) {
+    const src = new THREE.IcosahedronGeometry(1, detail).attributes.position, seen = new Map(), pos = [], idx = [];
+    for (let i = 0; i < src.count; i++) {
+      const x = src.getX(i), y = src.getY(i), z = src.getZ(i), key = Math.round(x * 1e4) + "," + Math.round(y * 1e4) + "," + Math.round(z * 1e4);
+      let j = seen.get(key);
+      if (j === undefined) {
+        j = pos.length / 3; seen.set(key, j);
+        const k = 1 + amount * (Math.sin(x * 2.3 + phase) * Math.cos(z * 2.7 - phase) + 0.6 * Math.sin(y * 3.7 + phase * 2) + 0.4 * Math.sin((x + z) * 5.1 + phase) + rough * Math.sin(x * 9 + phase) * Math.sin(y * 8 - phase) * Math.sin(z * 10));
+        pos.push(x * k, y * k, z * k);
+      }
+      idx.push(j);
+    }
+    const g = new THREE.BufferGeometry();
+    g.setAttribute("position", new THREE.Float32BufferAttribute(pos, 3));
+    g.setIndex(idx);
+    g.computeVertexNormals();
+    return g;
+  }
+
+  // A small modeller: petals are curved, cupped sheets that shade from throat to tip; whole flower heads are merged
+  // into one mesh each, with a colour and a "glow" weight on every vertex.
+  const tmpV = V3(0, 0, 0), tmpC = col(0), M4 = () => new THREE.Matrix4();
+  const ballGeo = new THREE.SphereGeometry(1, 24, 16), dotGeo = new THREE.SphereGeometry(1, 10, 8);
+  // How finely petals and leaves are divided, along and across.
+  const PETAL_U = small ? 10 : 18, PETAL_V = small ? 4 : 8;
+  class Geo {
+    constructor() { this.p = []; this.c = []; this.u = []; this.g = []; this.i = []; this.m = null; }
+    get n() { return this.p.length / 3; }
+    vert(x, y, z, color, u, v, glow) {
+      tmpV.set(x, y, z); if (this.m) tmpV.applyMatrix4(this.m);
+      this.p.push(tmpV.x, tmpV.y, tmpV.z); this.c.push(color.r, color.g, color.b); this.u.push(u, v); this.g.push(glow);
+    }
+    grid(base, rows, cols) { for (let a = 0; a < rows; a++) for (let b = 0; b < cols; b++) { const o = base + a * (cols + 1) + b; this.i.push(o, o + cols + 1, o + 1, o + 1, o + cols + 1, o + cols + 2); } }
+    // One petal or leaf growing out along +x from the middle, turned by az. tilt lifts it, curl bends it as it goes,
+    // cup curls its edges up, k and p shape its outline, wave crinkles it.
+    petal({ len, wid, k = 1, p = 0.7, tilt = 0, curl = 0, cup = 0.3, wave = 0, az = 0, y = 0, r0 = 0, c0, c1, cm, glow = 1, nu = PETAL_U, nv = PETAL_V, ph = 0 }) {
+      const base = this.n, ca = Math.cos(az), sa = Math.sin(az);
+      let x = r0, yy = y, before = 0;
+      for (let iu = 0; iu <= nu; iu++) {
+        // Steps are shorter near the base and the tip, where the outline turns fastest.
+        const u = 0.5 - 0.5 * Math.cos(Math.PI * iu / nu), th = tilt + curl * u;
+        if (iu) { const tm = tilt + curl * (u + before) / 2; x += Math.cos(tm) * len * (u - before); yy += Math.sin(tm) * len * (u - before); }
+        before = u;
+        const w = wid * 0.5 * Math.pow(Math.max(0, Math.sin(Math.PI * Math.pow(u, k))), p) + 0.01;
+        if (cm) { if (u < 0.3) tmpC.copy(c0).lerp(cm, u / 0.3); else tmpC.copy(cm).lerp(c1, (u - 0.3) / 0.7); } else tmpC.copy(c0).lerp(c1, u);
+        const shade = tmpC.clone();
+        for (let iv = 0; iv <= nv; iv++) {
+          const v = iv / nv * 2 - 1, lift = (cup * v * v + wave * Math.sin(v * 5 + u * 8 + ph) * u) * w;
+          const lx = x - Math.sin(th) * lift, ly = yy + Math.cos(th) * lift, lz = v * w;
+          this.vert(lx * ca + lz * sa, ly, -lx * sa + lz * ca, shade, v * 0.5 + 0.5, u, glow);
+        }
+      }
+      this.grid(base, nu, nv);
+      return this;
+    }
+    ring(n, o, az0 = 0, jitter = 0.04) { for (let i = 0; i < n; i++) this.petal(Object.assign({}, o, { az: az0 + i * TAU / n + between(-jitter, jitter), tilt: (o.tilt || 0) + between(-0.05, 0.05), ph: rand() * 6 })); return this; }
+    // Any ready-made shape, placed by a matrix and shaded from c0 at its foot to c1 at its top.
+    add(geo, m, c0, c1, glow = 0) {
+      const base = this.n, pos = geo.attributes.position, uv = geo.attributes.uv, outer = this.m;
+      if (!geo.boundingBox) geo.computeBoundingBox();
+      const y0 = geo.boundingBox.min.y, dy = (geo.boundingBox.max.y - y0) || 1;
+      this.m = outer ? outer.clone().multiply(m) : m;
+      for (let i = 0; i < pos.count; i++) { tmpC.copy(c0).lerp(c1 || c0, (pos.getY(i) - y0) / dy); this.vert(pos.getX(i), pos.getY(i), pos.getZ(i), tmpC, uv ? uv.getX(i) : 0, uv ? uv.getY(i) : 0, glow); }
+      this.m = outer;
+      if (geo.index) for (let i = 0; i < geo.index.count; i++) this.i.push(base + geo.index.getX(i)); else for (let i = 0; i < pos.count; i++) this.i.push(base + i);
+      return this;
+    }
+    ball(x, y, z, r, sy, c0, c1, glow = 0, geo = ballGeo) { return this.add(geo, M4().makeScale(r, r * sy, r).setPosition(x, y, z), c0, c1, glow); }
+    stamens(n, rad, y, r, color, glow = 0.8) { for (let i = 0; i < n; i++) { const a = i * TAU / n + between(-0.1, 0.1), rr = rad * between(0.8, 1.05); this.ball(Math.cos(a) * rr, y + between(-0.01, 0.02), Math.sin(a) * rr, r, 1, color, color, glow, dotGeo); } return this; }
+    // A hanging bell with five pointed lobes at its mouth.
+    bell(len, rad, c0, c1) {
+      const base = this.n, nf = 40, nt = 14;
+      for (let it = 0; it <= nt; it++) {
+        const t = it / nt;
+        tmpC.copy(c0).lerp(c1, t); const shade = tmpC.clone();
+        for (let i = 0; i <= nf; i++) {
+          const f = i / nf * TAU, lobe = Math.cos(f * 5) * t * t, r = rad * (0.16 + 0.84 * Math.pow(t, 0.6)) * (1 + 0.32 * Math.pow(t, 5)) * (1 + 0.1 * lobe);
+          this.vert(Math.cos(f) * r, -len * (t + 0.08 * lobe), Math.sin(f) * r, shade, i / nf, t, 1);
+        }
+      }
+      this.grid(base, nt, nf);
+      return this;
+    }
+    build() {
+      const b = new THREE.BufferGeometry();
+      b.setAttribute("position", new THREE.Float32BufferAttribute(this.p, 3));
+      b.setAttribute("color", new THREE.Float32BufferAttribute(this.c, 3));
+      b.setAttribute("uv", new THREE.Float32BufferAttribute(this.u, 2));
+      b.setAttribute("aGlow", new THREE.Float32BufferAttribute(this.g, 1));
+      b.setIndex(this.i);
+      b.computeVertexNormals();
+      return b;
+    }
+  }
+
+  // ---- The plan of the garden -------------------------------------------------
+  // An irregular pond in the middle; six loose drifts of flowers of different sizes around it; faint trails that
+  // wander between them. Nothing is walled or paved: the drifts grow straight out of the meadow.
+  const pondR = a => 5.9 + 0.8 * Math.sin(a + 0.5) + 0.5 * Math.sin(2 * a + 1.7) + 0.25 * Math.sin(3 * a);
+  const BEDS = {
+    memory: { ang: 95, r: 15.5, size: 5.8, h: 0, ph: [0.4, 2.1] },
+    decision: { ang: 30, r: 14.5, size: 4.3, h: 0, ph: [1.9, 0.3] },
+    task: { ang: 322, r: 14.5, size: 5.4, h: 0, ph: [3.1, 1.2] },
+    checkpoint: { ang: 210, r: 13.8, size: 4.7, h: 0, ph: [5.0, 4.4] },
+    artifact: { ang: 257, r: 16.5, size: 3.5, h: 0, ph: [2.4, 5.6] },
+    action: { ang: 152, r: 14.2, size: 4.3, h: 0, ph: [0.9, 3.3] },
+  };
+  KINDS.forEach(k => {
+    const b = BEDS[k], a = b.ang * RAD;
+    b.c = place(b.r, b.ang); b.er = [Math.cos(a), -Math.sin(a)]; b.et = [-Math.sin(a), -Math.cos(a)];
+    b.rad = f => b.size * (1 + 0.13 * Math.sin(2 * f + b.ph[0]) + 0.08 * Math.sin(3 * f + b.ph[1]));
+    // A point in the bed, at angle f around its middle and fraction k of the way to its edge.
+    b.at = (f, k, y = 0) => { const rr = b.rad(f) * k, lt = rr * Math.cos(f) * 1.12, lr = rr * Math.sin(f) * 0.9; return V3(b.c.x + b.et[0] * lt + b.er[0] * lr, y, b.c.z + b.et[1] * lt + b.er[1] * lr); };
+    // How far out (x, z) is: below 1 is inside the bed.
+    b.inside = (x, z) => { const dx = x - b.c.x, dz = z - b.c.z, lt = (dx * b.et[0] + dz * b.et[1]) / 1.12, lr = (dx * b.er[0] + dz * b.er[1]) / 0.9; return Math.hypot(lt, lr) / b.rad(Math.atan2(lr, lt)); };
+    b.outline = (n, k = 1) => Array.from({ length: n }, (_, i) => b.at(i / n * TAU, k));
+  });
+  const POND_EDGE = 1.7;
+  const paths = [];
+  {
+    const ring = [];
+    for (let d = 0; d <= 360; d += 6) { const p = place(pondR(d * RAD) + POND_EDGE, d); ring.push([p.x, p.z]); }
+    paths.push({ pts: ring, w: 0.9 });
+    const spoke = (deg, r1, wig, w) => {
+      const pts = [], r0 = pondR(deg * RAD) + POND_EDGE;
+      for (let i = 0; i <= 10; i++) { const t = i / 10, p = place(r0 + (r1 - r0) * t, deg + Math.sin(t * Math.PI * 1.6) * wig); pts.push([p.x, p.z]); }
+      paths.push({ pts, w });
+    };
+    spoke(61, 27, 4, 0.7); spoke(126, 27, -4, 0.7); spoke(180, 28, 4, 0.7); spoke(237.5, 26, -3, 0.7); spoke(357, 28, 4, 0.7); spoke(285, 52, 6, 1.1);
+  }
+  function pathDist(x, z) {
+    let best = 1e9;
+    for (const path of paths) {
+      const pts = path.pts;
+      for (let i = 1; i < pts.length; i++) {
+        const ax = pts[i - 1][0], az = pts[i - 1][1], bx = pts[i][0] - ax, bz = pts[i][1] - az;
+        const t = Math.max(0, Math.min(1, ((x - ax) * bx + (z - az) * bz) / (bx * bx + bz * bz)));
+        const d = Math.hypot(x - ax - bx * t, z - az - bz * t) - path.w / 2;
+        if (d < best) best = d;
+      }
+    }
+    return best;
+  }
+
+  // ---- The open country ---------------------------------------------------------------
+  // The garden stands on a level lawn. Beyond it the land is one continuous surface: meadow that begins to roll,
+  // broad swells, then valleys and ridges, then mountain ranges. A wide valley runs down from the far side and holds a lake.
+  const hash2 = (x, y) => { const v = Math.sin(x * 127.1 + y * 311.7) * 43758.5453; return v - Math.floor(v); };
+  const noise2 = (x, y) => {
+    const xi = Math.floor(x), yi = Math.floor(y), xf = x - xi, yf = y - yi, u = xf * xf * (3 - 2 * xf), v = yf * yf * (3 - 2 * yf);
+    const a = hash2(xi, yi), b = hash2(xi + 1, yi), c = hash2(xi, yi + 1), d = hash2(xi + 1, yi + 1);
+    return a + (b - a) * u + (c - a) * v + (a - b - c + d) * u * v;
+  };
+  const fbm2 = (x, y, oct) => { let amp = 0.5, sum = 0, norm = 0; for (let i = 0; i < oct; i++) { sum += amp * noise2(x, y); norm += amp; x = x * 2.03 + 17.3; y = y * 2.03 + 9.1; amp *= 0.5; } return sum / norm; };
+  const sstep = (a, b, x) => { const t = Math.max(0, Math.min(1, (x - a) / (b - a))); return t * t * (3 - 2 * t); };
+  const LAKE = { far: 600, level: -21 };
+  function terrainY(x, z) {
+    const r = Math.hypot(x, z);
+    if (r < 52) return 0;
+    let h = (fbm2(x / 85 + 3.1, z / 85 + 7.7, 3) - 0.5) * 13 * sstep(52, 130, r);
+    h += (fbm2(x / 260 + 11, z / 260 + 2, 3) - 0.5) * 40 * sstep(110, 420, r);
+    const ridge = 1 - Math.abs(2 * fbm2(x / 640 + 5, z / 640 + 1, 4) - 1);
+    h += ridge * ridge * 95 * sstep(450, 1500, r);
+    const peak = 1 - Math.abs(2 * fbm2(x / 1500 + 9, z / 1500 + 4, 5) - 1), along = x * VALE_X + z * VALE_Z, across = Math.abs(-x * VALE_Z + z * VALE_X);
+    // The ranges stand lower at the head of the valley, so the view down it stays open.
+    h += Math.pow(peak, 1.6) * 560 * sstep(2200, 4600, r) * (1 - 0.5 * Math.pow(Math.max(0, along / r), 24));
+    const valley = Math.exp(-(across / 430) * (across / 430)) * sstep(70, 380, along) * (1 - sstep(1100, 1800, along));
+    h = h * (1 - 0.85 * valley) - 17 * valley;
+    const basin = 1 - sstep(0.78, 1.1, Math.hypot((along - LAKE.far) / 160, across / 340));
+    return h + (-28 - h) * basin;
+  }
+  const withGround = p => { p.y = terrainY(p.x, p.z); return p; };
+  // One wisteria in flower stands alone a little way off, and another far out on the meadow.
+  const WISTERIA = [{ p: withGround(place(60, 141)), h: 15, spread: 7.4 }, { p: withGround(place(190, 36)), h: 18, spread: 9 }];
+
+  // ---- The ground, painted ------------------------------------------------------
+  // One large canvas is painted like a plan of the field: grass in thousands of small strokes, a wash of each kind's
+  // colour where its flowers grow, specks of wild flowers, faint worn trails. The grass blades take their colour from it.
+  const GEXT = 64, GS = small ? 1024 : 2048, gpx = GS / (GEXT * 2), px = v => (v + GEXT) * gpx;
+  const FAR_LAWN = "#5c9440";
+  const groundCanvas = document.createElement("canvas");
+  groundCanvas.width = groundCanvas.height = GS;
+  {
+    const g = groundCanvas.getContext("2d");
+    const dab = (x, z, len, wid, ang, color, alpha) => { g.globalAlpha = alpha; g.fillStyle = color; g.beginPath(); g.ellipse(px(x), px(z), len * gpx, wid * gpx, ang, 0, TAU); g.fill(); };
+    // A blurred shape, drawn with the canvas shadow so it works in every browser.
+    const soft = (color, alpha, blur, trace) => {
+      g.save(); g.globalAlpha = alpha; g.fillStyle = "#000"; g.shadowColor = color; g.shadowBlur = blur * gpx; g.shadowOffsetX = 20000; g.shadowOffsetY = 0;
+      g.translate(-20000, 0); g.beginPath(); trace(); g.fill(); g.restore();
+    };
+    const poly = pts => { pts.forEach((p, i) => (i ? g.lineTo(px(p.x), px(p.z)) : g.moveTo(px(p.x), px(p.z)))); g.closePath(); };
+    const pondPts = k => Array.from({ length: 72 }, (_, i) => place(pondR(i * 5 * RAD) + k, i * 5));
+    g.fillStyle = "#62a044"; g.fillRect(0, 0, GS, GS);
+    const LAWN = ["#6aa844", "#5a9640", "#7cb64c", "#4f8a3c", "#8ec25a", "#5d9c52", "#74aa3e", "#9ccd66", "#4a8240"];
+    for (let i = 0; i < 240; i++) soft(pick1(LAWN), between(0.2, 0.5), between(1.5, 4), () => g.arc(px(between(-60, 60)), px(between(-60, 60)), between(1.5, 6) * gpx, 0, TAU));
+    for (let i = 0, n = small ? 9000 : 26000; i < n; i++) {
+      const x = between(-63, 63), z = between(-63, 63);
+      dab(x, z, between(0.25, 0.95), between(0.06, 0.2), Math.sin(x * 0.11) + Math.cos(z * 0.09) * 1.4 + between(-0.45, 0.45), LAWN[i % LAWN.length], between(0.16, 0.5));
+    }
+    // A soft wash of each kind's colour where its flowers grow, so even the grass hints at the six drifts.
+    KINDS.forEach(k => soft("#" + col(HEX[k]).getHexString(), 0.26, 3.5, () => poly(BEDS[k].outline(48, 0.95))));
+    // Specks of tiny wild flowers everywhere.
+    const SPECK = ["#ffffff", "#fff3b0", "#ffd84a", "#ffb3c8", "#d9b8ff", "#a8c8ff", "#ff9a5a"];
+    for (let i = 0; i < (small ? 110 : 220); i++) {
+      const cx = between(-58, 58), cz = between(-58, 58), tone = pick1(SPECK), spread = between(1.5, 5);
+      for (let j = 0; j < 40; j++) dab(cx + (rand() + rand() - 1) * spread, cz + (rand() + rand() - 1) * spread, between(0.05, 0.11), between(0.05, 0.11), 0, tone, between(0.5, 0.95));
+    }
+    // Trails: grass worn pale by walking, with a little bare earth showing along the middle.
+    g.lineJoin = g.lineCap = "round";
+    const stroke = (path, extra, color, alpha) => {
+      g.globalAlpha = alpha; g.strokeStyle = color; g.lineWidth = Math.max(0.1, path.w + extra) * gpx;
+      g.beginPath(); path.pts.forEach((p, i) => (i ? g.lineTo(px(p[0]), px(p[1])) : g.moveTo(px(p[0]), px(p[1])))); g.stroke();
+    };
+    paths.forEach(p => stroke(p, 0.7, "#a4c468", 0.4));
+    paths.forEach(p => stroke(p, 0, "#b9b47c", 0.42));
+    paths.forEach(p => stroke(p, -0.5, "#b8a276", 0.4));
+    // A damp, darker bank around the water.
+    soft("#3f7038", 0.6, 1.2, () => poly(pondPts(0.8)));
+    // Fade to one colour at the edge, so the painting can run on into the open meadow.
+    const edge = g.createRadialGradient(GS / 2, GS / 2, 44 * gpx, GS / 2, GS / 2, 63 * gpx);
+    edge.addColorStop(0, "rgba(92,148,64,0)"); edge.addColorStop(1, "rgba(92,148,64,1)");
+    g.globalAlpha = 1; g.fillStyle = edge; g.fillRect(0, 0, GS, GS);
+  }
+  const groundData = groundCanvas.getContext("2d").getImageData(0, 0, GS, GS).data;
+  const groundColor = (x, z, out) => {
+    const ix = Math.max(0, Math.min(GS - 1, Math.round(px(x)))), iz = Math.max(0, Math.min(GS - 1, Math.round(px(z)))), k = (iz * GS + ix) * 4;
+    return out.setRGB(groundData[k] / 255, groundData[k + 1] / 255, groundData[k + 2] / 255);
+  };
+  const groundTex = new THREE.CanvasTexture(groundCanvas);
+  groundTex.flipY = false;
+  groundTex.anisotropy = Math.min(8, renderer.capabilities.getMaxAnisotropy());
+  // The land is drawn as three nested rings of the same surface, each finer in angle than the last, so that near
+  // ground is dense where the camera walks and far ridgelines stay smooth against the sky.
+  const terrainMat = new THREE.ShaderMaterial({
+    uniforms: Object.assign({ uMap: { value: groundTex }, uFar: { value: col(FAR_LAWN) } }, U),
+    vertexShader: "varying vec3 vW; varying vec3 vN; void main(){ vW = position; vN = normal; gl_Position = projectionMatrix * viewMatrix * vec4(position, 1.0); }",
+    fragmentShader: LIGHTS + `
+      varying vec3 vW; varying vec3 vN; uniform sampler2D uMap; uniform vec3 uFar;
+      void main(){
+        vec3 N = normalize(vN); float r = length(vW.xz), dist = length(vW - cameraPosition);
+        vec3 alb = texture2D(uMap, clamp(vW.xz / ${(GEXT * 2).toFixed(1)} + 0.5, 0.0, 1.0)).rgb;
+        // Meadow: lush grass, lighter and darker in broad sweeps, hazed with drifts of wild flowers in many colours.
+        vec3 meadow = vec3(0.36, 0.58, 0.25) * (0.84 + 0.34 * vnoise(vW.xz * 0.03) + 0.14 * vnoise(vW.xz * 0.11));
+        float kind = vnoise(vW.xz * 0.009 + 11.0);
+        vec3 bloom = kind < 0.4 ? vec3(0.98, 0.86, 0.3) : kind < 0.56 ? vec3(0.8, 0.6, 0.95) : kind < 0.64 ? vec3(0.95, 0.94, 0.88) : vec3(0.97, 0.52, 0.58);
+        float drift = smoothstep(0.42, 0.78, vnoise(vW.xz * 0.021 + 5.0));
+        meadow = mix(meadow, bloom, drift * mix(0.5 * smoothstep(0.45, 0.85, vnoise(vW.xz * 1.9)), 0.26, smoothstep(40.0, 200.0, dist)));
+        alb = mix(alb, meadow, smoothstep(54.0, 63.0, r));
+        alb = mix(alb, vec3(0.2, 0.4, 0.2), smoothstep(40.0, 150.0, vW.y) * 0.7);
+        alb = mix(alb, vec3(0.5, 0.5, 0.5), smoothstep(0.2, 0.5, 1.0 - N.y) * smoothstep(150.0, 500.0, r));
+        alb = mix(alb, vec3(0.98, 0.98, 1.0), smoothstep(400.0, 560.0, vW.y + 110.0 * vnoise(vW.xz * 0.004)) * smoothstep(0.75, 0.4, 1.0 - N.y));
+        alb = mix(alb, alb * vec3(0.7, 0.75, 0.6), smoothstep(${(LAKE.level + 4).toFixed(1)}, ${(LAKE.level + 0.5).toFixed(1)}, vW.y) * smoothstep(200.0, 300.0, r));
+        alb *= mix(0.9 + 0.22 * vnoise(vW.xz * 2.6) + 0.1 * vnoise(vW.xz * 9.0), 1.06, smoothstep(40.0, 160.0, dist));
+        gl_FragColor = vec4(fogged(alb * lit(vW, N, 0.5), vW), 1.0);
+      }`,
+  });
+  function terrainRing(r0, r1, rings, segs, curve) {
+    const pos = new Float32Array((rings + 1) * (segs + 1) * 3), nor = new Float32Array(pos.length), idx = [];
+    let k = 0;
+    for (let i = 0; i <= rings; i++) {
+      const r = r0 + (r1 - r0) * Math.pow(i / rings, curve), e = Math.max(0.6, r * 0.005);
+      for (let j = 0; j <= segs; j++) {
+        const a = (j % segs) / segs * TAU, x = r * Math.cos(a), z = r * Math.sin(a);
+        const dx = terrainY(x + e, z) - terrainY(x - e, z), dz = terrainY(x, z + e) - terrainY(x, z - e), len = Math.hypot(dx, 2 * e, dz);
+        pos[k] = x; pos[k + 1] = terrainY(x, z); pos[k + 2] = z;
+        nor[k] = -dx / len; nor[k + 1] = 2 * e / len; nor[k + 2] = -dz / len;
+        k += 3;
+        if (i < rings && j < segs) { const o = i * (segs + 1) + j; idx.push(o, o + 1, o + segs + 1, o + 1, o + segs + 2, o + segs + 1); }
+      }
+    }
+    const geo = new THREE.BufferGeometry();
+    geo.setAttribute("position", new THREE.BufferAttribute(pos, 3));
+    geo.setAttribute("normal", new THREE.BufferAttribute(nor, 3));
+    geo.setIndex(idx);
+    const mesh = new THREE.Mesh(geo, terrainMat);
+    mesh.frustumCulled = false;
+    scene.add(mesh);
+  }
+  terrainRing(0, 275, small ? 44 : 72, small ? 120 : 240, 1.5);
+  terrainRing(250, 1560, small ? 56 : 110, small ? 360 : 720, 1.5);
+  terrainRing(1500, 7600, small ? 22 : 36, small ? 720 : 1440, 1.5);
+  // The far lake: it mirrors the blue of the low sky, and glitters.
+  {
+    const pos = [0, 0, 0], idx = [], n = 72;
+    for (let i = 0; i < n; i++) { const a = i / n * TAU, al = Math.cos(a) * 215, ac = Math.sin(a) * 440; pos.push(al * VALE_X - ac * VALE_Z, 0, al * VALE_Z + ac * VALE_X); idx.push(0, 1 + (i + 1) % n, 1 + i); }
+    const geo = new THREE.BufferGeometry();
+    geo.setAttribute("position", new THREE.Float32BufferAttribute(pos, 3));
+    geo.setIndex(idx);
+    const lake = new THREE.Mesh(geo, new THREE.ShaderMaterial({
+      uniforms: U, side: THREE.DoubleSide,
+      vertexShader: "varying vec3 vW; void main(){ vec4 w = modelMatrix * vec4(position, 1.0); vW = w.xyz; gl_Position = projectionMatrix * viewMatrix * w; }",
+      fragmentShader: LIGHTS + `
+        varying vec3 vW;
+        void main(){
+          vec3 V = normalize(cameraPosition - vW); vec2 p = vW.xz * 0.045;
+          vec3 N = normalize(vec3((vnoise(p + uTime * 0.03) - 0.5) * 0.1, 1.0, (vnoise(p * 1.3 + 7.0 - uTime * 0.025) - 0.5) * 0.1));
+          vec3 R = reflect(-V, N);
+          float toward = pow(clamp(dot(normalize(vec3(R.x, 0.0, R.z)), normalize(vec3(uSunDir.x, 0.0, uSunDir.z))) * 0.5 + 0.5, 0.0, 1.0), 3.0);
+          vec3 low = mix(vec3(0.42, 0.66, 0.95), uFogCol2, toward * 0.6);
+          vec3 c = mix(vec3(0.08, 0.3, 0.55), low, 0.62) + vec3(1.0) * smoothstep(0.78, 0.95, vnoise(vW.xz * 0.6 + uTime * 0.5)) * 0.22;
+          gl_FragColor = vec4(fogged(c, vW), 1.0);
+        }`,
+    }));
+    lake.position.set(VALE_X * LAKE.far, LAKE.level, VALE_Z * LAKE.far);
+    lake.frustumCulled = false;
+    scene.add(lake);
+  }
+
+  // ---- The sky: a summer afternoon, blue overhead and pale at the horizon, with soft heaped clouds --------------
+  const sky = new THREE.Mesh(new THREE.SphereGeometry(9500, 64, 32), new THREE.ShaderMaterial({
+    side: THREE.BackSide, depthWrite: false, uniforms: U,
+    vertexShader: "varying vec3 vp; void main(){ vp = position; gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0); }",
+    fragmentShader: LIGHTS + `
+      varying vec3 vp;
+      float fbm(vec2 p){ float a = 0.5, s = 0.0; for (int i = 0; i < 5; i++) { s += a * vnoise(p); p = p * 2.03 + vec2(17.3, 9.1); a *= 0.5; } return s; }
+      void main(){
+        vec3 d = normalize(vp); float h = d.y, sd = dot(d, uSunDir);
+        float toward = pow(clamp(sd * 0.5 + 0.5, 0.0, 1.0), 3.0);
+        vec3 haze = mix(uFogCol, uFogCol2, toward);
+        vec3 c = mix(vec3(0.5, 0.72, 0.94), vec3(0.22, 0.47, 0.86), smoothstep(0.0, 0.5, h));
+        c = mix(c, vec3(0.14, 0.34, 0.77), smoothstep(0.4, 1.0, h));
+        c = mix(haze, c, smoothstep(-0.01, 0.16, h));
+        // Clouds: brighter on the side that faces the sun, grey-blue underneath.
+        vec2 q = d.xz / (max(h, 0.0) + 0.22) * 0.42 + vec2(uTime * 0.004, 3.0);
+        float cl = fbm(q), sunSide = clamp((cl - fbm(q + uSunDir.xz * 0.14)) * 5.0 + 0.62, 0.0, 1.0);
+        float ca = smoothstep(0.44, 0.66, cl) * smoothstep(0.012, 0.1, h);
+        c = mix(c, mix(vec3(0.7, 0.77, 0.88), vec3(1.0, 0.99, 0.96), sunSide), ca * 0.93);
+        c += vec3(1.0, 0.95, 0.84) * (pow(max(sd, 0.0), 900.0) * 1.6 + pow(max(sd, 0.0), 36.0) * 0.22);
+        gl_FragColor = vec4(c, 1.0);
+      }`,
+  }));
+  sky.renderOrder = -2;
+  scene.add(sky);
+
+  // ---- The pond and the candle ------------------------------------------------------------
+  const pondShape = new THREE.Shape(Array.from({ length: 240 }, (_, i) => { const a = i * 1.5 * RAD, r = pondR(a); return new THREE.Vector2(r * Math.cos(a), r * Math.sin(a)); }));
+  const WATER_Y = 0.06;
+  let pond = null;
+  if (THREE.Reflector) {
+    pond = new THREE.Reflector(new THREE.ShapeGeometry(pondShape, 24), {
+      clipBias: 0.003, textureWidth: small ? 512 : 1024, textureHeight: small ? 512 : 1024, color: 0xffffff,
+      shader: {
+        uniforms: { color: { value: null }, tDiffuse: { value: null }, textureMatrix: { value: null } },
+        vertexShader: "uniform mat4 textureMatrix; varying vec4 vUv; varying vec3 vW; void main(){ vUv = textureMatrix * vec4(position, 1.0); vec4 w = modelMatrix * vec4(position, 1.0); vW = w.xyz; gl_Position = projectionMatrix * viewMatrix * w; }",
+        fragmentShader: LIGHTS + `
+          uniform sampler2D tDiffuse; varying vec4 vUv; varying vec3 vW;
+          void main(){
+            vec2 p = vW.xz;
+            vec2 wob = vec2(sin(p.y * 3.1 + uTime * 0.8) + sin((p.x + p.y) * 1.7 - uTime * 0.6), cos(p.x * 2.7 - uTime * 0.7) + sin((p.x - p.y) * 2.3 + uTime * 0.5));
+            wob += (vec2(vnoise(p * 1.7 + uTime * 0.15), vnoise(p * 1.7 - uTime * 0.12 + 7.0)) - 0.5) * 2.0;
+            vec4 uv = vUv; uv.xy += wob * 0.008 * uv.w;
+            vec3 refl = texture2DProj(tDiffuse, uv).rgb;
+            vec3 V = normalize(cameraPosition - vW);
+            float fres = pow(1.0 - clamp(V.y, 0.0, 1.0), 2.2);
+            vec3 deep = vec3(0.05, 0.17, 0.2);
+            vec3 c = mix(deep + refl * 0.5, refl * 1.04 + 0.01, 0.4 + 0.6 * fres);
+            gl_FragColor = vec4(fogged(c, vW), 1.0);
+          }`,
+      },
+    });
+    Object.assign(pond.material.uniforms, U);
+  } else {
+    pond = new THREE.Mesh(new THREE.ShapeGeometry(pondShape, 24), new THREE.MeshBasicMaterial({ color: 0x3a3f78 }));
+  }
+  pond.rotation.x = -Math.PI / 2;
+  pond.position.y = WATER_Y;
+  scene.add(pond);
+  // ---- Natural rock: a few half-buried boulders on the bank, and one in the water for the candle --------------
+  const ROCK = [0xa3a297, 0x92958e, 0xb0ada0, 0x868a84].map(col), rocks = [];
+  [[18, 1.1], [27, 0.6], [150, 0.9], [236, 1.2], [244, 0.5], [318, 0.7]].forEach(([d, size]) => {
+    const p = place(pondR(d * RAD) + between(0.15, 0.5), d, -0.16 * size);
+    rocks.push({ p: [p.x, p.y, p.z], r: [between(-0.3, 0.3), rand() * TAU, between(-0.3, 0.3)], s: [size * between(0.9, 1.3), size * between(0.45, 0.62), size * between(0.8, 1.1)], c: pick1(ROCK) });
+  });
+  rocks.push({ p: [0, 0.1, 0], r: [0, 0.4, 0], s: [1.15, 0.44, 0.98], c: ROCK[0] });
+  inst(lumpy(small ? 3 : 4, 0.09, 0.4, 0.18), paint({ dab: 0.22, dabScale: 2.2, rim: 0.4 }), rocks);
+  const candle = new THREE.Mesh(new THREE.CylinderGeometry(0.15, 0.17, 1.0, 40), paint({ color: 0xf6ead6, emit: 0x1c1206, dab: 0.04, rim: 0.2 }));
+  candle.position.y = 1.03;
+  scene.add(candle);
+  const flameTex = canvasTexture(64, 128, (g, w, h) => {
+    const grd = g.createRadialGradient(w / 2, h * 0.68, 1, w / 2, h * 0.6, h * 0.42);
+    grd.addColorStop(0, "rgba(255,255,255,1)"); grd.addColorStop(0.3, "rgba(255,238,190,1)"); grd.addColorStop(0.7, "rgba(255,170,70,.9)"); grd.addColorStop(1, "rgba(255,120,40,0)");
+    g.fillStyle = grd; g.beginPath(); g.moveTo(w / 2, h * 0.04); g.bezierCurveTo(w * 0.95, h * 0.5, w * 0.9, h * 0.95, w / 2, h * 0.95); g.bezierCurveTo(w * 0.1, h * 0.95, w * 0.05, h * 0.5, w / 2, h * 0.04); g.fill();
+  });
+  const flame = new THREE.Sprite(new THREE.SpriteMaterial({ map: flameTex, transparent: true, depthWrite: false }));
+  flame.center.set(0.5, 0.08); flame.position.y = 1.53; flame.scale.set(0.3, 0.62, 1);
+  scene.add(flame);
+  const flameHalo = halo(CANDLE, 2.0, 0.3);
+  flameHalo.position.y = 1.78;
+  scene.add(flameHalo);
+
+
+  // ---- The flower field ---------------------------------------------------------------------
+  // Wild flowers by the thousand, on stems that sway with the grass. They are thickest around the garden and thin
+  // away with distance, where the painted ground carries the colour on. Near each drift they take its kind's hue.
+  const PALE = [rgb(0.55, 0.55, 0.55), rgb(1, 1, 1)];
+  const rosetteGeo = new Geo().ring(7, { len: 0.5, wid: 0.25, k: 0.75, p: 0.85, tilt: 0.7, curl: -0.95, cup: 0.35, c0: PALE[0], c1: PALE[1], glow: 0, nu: small ? 4 : 6, nv: small ? 2 : 4 }, 0, 0.3).build();
+  // A flower spike on a thin stalk, like lavender or salvia.
+  const wandGeo = new THREE.LatheGeometry([[0.012, 0], [0.012, 0.42], [0.06, 0.5], [0.1, 0.66], [0.07, 0.86], [0.001, 1]].map(([x, y]) => new THREE.Vector2(x, y)), 14);
+  { const wp = wandGeo.attributes.position, wc = new Float32Array(wp.count * 3); for (let i = 0; i < wp.count; i++) { const stalk = wp.getY(i) < 0.45; wc.set(stalk ? [0.45, 0.62, 0.42] : [1, 1, 1], i * 3); } wandGeo.setAttribute("color", new THREE.BufferAttribute(wc, 3)); }
+  const LEAFY = [0x4f9a3e, 0x62aa46, 0x418a3a, 0x78b84e, 0x4a8e4e, 0x5a9e58].map(col);
+  // Wild flowers near each drift lean towards its kind's colour, a little deeper and smaller than the record blooms.
+  const FILL = { memory: [0x8f74d6, 0xb49cf0, 0x6f5cb8], decision: [0x4fae9c, 0x86d4c0, 0x3d8f8a], task: [0xd9814a, 0xf2a66e, 0xb8623e], checkpoint: [0x5f8fe0, 0x8db6f2, 0x4a70c0], artifact: [0xcfae4a, 0xe3cf7d, 0xb08c36], action: [0xd9688c, 0xef93ae, 0xb84f78] };
+  // Two small wild blooms, modelled once: an open daisy and a cupped buttercup. Vertices with no glow weight are the golden eye.
+  const eyeGeo = new THREE.SphereGeometry(1, 7, 4), GREY = rgb(0.74, 0.74, 0.74), WHITE = rgb(1, 1, 1);
+  const wildGeos = [
+    new Geo().ring(8, { len: 0.5, wid: 0.21, k: 1.4, p: 0.6, tilt: 0.16, curl: -0.25, cup: 0.3, c0: GREY, c1: WHITE, glow: 1, nu: 3, nv: 2 }, 0, 0.1).ball(0, 0.03, 0, 0.13, 0.6, WHITE, WHITE, 0, eyeGeo).build(),
+    new Geo().ring(5, { len: 0.46, wid: 0.44, k: 1.3, p: 0.5, tilt: 0.55, curl: 0.5, cup: 0.35, c0: GREY, c1: WHITE, glow: 1, nu: 3, nv: 2 }, 0, 0.1).ball(0, 0.06, 0, 0.1, 0.7, WHITE, WHITE, 0, eyeGeo).build(),
+  ];
+  const wildMat = new THREE.ShaderMaterial({
+    uniforms: Object.assign({ uOpacity: { value: 1 }, uGlow: { value: 0.06 }, uTrans: { value: 0.6 }, uSat: { value: 1 } }, U), side: THREE.DoubleSide, vertexColors: true,
+    vertexShader: "uniform float uTime;" + NOISE_WIND + `
+      attribute float aGlow; attribute float aH;
+      varying vec3 vW; varying vec3 vN; varying vec3 vC; varying vec2 vUv; varying float vG;
+      void main(){
+        vec3 base = instanceMatrix[3].xyz;
+        vec4 w = instanceMatrix * vec4(position, 1.0);
+        // The head rides the tip of its stem, which is a blade in the grass and bends by the same rule.
+        w.y += aH; w.xz += windAt(base.xz) * 0.11 * aH;
+        vW = w.xyz; vN = normalize(mat3(instanceMatrix) * normal);
+        vC = mix(vec3(1.0, 0.8, 0.22), instanceColor * color, aGlow);
+        vUv = uv; vG = aGlow;
+        gl_Position = projectionMatrix * viewMatrix * w;
+      }`,
+    fragmentShader: FLORA_FS,
+  });
+  const MEADOW_BLOOM = [0xffffff, 0xfff4b8, 0xffd23f, 0xffa9c0, 0xe8628e, 0xc79bf2, 0x8f7be8, 0x7fb2ff, 0xff8f42, 0xf25a50, 0xffffff, 0xffd23f].map(col);
+  const wild = [[], []], wildStems = [], spires = [], rosettes = [];
+  {
+    const WILD = small ? 4500 : 12000, fills = {};
+    KINDS.forEach(k => { fills[k] = FILL[k].map(col); });
+    // How strongly a spot belongs to a drift: 1 inside it, fading to nothing a little way beyond its edge.
+    const belong = (x, z) => { let best = null, near = 9; KINDS.forEach(k => { const d = BEDS[k].inside(x, z); if (d < near) { near = d; best = k; } }); return { kind: best, w: near < 1 ? 1 : Math.max(0, (1.75 - near) / 0.75) }; };
+    for (let tries = 0, made = 0; made < WILD && tries < WILD * 4; tries++) {
+      const r = 6.6 + Math.pow(rand(), 1.05) * 150, a = rand() * TAU, x = r * Math.cos(a), z = -r * Math.sin(a);
+      if (r < pondR(a) + 0.7 || (pathDist(x, z) < 0.05 && rand() < 0.85)) continue;
+      const home = belong(x, z), inDrift = rand() < home.w * 0.94;
+      const tone = (inDrift ? pick1(fills[home.kind]) : MEADOW_BLOOM[Math.floor(noise2(x / 9 + 3, z / 9 + 8) * 9 + rand() * 3.5) % MEADOW_BLOOM.length]).clone().multiplyScalar(between(0.85, 1.05));
+      const h = between(0.5, 1.25) * (inDrift ? 0.85 : 1) + Math.max(0, r - 50) * 0.008, size = between(0.46, 0.84) + Math.max(0, r - 50) * 0.006, y = terrainY(x, z);
+      wild[rand() < 0.55 ? 0 : 1].push({ p: [x, y, z], r: [between(0.2, 0.9), rand() * TAU, between(-0.3, 0.3)], s: [size, size, size], c: tone, h });
+      wildStems.push({ x, y, z, h });
+      made++;
+    }
+    KINDS.forEach(k => {
+      const b = BEDS[k], area = b.size * b.size;
+      for (let i = 0, m = Math.round(area * (small ? 3 : 5)); i < m; i++) {
+        const p = b.at(rand() * TAU, Math.sqrt(rand()) * 1.1), size = between(0.55, 1.05);
+        rosettes.push({ p: [p.x, between(0.02, 0.1), p.z], r: [between(-0.15, 0.15), rand() * TAU, between(-0.15, 0.15)], s: [size, size * between(0.8, 1.2), size], c: pick1(LEAFY) });
+      }
+      for (let i = 0, m = Math.round(area * (small ? 1.2 : 2.4)); i < m; i++) {
+        const p = b.at(rand() * TAU, Math.sqrt(rand()) * 1.2), size = between(0.8, 1.3);
+        spires.push({ p: [p.x, 0, p.z], r: [between(-0.12, 0.12), rand() * TAU, between(-0.12, 0.12)], s: [size, between(0.9, 1.5), size], c: pick1(fills[k]).clone().lerp(WHITE, 0.15) });
+      }
+    });
+    // Taller spikes scattered through the open meadow, like lupins and foxgloves.
+    for (let i = 0; i < (small ? 500 : 1500); i++) {
+      const r = 8 + Math.pow(rand(), 0.8) * 92, a = rand() * TAU, x = r * Math.cos(a), z = -r * Math.sin(a), size = between(0.9, 1.5);
+      if (r < pondR(a) + 0.8 || belong(x, z).w > 0.3 || pathDist(x, z) < 0.1) continue;
+      spires.push({ p: [x, terrainY(x, z), z], r: [between(-0.12, 0.12), rand() * TAU, between(-0.12, 0.12)], s: [size, between(1.0, 1.9), size], c: pick1(MEADOW_BLOOM).clone().lerp(col(0xc79bf2), 0.3) });
+    }
+  }
+  const wildMeshes = wild.map((items, i) => {
+    const mesh = inst(wildGeos[i], wildMat, items);
+    mesh.geometry.setAttribute("aH", new THREE.InstancedBufferAttribute(new Float32Array(items.map(o => o.h)), 1));
+    mesh.layers.set(1);
+    return mesh;
+  });
+  inst(rosetteGeo, flora({ trans: 0.7, defines: { WIND: "0.02" } }), rosettes);
+  inst(wandGeo, paint({ dab: 0.16, dabScale: 30, hard: 0.5, rim: 0.5, vertexColors: true, defines: { WIND: "0.07" } }), spires).layers.set(1);
+
+  // ---- Grass that moves in the wind, and reeds at the water's edge ----------------------
+  // Each blade is tinted from the painted ground beneath it, darker at the root and bright at the tip. The stems of
+  // the wild flowers are blades too, so every flower head sways exactly with its stem.
+  const grassGeo = new THREE.PlaneGeometry(0.15, 1, 1, 4);
+  grassGeo.translate(0, 0.5, 0);
+  { const gp = grassGeo.attributes.position; for (let i = 0; i < gp.count; i++) gp.setX(i, gp.getX(i) * (1 - gp.getY(i) * 0.9)); }
+  const grassMat = new THREE.ShaderMaterial({
+    uniforms: U, side: THREE.DoubleSide,
+    vertexShader: LIGHTS + `
+      varying vec3 vCol; varying vec3 vW;
+      void main(){
+        vec3 ip = instanceMatrix[3].xyz; float y = position.y;
+        vec4 w = instanceMatrix * vec4(position, 1.0);
+        float bend = y * y * length(instanceMatrix[1].xyz);
+        w.xz += windAt(ip.xz) * 0.11 * bend;
+        vec3 alb = instanceColor * mix(0.6, 1.16, y);
+        vec3 c = alb * (mix(uGroundCol, uSkyCol, 0.9) + uSunCol * 0.86 * cloudShade(ip) + warm(ip, vec3(0.0, 1.0, 0.0), 0.6));
+        vec3 V = normalize(cameraPosition - w.xyz);
+        c += alb * uSunCol * pow(clamp(dot(-V, uSunDir), 0.0, 1.0), 2.0) * y * 0.35;
+        vCol = c; vW = w.xyz;
+        gl_Position = projectionMatrix * viewMatrix * w;
+      }`,
+    fragmentShader: LIGHTS + "varying vec3 vCol; varying vec3 vW; void main(){ gl_FragColor = vec4(fogged(vCol, vW), 1.0); }",
+  });
+  {
+    const blades = [], GRASS = small ? 9000 : 30000, tone = col(0);
+    for (let tries = 0; blades.length < GRASS && tries < GRASS * 5; tries++) {
+      const r = 5 + Math.pow(rand(), 0.8) * 45, a = rand() * TAU, x = r * Math.cos(a), z = -r * Math.sin(a);
+      if (r < pondR(a) + 0.4 || (pathDist(x, z) < 0.05 && rand() < 0.8)) continue;
+      const meadow = Math.max(0, Math.min(1, (r - 30) / 14)), h = between(0.4, 0.95) + meadow * between(0.2, 1.0);
+      groundColor(x, z, tone).multiplyScalar(between(0.9, 1.18));
+      blades.push({ p: [x, 0, z], r: [between(-0.2, 0.2), rand() * Math.PI, between(-0.2, 0.2)], s: [between(0.8, 1.4), h, 1], c: tone.clone() });
+    }
+    // Out on the meadow the grass grows longer and thins away.
+    for (let i = 0, n = small ? 3000 : 12000; i < n; i++) {
+      const r = 49 + Math.pow(rand(), 2.0) * 110, a = rand() * TAU, x = r * Math.cos(a), z = -r * Math.sin(a);
+      if (pathDist(x, z) < 0.05 && rand() < 0.8) continue;
+      groundColor(x, z, tone).multiplyScalar(between(0.9, 1.2));
+      blades.push({ p: [x, terrainY(x, z), z], r: [between(-0.2, 0.2), rand() * Math.PI, between(-0.2, 0.2)], s: [between(1, 1.7), between(0.7, 1.9), 1], c: tone.clone() });
+    }
+    const STEM = [0x4f8e3a, 0x5f9c44, 0x478438].map(col);
+    wildStems.forEach(f => blades.push({ p: [f.x, f.y, f.z], r: [0, rand() * Math.PI, 0], s: [0.45, f.h, 1], c: pick1(STEM) }));
+    const REED = [0x4f9a48, 0x3f8a40, 0x62a850, 0x4c8e5a].map(col);
+    [[92, 146], [196, 232], [322, 356], [14, 50], [262, 290]].forEach(([d0, d1]) => {
+      for (let i = 0, n = small ? 60 : 130; i < n; i++) {
+        const d = between(d0, d1), edge = Math.sin((d - d0) / (d1 - d0) * Math.PI), p = place(pondR(d * RAD) + between(-0.3, 0.5), d);
+        blades.push({ p: [p.x, 0, p.z], r: [between(-0.16, 0.16), rand() * Math.PI, between(-0.16, 0.16)], s: [between(1.5, 2.3), between(0.8, 1.2) + edge * between(0.2, 1.1), 1], c: pick1(REED).clone().multiplyScalar(between(0.7, 0.95)) });
+      }
+    });
+    inst(grassGeo, grassMat, blades);
+  }
+
+  const barkMat = paint({ color: 0x6e5a48, dab: 0.3, dabScale: 2.5, rim: 0.5 });
+  // A tapering, twisting limb along a few points: wisteria trunks and boughs.
+  function limb(pts, r0, r1, mat, segs = 24) {
+    const RAD_SEGS = 12, curve = new THREE.CatmullRomCurve3(pts), geo = new THREE.TubeGeometry(curve, segs, 1, RAD_SEGS, false), pos = geo.attributes.position, c = V3(0, 0, 0);
+    for (let i = 0; i <= segs; i++) {
+      curve.getPointAt(i / segs, c);
+      const rr = r0 + (r1 - r0) * i / segs;
+      for (let j = 0; j <= RAD_SEGS; j++) { const k = i * (RAD_SEGS + 1) + j; pos.setXYZ(k, c.x + (pos.getX(k) - c.x) * rr, c.y + (pos.getY(k) - c.y) * rr, c.z + (pos.getZ(k) - c.z) * rr); }
+    }
+    geo.computeVertexNormals();
+    scene.add(new THREE.Mesh(geo, mat));
+  }
+
+  // Wisteria: every raceme is three crossed cards carrying one small painting of a hanging cluster of blossom.
+  const racemeGeo = new THREE.BufferGeometry();
+  {
+    const pos = [], uv = [], idx = [];
+    for (let k = 0; k < 3; k++) {
+      const a = k * Math.PI / 3, cx = Math.cos(a) * 0.5, cz = Math.sin(a) * 0.5, base = pos.length / 3;
+      for (let j = 0; j <= 3; j++) { pos.push(-cx, -j / 3, -cz, cx, -j / 3, cz); uv.push(0, 1 - j / 3, 1, 1 - j / 3); }
+      for (let j = 0; j < 3; j++) { const o = base + j * 2; idx.push(o, o + 2, o + 1, o + 1, o + 2, o + 3); }
+    }
+    racemeGeo.setAttribute("position", new THREE.Float32BufferAttribute(pos, 3));
+    racemeGeo.setAttribute("uv", new THREE.Float32BufferAttribute(uv, 2));
+    racemeGeo.setIndex(idx);
+  }
+  const racemeCol = document.createElement("canvas"), racemeAlpha = document.createElement("canvas");
+  {
+    const W = 128, HH = 320;
+    racemeCol.width = racemeAlpha.width = W; racemeCol.height = racemeAlpha.height = HH;
+    const cg = racemeCol.getContext("2d"), ag = racemeAlpha.getContext("2d");
+    cg.fillStyle = "#9477d6"; cg.fillRect(0, 0, W, HH); ag.fillStyle = "#000"; ag.fillRect(0, 0, W, HH);
+    ag.fillStyle = "#fff"; ag.fillRect(W / 2 - 1.5, 0, 3, HH * 0.5);
+    const top = col(0x6040b8), mid = col(0x9a7ce0), tip = col(0xd9c8f6), c = col(0);
+    for (let i = 0; i < 190; i++) {
+      const t = Math.pow(rand(), 0.85), half = (0.1 + 0.9 * Math.pow(1 - t, 0.7)) * W * 0.4;
+      const x = W / 2 + (rand() + rand() - 1) * half, y = 9 + t * (HH - 22), rr = between(5.5, 9.5) * (1 - t * 0.4);
+      if (t < 0.5) c.copy(top).lerp(mid, t * 2); else c.copy(mid).lerp(tip, t * 2 - 1);
+      c.offsetHSL(between(-0.02, 0.03), 0, between(-0.07, 0.09));
+      cg.fillStyle = "#" + c.getHexString(); cg.beginPath(); cg.arc(x, y, rr + 2.5, 0, TAU); cg.fill();
+      c.offsetHSL(0, 0, 0.1); cg.fillStyle = "#" + c.getHexString(); cg.beginPath(); cg.arc(x - rr * 0.2, y - rr * 0.25, rr * 0.5, 0, TAU); cg.fill();
+      ag.beginPath(); ag.arc(x, y, rr, 0, TAU); ag.fill();
+    }
+  }
+  const racemeMat = new THREE.ShaderMaterial({
+    uniforms: Object.assign({ uMap: { value: new THREE.CanvasTexture(racemeCol) }, uAlpha: { value: new THREE.CanvasTexture(racemeAlpha) } }, U), side: THREE.DoubleSide,
+    vertexShader: `
+      uniform float uTime; varying vec2 vUv; varying vec3 vW; varying vec3 vC;
+      void main(){
+        vec3 ip = instanceMatrix[3].xyz; vec4 w = instanceMatrix * vec4(position, 1.0);
+        float hang = -position.y, sway = hang * hang * length(instanceMatrix[1].xyz);
+        w.x += sin(uTime * 0.9 + ip.x * 0.5 + ip.z * 0.3) * sway * 0.11;
+        w.z += cos(uTime * 0.7 + ip.z * 0.4 + ip.x * 0.2) * sway * 0.08;
+        vUv = uv; vW = w.xyz; vC = instanceColor;
+        gl_Position = projectionMatrix * viewMatrix * w;
+      }`,
+    fragmentShader: LIGHTS + `
+      uniform sampler2D uMap; uniform sampler2D uAlpha; varying vec2 vUv; varying vec3 vW; varying vec3 vC;
+      void main(){
+        if (texture2D(uAlpha, vUv).r < 0.5) discard;
+        vec3 alb = texture2D(uMap, vUv).rgb * vC; vec3 V = normalize(cameraPosition - vW);
+        vec3 c = alb * (mix(uGroundCol, uSkyCol, 0.7) + uSunCol * 0.36 + warm(vW, vec3(0.0, 1.0, 0.0), 1.0));
+        c += alb * uSunCol * pow(clamp(dot(-V, uSunDir), 0.0, 1.0), 2.0) * 0.42 + alb * 0.05;
+        gl_FragColor = vec4(fogged(c, vW), 1.0);
+      }`,
+  });
+  const racemes = [], crowns = [], farCrowns = [], trunks = [];
+  const TINT = [rgb(1, 1, 1), rgb(1, 1, 1), rgb(1.08, 0.86, 1.0), rgb(0.9, 0.95, 1.1), rgb(0.86, 0.8, 1.0)];
+  const WLEAF = [0x5a9650, 0x4a864a, 0x6aa65a, 0x3f7a52, 0x648f6a, 0x548c62].map(col);
+  const WBLOOM = [0xb284d2, 0xc294de, 0x9e74c2, 0xaa8cda].map(col);
+  const raceme = (x, y, z, len, wide) => racemes.push({ p: [x, y, z], r: [0, rand() * TAU, 0], s: [wide, len, wide], c: pick1(TINT) });
+
+  // ---- Lone wisteria trees, and the scattered trees of the open country ----------------------
+  WISTERIA.forEach(t => {
+    const { p, h, spread } = t, top = p.y + h * 0.6, dome = rho => top + h * 0.12 + (1 - (rho / spread) * (rho / spread)) * h * 0.26;
+    for (let k = 0; k < 3; k++) {
+      const ph = k * TAU / 3 + rand();
+      limb([0, 0.25, 0.5, 0.75, 1].map(u => V3(p.x + Math.cos(ph + u * 3.4) * (0.75 - 0.5 * u), p.y - 0.3 + u * (h * 0.6 + 0.3), p.z + Math.sin(ph + u * 3.4) * (0.75 - 0.5 * u))), 0.52, 0.3, barkMat, 28);
+    }
+    for (let k = 0; k < 8; k++) {
+      const a = k * TAU / 8 + between(-0.25, 0.25), reach = spread * between(0.72, 0.98), dx = Math.cos(a), dz = Math.sin(a);
+      limb([V3(p.x, top - 0.5, p.z), V3(p.x + dx * reach * 0.3, top + h * 0.24, p.z + dz * reach * 0.3), V3(p.x + dx * reach * 0.7, top + h * 0.3, p.z + dz * reach * 0.7), V3(p.x + dx * reach, top + h * 0.15, p.z + dz * reach)], 0.3, 0.07, barkMat, 20);
+    }
+    for (let i = 0; i < (small ? 26 : 56); i++) {
+      const rho = spread * Math.sqrt(rand()) * 0.97, a = rand() * TAU, s = between(1.1, 2.0);
+      crowns.push({ p: [p.x + Math.cos(a) * rho, dome(rho) + 0.2, p.z + Math.sin(a) * rho], r: [0, rand() * TAU, 0], s: [s, s * 0.6, s], c: rand() < 0.55 ? pick1(WBLOOM) : pick1(WLEAF) });
+    }
+    for (let i = 0, n = small ? 220 : 560; i < n; i++) {
+      const rho = spread * Math.sqrt(rand()) * 1.03, a = rand() * TAU;
+      raceme(p.x + Math.cos(a) * rho, dome(rho) - 0.4, p.z + Math.sin(a) * rho, between(1.6, 3.2) + rho / spread * between(0.5, 2.4), between(0.75, 1.2));
+    }
+  });
+  {
+    // Single trees near at hand, then copses further and further off, to give the land its size.
+    const CYP = [0x2f6a3a, 0x2a5e38, 0x377440].map(col), ROUND = [0x4a8a3c, 0x569a44, 0x3f7c3a, 0x64a64c].map(col), BARK = col(0x9a8266), spots = [], shade = [];
+    for (let i = 0; i < (small ? 10 : 18); i++) spots.push(place(between(88, 430), rand() * 360));
+    for (let c = 0, n = small ? 14 : 28; c < n; c++) {
+      const centre = place(170 + Math.pow(rand(), 1.5) * 1250, rand() * 360), spread = between(16, 55);
+      for (let j = 0, m = 3 + Math.floor(rand() * 9); j < m; j++) spots.push(V3(centre.x + (rand() + rand() - 1) * spread, 0, centre.z + (rand() + rand() - 1) * spread));
+    }
+    spots.forEach(p => {
+      withGround(p);
+      const r = Math.hypot(p.x, p.z);
+      // Not in the lake, not on the way in where the camera rests, and not crowding the near wisteria.
+      if (p.y < LAKE.level + 2 || (p.z > 20 && Math.abs(p.x) < 60 && r < 240) || WISTERIA.some(t => t.p.distanceTo(p) < 26)) return;
+      const big = 1 + Math.min(1, r / 800) * 0.6, list = r < 260 ? crowns : farCrowns;
+      if (rand() < 0.3) {
+        const h = between(11, 19) * big, w = between(1.4, 2.2) * big;
+        list.push({ p: [p.x, p.y + h / 2 - 0.4, p.z], r: [0, rand() * TAU, 0], s: [w, h / 2, w], c: pick1(CYP) });
+        if (r < 340) shade.push({ x: p.x, z: p.z, rad: w * 1.5, up: h * 0.5 });
+        return;
+      }
+      const h = between(6, 10) * big;
+      if (r < 340) shade.push({ x: p.x, z: p.z, rad: 5.2 * big, up: h + 1.5 });
+      trunks.push({ p: [p.x, p.y + h / 2 - 0.6, p.z], r: [between(-0.06, 0.06), 0, between(-0.06, 0.06)], s: [big, h + 1.2, big], c: BARK });
+      for (let k = 0; k < 5; k++) { const s = between(2.4, 4) * big; list.push({ p: [p.x + between(-2.2, 2.2) * big, p.y + h + between(-0.3, 2.8) * big, p.z + between(-2.2, 2.2) * big], r: [0, rand() * TAU, 0], s: [s, s * 0.85, s], c: pick1(ROUND) }); }
+    });
+    WISTERIA.forEach(t => shade.push({ x: t.p.x, z: t.p.z, rad: t.spread * 1.15, up: t.h * 0.8 }));
+    // Soft shadows under the nearer trees: patches that follow the ground, thrown away from the sun.
+    const pos = [], uv = [], idx = [], N = 6, lean = Math.hypot(SUN_DIR.x, SUN_DIR.z) / SUN_DIR.y, ax = -SUN_DIR.x / Math.hypot(SUN_DIR.x, SUN_DIR.z), az = -SUN_DIR.z / Math.hypot(SUN_DIR.x, SUN_DIR.z);
+    shade.forEach(sh => {
+      const base = pos.length / 3, cx = sh.x + ax * sh.up * lean, cz = sh.z + az * sh.up * lean;
+      for (let i = 0; i <= N; i++) for (let j = 0; j <= N; j++) {
+        const x = cx + (i / N * 2 - 1) * sh.rad, z = cz + (j / N * 2 - 1) * sh.rad;
+        pos.push(x, terrainY(x, z) + 0.12, z); uv.push(i / N, j / N);
+        if (i < N && j < N) { const o = base + i * (N + 1) + j; idx.push(o, o + 1, o + N + 1, o + 1, o + N + 2, o + N + 1); }
+      }
+    });
+    const geo = new THREE.BufferGeometry();
+    geo.setAttribute("position", new THREE.Float32BufferAttribute(pos, 3));
+    geo.setAttribute("uv", new THREE.Float32BufferAttribute(uv, 2));
+    geo.setIndex(idx);
+    const shadows = new THREE.Mesh(geo, new THREE.MeshBasicMaterial({ map: GLOW, color: 0x163a14, transparent: true, opacity: 0.6, depthWrite: false, side: THREE.DoubleSide, polygonOffset: true, polygonOffsetFactor: -4, polygonOffsetUnits: -4 }));
+    shadows.frustumCulled = false;
+    scene.add(shadows);
+  }
+  const crownMat = paint({ dab: 0.2, dabScale: 7, hard: 0.15, rim: 0.6 });
+  inst(lumpy(small ? 2 : 3, 0.13, 2.2, 0.5), crownMat, crowns);
+  inst(lumpy(2, 0.13, 2.2), crownMat, farCrowns);
+  inst(new THREE.CylinderGeometry(0.24, 0.46, 1, 16), barkMat, trunks);
+  inst(racemeGeo, racemeMat, racemes);
+
+  // ---- Day life: seed fluff on the wind, butterflies over the flowers, petals falling from the wisteria ----------
+  const FLUFF = small ? 60 : 170;
+  const fluff = [], fluffPos = new Float32Array(FLUFF * 3);
+  for (let i = 0; i < FLUFF; i++) fluff.push({ x: between(-46, 46), y: between(0.7, 7.5), z: between(-42, 50), s: rand() * TAU, v: between(0.35, 0.95) });
+  const fluffGeo = new THREE.BufferGeometry();
+  fluffGeo.setAttribute("position", new THREE.BufferAttribute(fluffPos, 3));
+  scene.add(new THREE.Points(fluffGeo, new THREE.PointsMaterial({ color: 0xfffdf2, size: 0.15, map: GLOW, transparent: true, opacity: 0.85, depthWrite: false })));
+  // Each butterfly is two wings that hinge along its body; it wanders in loops over one part of the field.
+  const BFLY = small ? 14 : 34, flies = [];
+  const wings = new THREE.InstancedMesh(new Geo().petal({ len: 0.3, wid: 0.34, k: 1.5, p: 0.5, cup: 0.06, c0: rgb(0.45, 0.4, 0.4), c1: WHITE, glow: 1, nu: 6, nv: 4 }).build(), flora({ glow: 0.08 }), BFLY * 2);
+  for (let i = 0; i < BFLY; i++) {
+    const c = place(between(7, 40), rand() * 360), tone = col(pick1([0xffffff, 0xffe27a, 0xffa04a, 0x9fd0ff, 0xf9b0d6, 0xfff3c0]));
+    flies.push({ x: c.x, z: c.z, y: between(1.4, 4), rad: between(1.5, 5.5), sp: between(0.25, 0.6) * (rand() < 0.5 ? -1 : 1), ph: rand() * TAU, beat: between(9, 14) });
+    wings.setColorAt(i * 2, tone); wings.setColorAt(i * 2 + 1, tone);
+  }
+  wings.frustumCulled = false;
+  scene.add(wings);
+  const petalTex = canvasTexture(64, 64, (g, s) => {
+    g.translate(s / 2, s / 2); g.rotate(0.6); g.scale(1, 0.55);
+    const grd = g.createRadialGradient(0, 0, 0, 0, 0, s * 0.42);
+    grd.addColorStop(0, "rgba(240,228,255,1)"); grd.addColorStop(0.7, "rgba(186,150,236,.95)"); grd.addColorStop(1, "rgba(186,150,236,0)");
+    g.fillStyle = grd; g.beginPath(); g.arc(0, 0, s * 0.42, 0, TAU); g.fill();
+  });
+  const FALL = small ? 40 : 110, fall = [], fallPos = new Float32Array(FALL * 3);
+  const fallFrom = f => {
+    const t = WISTERIA[rand() < 0.75 ? 0 : 1], rho = t.spread * Math.sqrt(rand()) * 1.2, a = rand() * TAU;
+    f.x = t.p.x + Math.cos(a) * rho; f.z = t.p.z + Math.sin(a) * rho; f.top = t.p.y + t.h * 0.66; f.floor = t.p.y;
+    return f;
+  };
+  for (let i = 0; i < FALL; i++) { const f = fallFrom({ v: between(0.2, 0.45), s: rand() * TAU }); f.y = between(f.floor + 0.1, f.top); fall.push(f); }
+  const fallGeo = new THREE.BufferGeometry();
+  fallGeo.setAttribute("position", new THREE.BufferAttribute(fallPos, 3));
+  scene.add(new THREE.Points(fallGeo, new THREE.PointsMaterial({ size: 0.26, map: petalTex, transparent: true, opacity: 0.92, depthWrite: false })));
+
+
+  // ---- Flowers: one species per kind of record -----------------------------------------
+  const SEPAL = [col(0x3f6e4c), col(0x79a86c)], GOLD = [col(0xc98a2e), col(0xffe08a)];
+  const calyx = (G, n, len, tilt = -0.25) => G.ring(n, { len, wid: len * 0.5, k: 0.8, p: 0.8, tilt, curl: -0.3, cup: 0.3, y: -0.02, c0: SEPAL[0], c1: SEPAL[1], glow: 0, nu: 5, nv: 3 }, rand());
+  function headGeo(kind) {
+    const G = new Geo();
+    switch (kind) {
+      case "memory": // a lilac daisy
+        calyx(G, 8, 0.2);
+        G.ring(15, { len: 0.58, wid: 0.2, k: 1.5, p: 0.6, tilt: 0.12, curl: -0.3, cup: 0.35, c0: col(0x7a55cc), c1: col(0xe9dcff) }, 0, 0.05);
+        G.ring(12, { len: 0.45, wid: 0.17, k: 1.5, p: 0.6, tilt: 0.42, curl: -0.25, cup: 0.4, y: 0.02, c0: col(0x8d68dc), c1: col(0xf6efff) }, 0.2, 0.05);
+        G.ball(0, 0.035, 0, 0.15, 0.62, GOLD[0], GOLD[1], 0.7).stamens(12, 0.125, 0.085, 0.024, col(0xfff0b0));
+        break;
+      case "decision": // a mint tulip
+        G.ring(3, { len: 0.74, wid: 0.58, k: 0.85, p: 0.5, tilt: 0.5, curl: 1.1, cup: 0.5, c0: col(0x238474), cm: col(0x4fbfa6), c1: col(0xaeeeda) }, rand());
+        G.ring(3, { len: 0.7, wid: 0.52, k: 0.85, p: 0.5, tilt: 0.64, curl: 1.05, cup: 0.5, c0: col(0x238474), cm: col(0x5cc8b0), c1: col(0xc0f4e4) }, rand() + 1.05);
+        G.ball(0, 0.16, 0, 0.035, 4, col(0x9ad08a), col(0xe6f2b0), 0.4).stamens(6, 0.07, 0.3, 0.03, col(0x3a2c46), 0);
+        break;
+      case "task": // an orange poppy
+        calyx(G, 5, 0.18);
+        G.ring(4, { len: 0.6, wid: 0.82, k: 1.35, p: 0.42, tilt: 0.42, curl: 0.5, cup: 0.3, wave: 0.14, c0: col(0x4a1820), cm: col(0xee7a3c), c1: col(0xffc896) }, rand(), 0.1);
+        G.ring(4, { len: 0.52, wid: 0.72, k: 1.35, p: 0.42, tilt: 0.66, curl: 0.5, cup: 0.3, wave: 0.14, y: 0.01, c0: col(0x4a1820), cm: col(0xf58a48), c1: col(0xffd6aa) }, rand() + 0.78, 0.1);
+        G.ball(0, 0.09, 0, 0.085, 1.15, col(0x3d5a3a), col(0x86a860), 0).stamens(18, 0.13, 0.1, 0.022, col(0xffe6a0));
+        break;
+      case "checkpoint": { // a spray of blue bellflowers
+        G.ball(0, 0, 0, 0.05, 1, SEPAL[0], SEPAL[1], 0);
+        [[Math.PI / 2, 0.72, 1], [Math.PI / 2 + 1.5, 0.6, 0.82], [Math.PI / 2 - 1.45, 0.66, 0.74]].forEach(([az, tip, s]) => {
+          dummy.position.set(Math.cos(az) * 0.15 * s, 0.02, Math.sin(az) * 0.15 * s); dummy.rotation.set(0, -az, tip); dummy.scale.setScalar(s); dummy.updateMatrix();
+          G.m = dummy.matrix.clone();
+          G.bell(0.6, 0.3, col(0x3f68d6), col(0xa4c4ff));
+          G.ball(0, 0.01, 0, 0.055, 0.8, SEPAL[0], SEPAL[1], 0).ball(0, -0.36, 0, 0.035, 2.4, col(0xfff2c0), col(0xfff2c0), 1);
+          G.m = null;
+        });
+        break;
+      }
+      case "artifact": // a sunflower
+        calyx(G, 13, 0.3, -0.05);
+        G.ring(21, { len: 0.45, wid: 0.15, k: 1.2, p: 0.7, tilt: 0.08, curl: -0.2, cup: 0.3, r0: 0.2, c0: col(0xe2921f), c1: col(0xffec8c) }, 0, 0.06);
+        G.ring(17, { len: 0.36, wid: 0.14, k: 1.2, p: 0.7, tilt: 0.34, curl: -0.2, cup: 0.3, r0: 0.18, y: 0.015, c0: col(0xe9a02a), c1: col(0xfff3a8) }, 0.15, 0.06);
+        G.ball(0, 0.02, 0, 0.3, 0.34, col(0x8a5522), col(0x35201a), 0.3).stamens(22, 0.25, 0.07, 0.026, col(0xc98a2e), 0.4);
+        break;
+      case "action": // a pink rose
+        calyx(G, 5, 0.26);
+        G.ring(5, { len: 0.5, wid: 0.54, k: 1.3, p: 0.45, tilt: 0.34, curl: 0.55, cup: 0.4, wave: 0.06, c0: col(0xc4447a), c1: col(0xffd4e2) }, rand());
+        G.ring(5, { len: 0.44, wid: 0.48, k: 1.3, p: 0.45, tilt: 0.7, curl: 0.6, cup: 0.42, wave: 0.05, y: 0.02, c0: col(0xbe3f76), c1: col(0xffc6d8) }, rand());
+        G.ring(4, { len: 0.38, wid: 0.42, k: 1.25, p: 0.45, tilt: 1.0, curl: 0.55, cup: 0.45, y: 0.04, c0: col(0xb43a70), c1: col(0xf9b2ca) }, rand());
+        G.ring(3, { len: 0.3, wid: 0.36, k: 1.2, p: 0.45, tilt: 1.25, curl: 0.5, cup: 0.5, y: 0.05, c0: col(0xa8336a), c1: col(0xf29cba) }, rand());
+        G.ball(0, 0.15, 0, 0.07, 1.6, col(0x9c2c62), col(0xe888ac), 0.8);
+        break;
+      case "lotus": // a cream lotus, blushing at the tips, with a golden heart
+        G.ring(9, { len: 0.74, wid: 0.36, k: 0.9, p: 0.75, tilt: 0.22, curl: 0.4, cup: 0.5, c0: col(0xf2dcae), cm: col(0xf4d2c0), c1: col(0xe88aa6) }, 0);
+        G.ring(8, { len: 0.64, wid: 0.32, k: 0.9, p: 0.75, tilt: 0.68, curl: 0.42, cup: 0.55, y: 0.02, c0: col(0xf6e2b8), cm: col(0xf8dcc8), c1: col(0xee98b0) }, 0.35);
+        G.ring(6, { len: 0.5, wid: 0.27, k: 0.9, p: 0.75, tilt: 1.1, curl: 0.3, cup: 0.6, y: 0.04, c0: col(0xfae8c0), cm: col(0xfae4d0), c1: col(0xf2a8bc) }, 0.1);
+        G.add(new THREE.CylinderGeometry(0.115, 0.07, 0.13, 28), M4().setPosition(0, 0.11, 0), GOLD[0], GOLD[1], 0.9).stamens(16, 0.15, 0.1, 0.022, col(0xffe6a0), 1);
+        break;
+    }
+    return G.build();
+  }
+  // A retired record: a closed, greyed bud nodding over on a bent neck.
+  function budGeo(hex) {
+    const G = new Geo(), deep = col(hex).lerp(col(0x7c7692), 0.62), pale = deep.clone().lerp(col(0xe2dcee), 0.45), neckC = col(0x587060);
+    G.add(new THREE.TubeGeometry(new THREE.CatmullRomCurve3([V3(0, -0.04, 0), V3(0.04, 0.14, 0), V3(0.16, 0.2, 0), V3(0.27, 0.1, 0)]), 20, 0.034, 12), M4(), neckC, neckC, 0);
+    G.m = M4().makeRotationZ(-2.4).setPosition(0.27, 0.1, 0);
+    G.ring(5, { len: 0.17, wid: 0.12, k: 0.8, p: 0.8, tilt: 0.95, curl: 0.3, cup: 0.5, c0: neckC, c1: col(0x8aa48c), glow: 0, nu: 5, nv: 3 }, 0);
+    G.ring(5, { len: 0.36, wid: 0.22, k: 0.9, p: 0.7, tilt: 1.12, curl: 0.5, cup: 0.7, c0: deep, c1: pale, glow: 0.4 }, 0.6);
+    G.m = null;
+    return G.build();
+  }
+  const LEAF = [col(0x2f5e44), col(0x6fa468)];
+  const leafGeo = (len, wid, tilt, curl, n, az0) => new Geo().ring(n, { len, wid, k: 0.75, p: 0.85, tilt, curl, cup: 0.35, c0: LEAF[0], c1: LEAF[1], glow: 0, nv: small ? 2 : 4 }, az0, 0.5).build();
+  // How each species holds itself: how far the head tips outward, and its leaves.
+  const HABIT = {
+    memory: { tip: 0.55, basal: [0.5, 0.2, 0.9, -1.2, 5], stemLeaf: [0.34, 0.14] },
+    decision: { tip: 0.1, basal: [1.05, 0.3, 1.15, -0.75, 3], stemLeaf: null },
+    task: { tip: 0.32, basal: [0.55, 0.3, 0.8, -1.1, 6], stemLeaf: [0.3, 0.18] },
+    checkpoint: { tip: 0.15, basal: [0.6, 0.22, 1.0, -1.0, 5], stemLeaf: [0.3, 0.1] },
+    artifact: { tip: 0.95, basal: [0.5, 0.34, 0.7, -1.0, 3], stemLeaf: [0.52, 0.34] },
+    action: { tip: 0.3, basal: [0.45, 0.26, 0.8, -1.1, 4], stemLeaf: [0.36, 0.22] },
+  };
+  const FLOWER = 2.1;
+  // Two small signs that mark a record among the wild flowers: a glint of sun on the bloom, and, for work that is
+  // not yet settled, a soft ring that opens around it.
+  const GLINT = canvasTexture(128, 128, (g, s) => {
+    g.translate(s / 2, s / 2);
+    const core = g.createRadialGradient(0, 0, 0, 0, 0, s * 0.22);
+    core.addColorStop(0, "rgba(255,255,255,1)"); core.addColorStop(1, "rgba(255,255,255,0)");
+    g.fillStyle = core; g.fillRect(-s / 2, -s / 2, s, s);
+    for (let k = 0; k < 2; k++) {
+      const ray = g.createLinearGradient(-s / 2, 0, s / 2, 0);
+      ray.addColorStop(0, "rgba(255,255,255,0)"); ray.addColorStop(0.5, "rgba(255,255,255,.95)"); ray.addColorStop(1, "rgba(255,255,255,0)");
+      g.fillStyle = ray; g.beginPath(); g.moveTo(-s / 2, 0); g.quadraticCurveTo(0, -s * 0.035, s / 2, 0); g.quadraticCurveTo(0, s * 0.035, -s / 2, 0); g.fill();
+      g.rotate(Math.PI / 2);
+    }
+  });
+  const RING = canvasTexture(128, 128, (g, s) => {
+    const grd = g.createRadialGradient(s / 2, s / 2, s * 0.3, s / 2, s / 2, s * 0.5);
+    grd.addColorStop(0, "rgba(255,255,255,0)"); grd.addColorStop(0.55, "rgba(255,255,255,.95)"); grd.addColorStop(1, "rgba(255,255,255,0)");
+    g.fillStyle = grd; g.fillRect(0, 0, s, s);
+  });
+  const padGeo = new THREE.CircleGeometry(0.85, 72, 0.3, TAU - 0.3);
+  {
+    const pinned = R.filter(r => r.pinned);
+    pinned.forEach((r, i) => { r.base = place(between(2.75, 3.2), 62 + i * 360 / pinned.length + between(-10, 10), WATER_Y); });
+    KINDS.forEach(k => {
+      const b = BEDS[k], items = R.filter(r => r.kind === k && !r.pinned);
+      items.forEach((r, j) => { r.base = b.at(j * 2.39996 + b.ph[0], 0.64 * Math.sqrt((j + 0.6) / items.length), b.h + 0.02); });
+    });
+  }
+
+  const hits = [];
+  R.forEach(r => {
+    const lotus = !!r.pinned, hab = HABIT[r.kind];
+    const petal = flora({ glow: 0.1, transparent: true, sat: 1.4 }), green = flora({ transparent: true, trans: 0.75 }), budMat = flora({ transparent: true, glow: 0.05, trans: 0.5 });
+    const g = new THREE.Group();
+    g.position.copy(r.base);
+    const out = V3(between(-0.45, 0.45), 0, 1).normalize();
+    const lean = V3(between(-0.2, 0.2), 1, between(-0.2, 0.2));
+    let stem = null, curve = null, pad = null;
+    const leaves = [];
+    if (lotus) {
+      const G = new Geo(), flat = M4().makeRotationX(-Math.PI / 2), turn = rand() * TAU;
+      G.add(padGeo, M4().makeRotationY(turn).multiply(flat), col(0x2c6650), col(0x5c9a6c), 0);
+      G.add(padGeo, M4().makeRotationY(turn + 2.2).multiply(M4().makeTranslation(1.0, -0.004, 0.25)).multiply(M4().makeScale(0.55, 1, 0.55)).multiply(flat), col(0x2c6650), col(0x6aa472), 0);
+      pad = new THREE.Mesh(G.build(), green);
+      g.add(pad);
+    } else {
+      curve = new THREE.CatmullRomCurve3([V3(0, 0, 0), V3(lean.x * 0.1, 0.3, lean.z * 0.1), V3(lean.x * 0.55, 0.7, lean.z * 0.55), V3(lean.x, 1, lean.z)]);
+      stem = new THREE.Mesh(new Geo().add(new THREE.TubeGeometry(curve, 36, 0.04, 16, false), M4(), col(0x2f5a42), col(0x5f9460), 0).build(), green);
+      const [bl, bw, bt, bc, bn] = hab.basal;
+      const basal = new THREE.Mesh(leafGeo(bl, bw, bt, bc, bn, rand() * TAU), green);
+      g.add(stem, basal);
+      if (hab.stemLeaf) [0.34, 0.62].forEach(f => { const m = new THREE.Mesh(leafGeo(hab.stemLeaf[0], hab.stemLeaf[1], 0.75, -0.9, 1, rand() * TAU), green); g.add(m); leaves.push({ m, f }); });
+    }
+    // The head sways as a whole; inside it, the bloom is tipped to face the way in.
+    const head = new THREE.Group(), bloom = new THREE.Mesh(headGeo(lotus ? "lotus" : r.kind), petal);
+    const tip = lotus ? 0 : hab.tip;
+    bloom.quaternion.setFromUnitVectors(V3(0, 1, 0), V3(out.x * Math.sin(tip), Math.cos(tip), out.z * Math.sin(tip)));
+    bloom.rotateY(rand() * TAU);
+    head.add(bloom);
+    const bud = new THREE.Mesh(budGeo(HEX[r.kind]), budMat);
+    bud.rotation.y = rand() * TAU;
+    bud.scale.setScalar(1.35);
+    const glow = halo(lotus ? CANDLE : HEX[r.kind], 2.3, 0.2);
+    const glint = new THREE.Sprite(new THREE.SpriteMaterial({ map: GLINT, color: 0xfffbe8, transparent: true, opacity: 0, depthWrite: false, blending: THREE.AdditiveBlending }));
+    const ring = new THREE.Sprite(new THREE.SpriteMaterial({ map: RING, color: col(lotus ? CANDLE : HEX[r.kind]).lerp(col(0xffffff), 0.35), transparent: true, opacity: 0, depthWrite: false }));
+    const hit = new THREE.Mesh(new THREE.SphereGeometry(0.85, 8, 6), new THREE.MeshBasicMaterial({ visible: false }));
+    hit.userData.id = r.id;
+    g.add(head, bud, glow, glint, ring, hit);
+    scene.add(g);
+    hits.push(hit);
+    Object.assign(r, { g, stem, curve, leaves, pad, head, bud, glow, glint, ring, hit, petal, mats: [petal, green, budMat], lean, lotus, height: 0, shown: 0, phase: rand() * TAU });
+  });
+
+  // ---- Ripples spreading from the lotuses, and petals drifting on the water --
+  const rippleGeo = new THREE.RingGeometry(0.95, 1, 96);
+  const ripples = [];
+  const rippleAt = [...R.filter(r => r.pinned).map(r => r.base.clone()), place(1.9, 200), place(4.0, 320), place(2.4, 130)];
+  rippleAt.forEach(c => {
+    for (let k = 0; k < 2; k++) {
+      const m = new THREE.Mesh(rippleGeo, new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0, depthWrite: false }));
+      m.rotation.x = -Math.PI / 2; m.position.set(c.x, WATER_Y + 0.015, c.z);
+      scene.add(m);
+      ripples.push({ m, offset: rand() + k * 0.5, speed: between(0.1, 0.17) });
+    }
+  });
+  const floaters = [];
+  const floatGeo = [0xeadcff, 0xf6cfdc].map(hex => new Geo().petal({ len: 0.24, wid: 0.13, k: 1.2, p: 0.6, tilt: 0.05, curl: 0.3, cup: 0.4, r0: -0.12, c0: col(hex).multiplyScalar(0.8), c1: col(hex) }).build());
+  const floatMat = flora({ glow: 0.05 });
+  for (let i = 0; i < 18; i++) {
+    const m = new THREE.Mesh(floatGeo[i % 2], floatMat);
+    const f = { m, r: between(1.5, 3.9), a: rand() * TAU, v: between(0.02, 0.06) * (rand() < 0.5 ? -1 : 1), spin: between(-0.4, 0.4) };
+    m.position.copy(place(f.r, f.a / RAD, WATER_Y + 0.02));
+    scene.add(m); floaters.push(f);
+  }
+  // ---- Labels ---------------------------------------------------------------
+  const labelsEl = document.getElementById("labels");
+  const bedLabels = KINDS.map((k, i) => {
+    const d = document.createElement("div"); d.className = "label bed"; d.innerHTML = `<span class="dot" style="background:${css(k)}"></span>${BED[k]}`;
+    labelsEl.appendChild(d);
+    const b = BEDS[k];
+    return { el: d, pos: b.at(Math.PI / 2, 1.3, 0.5) };
+  });
+  const flowerLabels = new Map();
+  R.forEach(r => {
+    const d = document.createElement("div"); d.className = "label" + (r.pinned ? " pin" : ""); d.textContent = r.title; d.hidden = true;
+    labelsEl.appendChild(d); flowerLabels.set(r.id, d);
+  });
+
+  // ---- State ----------------------------------------------------------------
+  const state = { time: T1, q: "", who: "", selected: null, hover: null };
+  let playing = false;
+  const matches = r => (!state.q || (r.title + " " + r.content).toLowerCase().includes(state.q)) && (!state.who || r.h.some(e => e[1] === state.who));
+  function at(r) {
+    const n = r.times.filter(t => t <= state.time).length;
+    return { exists: n > 0, rev: n, retired: RETIRED.has(r.status) && r.times[r.times.length - 1] <= state.time };
+  }
+  const headWorld = r => r.g.localToWorld(r.head.position.clone());
+
+  // ---- Links for the selected flower ----------------------------------------
+  let linkGroup = null;
+  function arc(a, b) {
+    const mid = a.clone().add(b).multiplyScalar(0.5); mid.y += 2.4 + a.distanceTo(b) * 0.16;
+    return new THREE.QuadraticBezierCurve3(a.clone(), mid, b.clone());
+  }
+  function drawLinks() {
+    // Only the tubes own their geometry; sprites share one built into Three.js.
+    if (linkGroup) { linkGroup.traverse(o => { if (o.isMesh) { o.geometry.dispose(); o.material.dispose(); } }); scene.remove(linkGroup); linkGroup = null; }
+    const r = state.selected && byId.get(state.selected);
+    if (!r) return;
+    linkGroup = new THREE.Group();
+    const color = r.lotus ? CANDLE : HEX[r.kind], thread = col(color).lerp(col(0xffffff), 0.45);
+    [...r.refs, ...refBy(r.id)].forEach(id => {
+      const o = byId.get(id);
+      if (!at(o).exists) return;
+      linkGroup.add(new THREE.Mesh(new THREE.TubeGeometry(arc(headWorld(r), headWorld(o)), 64, 0.045, 10, false), new THREE.MeshBasicMaterial({ color: thread, transparent: true, opacity: 0.92, depthWrite: false })));
+    });
+    near(r.id).forEach(id => {
+      const o = byId.get(id);
+      if (!at(o).exists) return;
+      const curve = arc(headWorld(r), headWorld(o));
+      for (let i = 1; i < 20; i++) { const s = new THREE.Sprite(new THREE.SpriteMaterial({ map: GLOW, color: 0xffffff, transparent: true, opacity: 0.95, depthWrite: false })); s.scale.set(0.4, 0.4, 1); s.position.copy(curve.getPoint(i / 20)); linkGroup.add(s); }
+    });
+    scene.add(linkGroup);
+  }
+
+  // ---- Card -----------------------------------------------------------------
+  const card = document.getElementById("card");
+  const chips = (ids, cls = "") => ids.map(id => { const o = byId.get(id); return `<button class="chip ${cls}" data-go="${id}"><span class="dot" style="background:${o.pinned ? "var(--candle)" : css(o.kind)}"></span>${esc(o.title)}</button>`; }).join("");
+  function showCard() {
+    const r = state.selected && byId.get(state.selected);
+    if (!r) { card.hidden = true; return; }
+    const warn = r.status === "blocked" || r.status === "unknown" || r.status === "pending";
+    const last = r.h[r.h.length - 1], linked = [...r.refs, ...refBy(r.id)], close = near(r.id);
+    card.innerHTML = `
+      <button class="close" aria-label="Close" id="closeCard">×</button>
+      <div class="pills"><span class="pill kind" style="background:${css(r.kind)}">${r.kind}</span><span class="pill ${warn ? "warn" : RETIRED.has(r.status) ? "bad" : ""}">${r.status}</span>${r.pinned ? `<span class="pill pinned">pinned</span>` : ""}</div>
+      <h2>${esc(r.title)}</h2>
+      <p class="sub">rev ${r.h.length} · ${esc(last[1])} · ${when(last[2])}</p>
+      <p class="content">${esc(r.content)}</p>
+      ${r.assigned ? `<div class="note"><b>Waiting for ${esc(r.assigned[0])}</b>Handed over by ${esc(r.assigned[1])}, ${when(r.assigned[2])}</div>` : ""}
+      ${r.next ? `<div class="note"><b>Next step</b>${esc(r.next)}</div>` : ""}
+      ${linked.length ? `<div class="rel"><h3>Linked</h3><div class="chips">${chips(linked)}</div></div>` : ""}
+      ${close.length ? `<div class="rel"><h3>Similar in meaning</h3><div class="chips">${chips(close, "near")}</div></div>` : ""}
+      <details><summary>${r.h.length === 1 ? "1 revision" : r.h.length + " revisions"}</summary><div class="hist">${[...r.h].reverse().map(e => `<div><span class="r">rev ${e[0]}</span><span>${esc(e[1])}, ${when(e[2])}${e[3] ? `<br><span class="x">changed ${e[3].map(esc).join(", ")}</span>` : ""}${e[4] ? `<br><span class="x">“${esc(e[4])}”</span>` : ""}</span></div>`).join("")}</div></details>`;
+    card.hidden = false;
+    card.querySelector("#closeCard").addEventListener("click", () => select(null, true));
+    card.querySelectorAll("[data-go]").forEach(b => b.addEventListener("click", () => select(b.dataset.go)));
+  }
+
+  // ---- Camera flights -------------------------------------------------------
+  function flyTo(pos, target) {
+    if (reduced) { camera.position.copy(pos); controls.target.copy(target); anim = null; return; }
+    anim = { p0: camera.position.clone(), t0: controls.target.clone(), p1: pos, t1: target, start: performance.now(), dur: 1300 };
+  }
+  function select(id, goHome) {
+    state.selected = id;
+    controls.autoRotate = false;
+    if (id) {
+      const r = byId.get(id);
+      const t = headWorld(r);
+      // Arrive looking down the valley, with the lake and the mountains behind the flower.
+      const dir = V3(-VALE_X, 0, -VALE_Z).addScaledVector(t.clone().setY(0).normalize(), 0.3).normalize();
+      flyTo(t.clone().add(dir.multiplyScalar(r.lotus ? 8.5 : 10)).setY(t.y + (r.lotus ? 4.2 : 4.6)), t.clone().add(new THREE.Vector3(0, innerWidth < 700 ? -3.4 : 0.3, 0)));
+    } else if (goHome) flyTo(HOME.pos.clone(), HOME.target.clone());
+    drawLinks(); showCard(); closePanels();
+  }
+
+  // ---- Panels and controls --------------------------------------------------
+  const listEl = document.getElementById("list"), keyEl = document.getElementById("key");
+  const listBtn = document.getElementById("listBtn"), keyBtn = document.getElementById("keyBtn");
+  function closePanels() { listEl.hidden = keyEl.hidden = true; listBtn.setAttribute("aria-pressed", "false"); keyBtn.setAttribute("aria-pressed", "false"); }
+  function renderList() {
+    const groups = [["Pinned core", R.filter(r => r.pinned)], ...KINDS.map(k => [BED[k], R.filter(r => r.kind === k && !r.pinned)])];
+    listEl.innerHTML = groups.map(([name, rs]) => {
+      const items = rs.filter(matches);
+      if (!items.length) return "";
+      return `<h3>${name}</h3>` + items.map(r => `<button class="item ${RETIRED.has(r.status) ? "off" : ""}" data-go="${r.id}"><span class="dot" style="background:${r.pinned ? "var(--candle)" : css(r.kind)}"></span>${esc(r.title)}</button>`).join("");
+    }).join("") || `<p class="key">Nothing matches.</p>`;
+    listEl.querySelectorAll("[data-go]").forEach(b => b.addEventListener("click", () => select(b.dataset.go)));
+  }
+  listBtn.addEventListener("click", () => { const open = listEl.hidden; closePanels(); if (open) { renderList(); listEl.hidden = false; listBtn.setAttribute("aria-pressed", "true"); } });
+  keyBtn.addEventListener("click", () => { const open = keyEl.hidden; closePanels(); if (open) { keyEl.hidden = false; keyBtn.setAttribute("aria-pressed", "true"); } });
+  const q = document.getElementById("q");
+  q.addEventListener("input", () => { state.q = q.value.trim().toLowerCase(); if (!listEl.hidden) renderList(); });
+  q.addEventListener("keydown", e => { if (e.key === "Enter") { const hit = R.find(r => state.q && matches(r) && at(r).exists); if (hit) select(hit.id); } });
+  const who = document.getElementById("who");
+  who.innerHTML += harnesses.map(h => `<option value="${esc(h)}">${esc(h)}</option>`).join("");
+  who.addEventListener("change", () => { state.who = who.value; if (!listEl.hidden) renderList(); });
+  document.getElementById("home").addEventListener("click", () => select(null, true));
+  const slider = document.getElementById("t"), tLabel = document.getElementById("tLabel"), playIcon = document.getElementById("playIcon");
+  const PLAY = "M3 1.5v11l9-5.5z", PAUSE = "M3 2h3v10H3zM8 2h3v10H8z";
+  function setTime(v) {
+    state.time = T0 + (T1 - T0) * v / 1000;
+    const d = new Date(state.time);
+    tLabel.textContent = v >= 1000 ? "Now" : d.toLocaleDateString("en-GB", { weekday: "short", day: "numeric", month: "short" }) + " " + d.toTimeString().slice(0, 5);
+    if (state.selected) drawLinks();
+  }
+  slider.addEventListener("input", () => { playing = false; playIcon.setAttribute("d", PLAY); setTime(+slider.value); });
+  document.getElementById("play").addEventListener("click", () => {
+    playing = !playing;
+    playIcon.setAttribute("d", playing ? PAUSE : PLAY);
+    if (playing && +slider.value >= 1000) { slider.value = 0; setTime(0); }
+  });
+  addEventListener("keydown", e => { if (e.key === "Escape") select(null, true); });
+
+  // ---- Picking --------------------------------------------------------------
+  const ray = new THREE.Raycaster(), mouse = new THREE.Vector2();
+  let down = null;
+  function pick(ev) {
+    const rect = renderer.domElement.getBoundingClientRect();
+    mouse.set(((ev.clientX - rect.left) / rect.width) * 2 - 1, -((ev.clientY - rect.top) / rect.height) * 2 + 1);
+    ray.setFromCamera(mouse, camera);
+    const found = ray.intersectObjects(hits.filter(h => byId.get(h.userData.id).shown > 0.5), false)[0];
+    return found ? found.object.userData.id : null;
+  }
+  renderer.domElement.addEventListener("pointermove", e => { if (e.pointerType !== "mouse") return; state.hover = pick(e); renderer.domElement.classList.toggle("hovering", !!state.hover); });
+  renderer.domElement.addEventListener("pointerdown", e => { down = [e.clientX, e.clientY]; });
+  renderer.domElement.addEventListener("pointerup", e => {
+    if (!down || Math.hypot(e.clientX - down[0], e.clientY - down[1]) > 6) return;
+    const id = pick(e);
+    if (id) select(id);
+  });
+
+  // ---- Finishing: a touch of glow on the brightest highlights, then a gentle daylight grade ---------------
+  let composer = null, bloom = null, grade = null;
+  const PR = Math.min(devicePixelRatio, 1.5);
+  renderer.setPixelRatio(PR);
+  if (THREE.EffectComposer && THREE.ShaderPass && THREE.RenderPass) {
+    // Smooth edges where the browser can; a plain buffer otherwise, and on touch devices to keep them cool.
+    const target = renderer.capabilities.isWebGL2 && THREE.WebGLMultisampleRenderTarget && !touch
+      ? new THREE.WebGLMultisampleRenderTarget(4, 4, { minFilter: THREE.LinearFilter, magFilter: THREE.LinearFilter, format: THREE.RGBAFormat })
+      : undefined;
+    composer = new THREE.EffectComposer(renderer, target);
+    composer.setPixelRatio(PR);
+    composer.addPass(new THREE.RenderPass(scene, camera));
+    if (THREE.UnrealBloomPass && !touch) { bloom = new THREE.UnrealBloomPass(new THREE.Vector2(innerWidth, innerHeight), 0.2, 0.6, 0.93); composer.addPass(bloom); }
+    grade = new THREE.ShaderPass({
+      uniforms: { tDiffuse: { value: null }, uTime: { value: 0 }, uGrain: { value: 0.018 } },
+      vertexShader: "varying vec2 vUv; void main(){ vUv = uv; gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0); }",
+      fragmentShader: `
+        uniform sampler2D tDiffuse; uniform float uTime; uniform float uGrain; varying vec2 vUv;
+        float hash(vec2 p){ return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453); }
+        void main(){
+          vec3 c = texture2D(tDiffuse, vUv).rgb;
+          float l = dot(c, vec3(0.299, 0.587, 0.114));
+          c *= mix(vec3(1.0), vec3(1.04, 1.01, 0.95), smoothstep(0.45, 1.0, l));
+          c = mix(c, c * c * (3.0 - 2.0 * c), 0.22);
+          c = mix(vec3(dot(c, vec3(0.299, 0.587, 0.114))), c, 1.04);
+          vec2 q = (vUv - 0.5) * vec2(1.0, 1.12);
+          c *= mix(0.84, 1.0, smoothstep(0.9, 0.3, length(q)));
+          c += (hash(vUv * vec2(1387.13, 947.91) + fract(uTime) * 19.0) - 0.5) * uGrain;
+          gl_FragColor = vec4(c, 1.0);
+        }`,
+    });
+    composer.addPass(grade);
+  }
+
+  function resize() {
+    const w = innerWidth, h = innerHeight;
+    renderer.setSize(w, h, false);
+    if (composer) composer.setSize(w, h);
+    camera.aspect = w / h;
+    camera.fov = w < 700 ? 62 : 50;
+    camera.updateProjectionMatrix();
+    const reach = camera.aspect >= 1.5 ? 1 : Math.min(1.6, 1 + (1.5 - camera.aspect) * 0.62);
+    HOME.pos.set(0, 14 * reach, 54 * reach);
+    if (!state.selected && !anim && controls.autoRotate) camera.position.copy(HOME.pos);
+  }
+  addEventListener("resize", resize);
+  resize();
+  // Arrive from high over the open country, then settle into the overview.
+  if (!reduced) {
+    const from = V3(HOME.pos.x + 80, HOME.pos.y * 7, HOME.pos.z * 3.6);
+    camera.position.copy(from);
+    anim = { p0: from, t0: HOME.target.clone(), p1: HOME.pos.clone(), t1: HOME.target.clone(), start: performance.now() + 250, dur: 6000 };
+  }
+
+  // ---- Frame loop -----------------------------------------------------------
+  const v = new THREE.Vector3();
+  function project(pos, el) {
+    v.copy(pos).project(camera);
+    if (v.z > 1 || v.z < -1) { el.hidden = true; return; }
+    el.hidden = false;
+    el.style.left = ((v.x + 1) / 2 * innerWidth) + "px";
+    el.style.top = ((1 - v.y) / 2 * innerHeight) + "px";
+  }
+  const CANDLE_COL = rgb(0.5, 0.3, 0.12);
+  let last = performance.now(), still = false;
+  // If frames run slow on this machine, step the picture down, up to three times: plain resolution, then half the
+  // wild flowers, then no glow.
+  const pace = { sum: 0, n: 0, level: 0 };
+  function frame(now) {
+    const gap = now - last, dt = Math.min(0.05, gap / 1000); last = now;
+    if (gap < 200) { pace.sum += gap; pace.n++; }
+    if (pace.n === 120) {
+      if (pace.sum / pace.n > 27 && pace.level < 3) {
+        pace.level++;
+        if (pace.level === 1) { renderer.setPixelRatio(1); if (composer) composer.setPixelRatio(1); resize(); }
+        else if (pace.level === 2) wildMeshes.forEach(m => { m.count = Math.floor(m.count / 2); });
+        else if (bloom) bloom.enabled = false;
+      }
+      pace.sum = pace.n = 0;
+    }
+    const tsec = now / 1000;
+    if (playing) {
+      const next = Math.min(1000, +slider.value + dt * 80);
+      slider.value = next; setTime(next);
+      if (next >= 1000) { playing = false; playIcon.setAttribute("d", PLAY); }
+    }
+    if (anim) {
+      const k = Math.max(0, Math.min(1, (now - anim.start) / anim.dur)), e = k < 0.5 ? 4 * k * k * k : 1 - Math.pow(-2 * k + 2, 3) / 2;
+      camera.position.lerpVectors(anim.p0, anim.p1, e);
+      controls.target.lerpVectors(anim.t0, anim.t1, e);
+      if (k >= 1) anim = null;
+    }
+    controls.update();
+    // Far out, the land rises and falls: keep the camera above it.
+    camera.position.y = Math.max(camera.position.y, terrainY(camera.position.x, camera.position.z) + 1.6);
+    // The haze begins a little in front of whatever the camera is looking at, so the subject stays clear and the distance softens.
+    const reach = camera.position.distanceTo(controls.target);
+    U.uFogNear.value = reach * 0.6;
+    U.uFogDen.value = 0.1 / Math.max(24, reach);
+    U.uTime.value = reduced ? 12 : tsec;
+    if (grade) grade.uniforms.uTime.value = reduced ? 0.37 : tsec;
+
+    const focus = state.selected ? new Set([state.selected, ...byId.get(state.selected).refs, ...refBy(state.selected), ...near(state.selected)]) : null;
+    R.forEach(r => {
+      const s = at(r);
+      const live = s.exists && !s.retired;
+      r.shown += ((s.exists ? 1 : 0) - r.shown) * Math.min(1, dt * 3);
+      const target = r.lotus ? 0 : live ? 1.25 + 0.45 * Math.min(s.rev, 4) : 0.8;
+      r.height += (target - r.height) * Math.min(1, dt * 2.5);
+      const grow = Math.max(0.001, r.shown);
+      r.g.scale.setScalar(grow * (r.lotus ? 1.25 : FLOWER));
+      if (r.stem) {
+        r.stem.scale.y = Math.max(0.01, r.height);
+        r.leaves.forEach(l => { r.curve.getPoint(l.f, l.m.position); l.m.position.y *= r.height; });
+        r.head.position.set(r.lean.x, r.height + 0.03, r.lean.z);
+        if (!reduced) { r.g.rotation.z = Math.sin(tsec * 0.8 + r.phase) * 0.025; r.g.rotation.x = Math.cos(tsec * 0.63 + r.phase) * 0.02; }
+      } else {
+        const bob = reduced ? 0 : Math.sin(tsec * 0.9 + r.phase) * 0.025;
+        r.head.position.set(0, 0.07 + bob, 0);
+        r.pad.position.y = 0.012 + bob * 0.6;
+      }
+      r.g.updateMatrixWorld();
+      r.head.visible = live || r.lotus;
+      r.bud.visible = s.exists && s.retired;
+      r.bud.position.copy(r.head.position);
+      r.glow.position.copy(r.head.position);
+      r.glint.position.set(r.head.position.x, r.head.position.y + 0.42, r.head.position.z + 0.3);
+      r.ring.position.copy(r.head.position);
+      r.hit.position.copy(r.head.position);
+      if (!reduced && !r.lotus) r.head.rotation.z = Math.sin(tsec * 1.1 + r.phase) * 0.05;
+      const dim = !matches(r) || (focus && !focus.has(r.id));
+      const alpha = dim ? 0.16 : 1;
+      const unsettled = UNSETTLED(r) && live;
+      const pulse = unsettled && !reduced ? 0.5 + 0.5 * Math.sin(tsec * 2.4 + r.phase) : 0;
+      r.mats.forEach(m => { m.uniforms.uOpacity.value = alpha; });
+      r.petal.uniforms.uGlow.value = (r.id === state.selected || r.id === state.hover ? 0.2 : 0.08) + pulse * 0.28;
+      r.glow.material.opacity = live || r.lotus ? (dim ? 0.02 : r.id === state.selected ? 0.22 : 0.1) : 0;
+      // The sun-glint twinkles now and then on every living record; the ring opens slowly around unsettled ones.
+      const blink = reduced ? 0.5 : Math.pow(Math.max(0, Math.sin(tsec * 1.1 + r.phase * 3)), 8);
+      r.glint.material.opacity = (live || r.lotus) && !dim && r.shown > 0.5 ? 0.3 + 0.65 * blink : 0;
+      r.glint.scale.setScalar(1.0 + 0.7 * blink);
+      const open = reduced ? 0.45 : (tsec * 0.45 + r.phase) % 1;
+      r.ring.material.opacity = unsettled && !dim ? 0.85 * (1 - open) * Math.min(1, open * 5) : 0;
+      r.ring.scale.setScalar(1.4 + open * 2.8);
+      r.head.scale.setScalar(1 + pulse * 0.1);
+      const label = flowerLabels.get(r.id);
+      const showLabel = r.shown > 0.5 && !dim && (r.id === state.hover || r.id === state.selected || (state.q && matches(r)) || (focus && focus.has(r.id)));
+      if (showLabel) { const hw = headWorld(r); project(hw.setY(hw.y + 1.15), label); } else label.hidden = true;
+    });
+    bedLabels.forEach(b => project(b.pos, b.el));
+    const flick = reduced ? 1 : 1 + 0.07 * Math.sin(tsec * 9) + 0.05 * Math.sin(tsec * 15.3);
+    flame.scale.set(0.3 * flick, 0.62 * (2 - flick), 1);
+    flameHalo.material.opacity = 0.3 * flick;
+    U.uCandleCol.value.copy(CANDLE_COL).multiplyScalar(flick);
+    if (!reduced) {
+      for (let i = 0; i < FLUFF; i++) {
+        const f = fluff[i];
+        fluffPos[i * 3] = ((f.x + tsec * f.v * 0.9 + 46) % 92) - 46;
+        fluffPos[i * 3 + 1] = f.y + Math.sin(tsec * f.v * 0.7 + f.s) * 0.6;
+        fluffPos[i * 3 + 2] = f.z + Math.cos(tsec * f.v * 0.5 + f.s) * 1.2;
+      }
+      fluffGeo.attributes.position.needsUpdate = true;
+      for (let i = 0; i < FALL; i++) {
+        const f = fall[i];
+        f.y -= f.v * dt;
+        if (f.y < f.floor + 0.05) { fallFrom(f); f.y = f.top + between(0, 0.6); }
+        fallPos[i * 3] = f.x + Math.sin(tsec * 0.8 + f.s) * 0.7;
+        fallPos[i * 3 + 1] = f.y;
+        fallPos[i * 3 + 2] = f.z + Math.cos(tsec * 0.6 + f.s) * 0.7;
+      }
+      fallGeo.attributes.position.needsUpdate = true;
+      ripples.forEach(o => {
+        const ph = (tsec * o.speed + o.offset) % 1;
+        o.m.scale.setScalar(0.4 + ph * 2.2);
+        o.m.material.opacity = 0.3 * (1 - ph) * Math.min(1, ph * 6);
+      });
+      floaters.forEach(f => { f.a += f.v * dt; f.m.position.set(Math.cos(f.a) * f.r, WATER_Y + 0.02 + Math.sin(tsec + f.r) * 0.008, -Math.sin(f.a) * f.r); f.m.rotation.y += f.spin * dt; });
+    } else if (!still) {
+      // Nothing drifts when motion is reduced: everything is set down once, where it would have been.
+      still = true;
+      fluff.forEach((f, i) => fluffPos.set([f.x, f.y, f.z], i * 3));
+      fluffGeo.attributes.position.needsUpdate = true;
+      fall.forEach((f, i) => fallPos.set([f.x, f.y, f.z], i * 3));
+      fallGeo.attributes.position.needsUpdate = true;
+      ripples.forEach((o, i) => { o.m.scale.setScalar(0.9 + (i % 2) * 0.9); o.m.material.opacity = 0.14; });
+    }
+    // Butterflies: each loops over its own patch, wings beating (held half open when motion is reduced).
+    for (let i = 0; i < BFLY; i++) {
+      const f = flies[i], t = (reduced ? 3.7 : tsec) * f.sp + f.ph, beat = reduced ? 0.55 : 0.15 + 0.95 * Math.abs(Math.sin(tsec * f.beat + f.ph));
+      dummy.position.set(f.x + Math.cos(t) * f.rad + Math.sin(t * 2.3) * 0.6, f.y + Math.sin(t * 3.1) * 0.5, f.z + Math.sin(t) * f.rad * 0.8);
+      const heading = Math.atan2(-Math.sin(t) * f.rad * f.sp, Math.cos(t) * f.rad * 0.8 * f.sp);
+      dummy.scale.set(1, 1, 1);
+      dummy.rotation.set(0, heading, beat); dummy.updateMatrix(); wings.setMatrixAt(i * 2, dummy.matrix);
+      dummy.rotation.set(0, heading, Math.PI - beat); dummy.updateMatrix(); wings.setMatrixAt(i * 2 + 1, dummy.matrix);
+    }
+    wings.instanceMatrix.needsUpdate = true;
+    if (composer) composer.render(); else renderer.render(scene, camera);
+    requestAnimationFrame(frame);
+  }
+  setTime(1000);
+  requestAnimationFrame(frame);
+})();
+</script>

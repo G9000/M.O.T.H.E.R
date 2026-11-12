@@ -1,0 +1,9 @@
+# Memory garden (design reference, not built)
+
+**Idea.** A way to see and walk through what M.O.T.H.E.R holds: a sunny wildflower meadow where each record is a flower. Each kind grows its own species (memories are daisies, decisions tulips, tasks poppies, checkpoints bellflowers, artifacts sunflowers, actions roses); pinned records float as lotuses on a pond around a candle. Record flowers are larger and more saturated than the wild ones and carry a small sun-glint. Clicking a flower flies to it and opens its record, with saved links drawn as threads and "similar in meaning" links as dots. A slider replays the week; search and a harness filter dim what does not match; a List panel is the keyboard-accessible way in.
+
+**Status.** Only the mockup exists: [docs/mockups/memory-garden.html](../../mockups/memory-garden.html). Open it in a browser. Every record in it is invented, nothing reads a real workspace, and it loads Three.js r128 from pinned CDN files, so it needs a network connection. It was checked in Chromium only; phones, Safari, Firefox and weaker GPUs are untested, and the wild field is heavy (about 1.3 million triangles on desktop, with a three-step fallback).
+
+**If it is built.** A read-only `mother garden` command inside the existing executable: a local web server (axum on the existing tokio runtime) bound to 127.0.0.1 on a random port, opened with a one-time token, with origin checks and no outside requests; Three.js bundled into the binary rather than loaded from a CDN. It would read the store directly, as the inbox TUI does. "Similar in meaning" links would come from the local search model. Tending from the garden (pin, hand off, retract, launch) is a later step that needs request-forgery protection. A terminal (ASCII) garden inside the TUI was also discussed as a lighter companion with no server at all.
+
+**Decision.** Not building it for now; the mockup is kept as the reference for the look and interactions.
