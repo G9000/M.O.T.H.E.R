@@ -50,3 +50,14 @@
 <p align="center">
   <sub><a href="docs/design.md">Design</a> &middot; <a href="docs/validation.md">Validation</a> &middot; <a href="docs/CHANGELOG.md">Changes</a></sub>
 </p>
+
+<hr>
+
+<p align="center">
+  <sub>
+    <em>
+      This repository was born out of my personal tragedy,<br>
+      transformed into a place of comfort, remembrance, and hope.
+    </em>
+  </sub>
+</p>
