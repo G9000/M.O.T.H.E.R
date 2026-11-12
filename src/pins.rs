@@ -134,6 +134,59 @@ pub(crate) fn restore(conn: &Connection, pins: &Value) -> Result<()> {
     Ok(())
 }
 
+/// Apply a pin change inside the caller's transaction, after the caller checked its own authority.
+pub(crate) fn set(tx: &Connection, id: &str, pinned: bool, actor: &str) -> Result<Value> {
+    let (record, _) = store::read_record(tx, id)?;
+    let kind = string(&record, "kind")?;
+    if !pinnable(kind) {
+        return Err(invalid("Only memories and decisions can be pinned"));
+    }
+    tx.execute_batch(SCHEMA)?;
+    let current: Option<(String, String)> = tx
+        .query_row(
+            "SELECT actor,pinned_at FROM pins WHERE record_id=?",
+            [id],
+            |r| Ok((r.get(0)?, r.get(1)?)),
+        )
+        .optional()?;
+    let changed = current.is_some() != pinned;
+    let (actor, pinned_at) = if pinned {
+        if let Some(existing) = current {
+            existing
+        } else {
+            let recallable: bool = tx.query_row(
+                &format!("SELECT {RECALLABLE} FROM records WHERE id=?"),
+                [id],
+                |r| r.get(0),
+            )?;
+            if !recallable {
+                return Err(invalid(
+                    "Retracted, superseded or cancelled records cannot be pinned",
+                ));
+            }
+            let count: i64 = tx.query_row("SELECT COUNT(*) FROM pins", [], |r| r.get(0))?;
+            if usize::try_from(count).unwrap_or(usize::MAX) >= MAX_PINS {
+                return Err(Error::domain(
+                    "RESOURCE_LIMIT",
+                    format!("At most {MAX_PINS} records can be pinned. Unpin one first."),
+                ));
+            }
+            let stamp = store::now();
+            tx.execute("INSERT INTO pins VALUES (?,?,?)", params![id, actor, stamp])?;
+            (actor.to_owned(), stamp)
+        }
+    } else {
+        tx.execute("DELETE FROM pins WHERE record_id=?", [id])?;
+        (String::new(), String::new())
+    };
+    let mut result = json!({"id":id,"kind":kind,"pinned":pinned,"changed":changed});
+    if pinned {
+        result["pinnedBy"] = json!(actor);
+        result["pinnedAt"] = json!(pinned_at);
+    }
+    Ok(result)
+}
+
 impl Store {
     /// Pin or unpin a memory or decision so every context read includes it.
     ///
@@ -159,53 +212,44 @@ impl Store {
         if !pinnable(kind) {
             return Err(invalid("Only memories and decisions can be pinned"));
         }
-        tx.execute_batch(SCHEMA)?;
-        let current: Option<(String, String)> = tx
-            .query_row(
-                "SELECT actor,pinned_at FROM pins WHERE record_id=?",
-                [id],
-                |r| Ok((r.get(0)?, r.get(1)?)),
-            )
-            .optional()?;
-        let changed = current.is_some() != pinned;
-        let (actor, pinned_at) = if pinned {
-            if let Some(existing) = current {
-                existing
-            } else {
-                let recallable: bool = tx.query_row(
-                    &format!("SELECT {RECALLABLE} FROM records WHERE id=?"),
-                    [id],
-                    |r| r.get(0),
-                )?;
-                if !recallable {
-                    return Err(invalid(
-                        "Retracted, superseded or cancelled records cannot be pinned",
-                    ));
-                }
-                let count: i64 = tx.query_row("SELECT COUNT(*) FROM pins", [], |r| r.get(0))?;
-                if usize::try_from(count).unwrap_or(usize::MAX) >= MAX_PINS {
-                    return Err(Error::domain(
-                        "RESOURCE_LIMIT",
-                        format!("At most {MAX_PINS} records can be pinned. Unpin one first."),
-                    ));
-                }
-                let stamp = store::now();
-                tx.execute(
-                    "INSERT INTO pins VALUES (?,?,?)",
-                    params![id, auth.client_id, stamp],
-                )?;
-                (auth.client_id.clone(), stamp)
-            }
-        } else {
-            tx.execute("DELETE FROM pins WHERE record_id=?", [id])?;
-            (String::new(), String::new())
-        };
+        let result = set(&tx, id, pinned, &auth.client_id)?;
         tx.commit()?;
-        let mut result = json!({"id":id,"kind":kind,"pinned":pinned,"changed":changed});
-        if pinned {
-            result["pinnedBy"] = json!(actor);
-            result["pinnedAt"] = json!(pinned_at);
-        }
         Ok(result)
+    }
+    /// Pin or unpin as the local owner, who needs no grant. The same rules apply.
+    pub fn owner_pin(&mut self, id: &str, pinned: bool) -> Result<Value> {
+        contracts::id(id)?;
+        let tx = self
+            .conn
+            .transaction_with_behavior(TransactionBehavior::Immediate)?;
+        let result = set(&tx, id, pinned, crate::tend::OWNER)?;
+        tx.commit()?;
+        Ok(result)
+    }
+    /// Every pin with its record's current state, for the owner.
+    pub fn owner_pins(&mut self) -> Result<Value> {
+        let tx = self.conn.transaction()?;
+        let mut pins = Vec::new();
+        if exists(&tx)? {
+            let mut statement = tx.prepare(&format!(
+                "SELECT r.payload, r.{RECALLABLE}, p.actor, p.pinned_at FROM pins p JOIN records r ON r.id=p.record_id ORDER BY p.pinned_at, p.record_id"
+            ))?;
+            let rows = statement
+                .query_map([], |r| {
+                    Ok((
+                        r.get::<_, String>(0)?,
+                        r.get::<_, bool>(1)?,
+                        r.get::<_, String>(2)?,
+                        r.get::<_, String>(3)?,
+                    ))
+                })?
+                .collect::<std::result::Result<Vec<_>, _>>()?;
+            for (payload, active, actor, at) in rows {
+                let r = contracts::parse_record(serde_json::from_str(&payload)?)?;
+                pins.push(json!({"id":r["id"],"kind":r["kind"],"title":r["title"],"status":r["status"],"revision":r["revision"],"active":active,"pinnedBy":actor,"pinnedAt":at}));
+            }
+        }
+        drop(tx);
+        Ok(json!({"limit":MAX_PINS,"pins":pins}))
     }
 }

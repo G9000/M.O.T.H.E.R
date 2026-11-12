@@ -26,7 +26,7 @@ Each harness is known to M.O.T.H.E.R by the name of its grant, such as `claude-c
 
 `mother_assign_task` with `{"id": ..., "assignee": "codex"}` hands an open task (todo, doing or blocked) to that harness; another name moves it, and `"assignee": null` clears it. The receiving harness sees it under `assignedToYou` in every context read, and at the top of its `mother brief`, with who handed it over and when. `assignedToYouSummary` gives the total; up to ten are listed, oldest handoff first.
 
-The receiving harness does the work under its own model and permissions and records progress with the ordinary task statuses through `mother_write_record`; a done or cancelled task leaves `assignedToYou`. Nothing runs automatically, and a harness only finds its work when it next reads context. A task can only go to a harness with a current grant that can read it. Handing off needs `task:write`.
+The receiving harness does the work under its own model and permissions and records progress with the ordinary task statuses through `mother_write_record`; a done or cancelled task leaves `assignedToYou`. Nothing runs automatically, and a harness only finds its work when it next reads context. A task can only go to a harness with a current grant that can read it. Handing off needs `task:write`. You can also hand a task over yourself with `mother tend` or `mother assign <task-id> --to <harness>`.
 
 Assignments are stored in their own table, so an executable older than 0.5.0 still reads the workspace; it simply does not show them, and its exports leave them out. Exports from 0.5.0 carry them. Grants are never exported, so after a restore, granting the same harness name again picks its waiting work back up.
 
@@ -39,7 +39,7 @@ Some things should never fall out of a first read: your name, what matters most 
 | `pinned` | Each pinned, still-active record with its current title, revision and content (up to 2,000 characters, with `truncated`), plus who pinned it and when. |
 | `pinnedSummary` | `total` pins, how many are `shown`, how many are `inactive` because the record was retracted or superseded, and the `limit` of 12. |
 
-A pin follows its record, so a corrected memory shows its newest text. A retracted pinned record drops out of `pinned` but still counts toward the limit until it is unpinned. Pinning needs the same write scope as editing that kind of record. Shared-access clients see only pins on records they were granted and cannot pin. Pins are carried in exports and restored with them.
+A pin follows its record, so a corrected memory shows its newest text. A retracted pinned record drops out of `pinned` but still counts toward the limit until it is unpinned. You can pin from your own terminal with `mother tend` or `mother pin <record-id>`, without a harness; see [the terminal guide](terminal.md#tend-the-pinned-core-and-handoffs). For a harness, pinning needs the same write scope as editing that kind of record. Shared-access clients see only pins on records they were granted and cannot pin. Pins are carried in exports and restored with them.
 
 Pins are kept in their own table rather than on the record, so an executable older than 0.5.0 ignores them and can still read the workspace. An export made by such an executable leaves pins out.
 

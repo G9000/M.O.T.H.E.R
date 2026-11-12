@@ -35,6 +35,8 @@ enum Command {
     Tui,
     /// Open the owner review inbox for proposed memories.
     Inbox,
+    /// Open the pinned core and handoffs: pin what she should never lose, and hand tasks to harnesses.
+    Tend,
     /// Connect a saved harness, or guide first-time setup in a terminal.
     Connect {
         #[arg(value_enum)]
@@ -131,6 +133,66 @@ enum Command {
     Model {
         #[command(subcommand)]
         command: ModelCommand,
+    },
+    /// List records with their pin and handoff state; output may contain private text.
+    Records {
+        /// Only this kind: memory, decision, task, checkpoint, artifact or action.
+        #[arg(long)]
+        kind: Option<String>,
+        /// Only records whose title or content contains this text.
+        #[arg(long)]
+        query: Option<String>,
+        #[arg(long, value_parser = clap::value_parser!(u16).range(1..=500))]
+        limit: Option<u16>,
+        #[arg(long)]
+        db: Option<PathBuf>,
+    },
+    /// List the pinned core: the records every harness reads first.
+    Pins {
+        #[arg(long)]
+        db: Option<PathBuf>,
+    },
+    /// Pin a memory or decision so every context read includes it.
+    Pin {
+        /// The record to pin; find IDs with `mother records`.
+        id: String,
+        #[arg(long)]
+        db: Option<PathBuf>,
+    },
+    /// Remove a record from the pinned core.
+    Unpin {
+        id: String,
+        #[arg(long)]
+        db: Option<PathBuf>,
+    },
+    /// List tasks handed to a harness, and the harnesses a task can go to.
+    Handoffs {
+        #[arg(long)]
+        db: Option<PathBuf>,
+    },
+    /// Hand an open task to a harness, or clear its handoff.
+    Assign {
+        /// The task to hand over.
+        id: String,
+        /// The harness (grant name) that should pick it up.
+        #[arg(long, required_unless_present = "clear", conflicts_with = "clear")]
+        to: Option<String>,
+        /// Clear the handoff instead.
+        #[arg(long)]
+        clear: bool,
+        #[arg(long)]
+        db: Option<PathBuf>,
+    },
+    /// Show a record's earlier revisions, or one of them in full.
+    History {
+        id: String,
+        /// Show this revision in full instead of the list.
+        #[arg(long, conflicts_with = "limit")]
+        revision: Option<u64>,
+        #[arg(long, value_parser = clap::value_parser!(u16).range(1..=100))]
+        limit: Option<u16>,
+        #[arg(long)]
+        db: Option<PathBuf>,
     },
     /// Start a harness on an open task through a launcher you declared.
     ///
@@ -426,6 +488,7 @@ fn execute(command: Command) -> Result<()> {
             }
         }
         Command::Inbox => crate::tui::run(crate::tui::Launch::Inbox),
+        Command::Tend => crate::tui::run(crate::tui::Launch::Tend),
         Command::Tui => crate::tui::run(crate::tui::Launch::Home),
         Command::Connect {
             harness: Harness::Animaos,
@@ -603,6 +666,47 @@ fn execute(command: Command) -> Result<()> {
                 ModelCommand::Install => embedding::install(&dir)?,
                 ModelCommand::Status => embedding::status(&dir)?,
             })
+        }
+        Command::Records {
+            kind,
+            query,
+            limit,
+            db,
+        } => {
+            let mut request = json!({});
+            if let Some(kind) = kind {
+                request["kind"] = kind.into();
+            }
+            if let Some(query) = query {
+                request["query"] = query.into();
+            }
+            if let Some(limit) = limit {
+                request["limit"] = limit.into();
+            }
+            print_json(Store::open(&db_path(db)?)?.owner_records(request)?)
+        }
+        Command::Pins { db } => print_json(Store::open(&db_path(db)?)?.owner_pins()?),
+        Command::Pin { id, db } => print_json(Store::open(&db_path(db)?)?.owner_pin(&id, true)?),
+        Command::Unpin { id, db } => print_json(Store::open(&db_path(db)?)?.owner_pin(&id, false)?),
+        Command::Handoffs { db } => print_json(Store::open(&db_path(db)?)?.owner_handoffs()?),
+        Command::Assign { id, to, clear, db } => {
+            let assignee = if clear { None } else { to.as_deref() };
+            print_json(Store::open(&db_path(db)?)?.owner_assign(&id, assignee)?)
+        }
+        Command::History {
+            id,
+            revision,
+            limit,
+            db,
+        } => {
+            let mut request = json!({"id":id});
+            if let Some(revision) = revision {
+                request["revision"] = revision.into();
+            }
+            if let Some(limit) = limit {
+                request["limit"] = limit.into();
+            }
+            print_json(Store::open(&db_path(db)?)?.owner_history(request)?)
         }
         Command::Launch {
             task,

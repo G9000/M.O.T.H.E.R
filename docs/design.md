@@ -50,6 +50,8 @@ The first release ran nothing: no agent loop, no tool execution. That still hold
 
 M.O.T.H.E.R choosing launches herself (proposals for approval, then launches within owner-set budgets) is a later stage and requires its own decision. See [the hearth](hearth.md).
 
+The owner has the same pin, handoff, history and record-listing operations without a grant, through the CLI and the terminal's tend screen. They share the harness code paths and rules, record `@owner` as the actor, and are not reachable from MCP.
+
 ## Local retrieval layer (v0.3.0)
 
 The existing search tool and owner CLI share local Candle inference and a disposable SQLite vector sidecar. Canonical SQLite records remain authoritative. Cache keys bind workspace/generation, model/profile, record revision and text digest; search rechecks grants and current canonical state before returning. Hybrid retrieval preserves exact identifiers and adds meaning-based candidates. Missing or busy infrastructure produces explicit literal fallback.

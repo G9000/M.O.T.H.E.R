@@ -94,6 +94,11 @@ pub(super) fn render(frame: &mut Frame, app: &App) {
                 inbox.render(frame, rows[1]);
             }
         }
+        Page::Tend => {
+            if let Some(tend) = &app.tend {
+                tend.render(frame, rows[1]);
+            }
+        }
         Page::Setup => setup(frame, rows[1], app),
         Page::ConfirmSave => confirm_save(frame, rows[1], app),
         Page::Help => help(frame, rows[1]),
@@ -119,6 +124,10 @@ pub(super) fn render(frame: &mut Frame, app: &App) {
             app.inbox
                 .as_ref()
                 .map_or(app.message.as_str(), |inbox| inbox.message.as_str())
+        } else if app.page == Page::Tend {
+            app.tend
+                .as_ref()
+                .map_or(app.message.as_str(), |tend| tend.message.as_str())
         } else {
             &app.message
         }))
@@ -136,9 +145,10 @@ pub(super) fn render(frame: &mut Frame, app: &App) {
         match app.page {
             Page::Health => "Up/Down select   Enter test   PgUp/PgDn scroll   Esc cancel / home",
             Page::Home => {
-                "t test   n AnimaOS   i inbox   s setup   c connect   d disconnect   r refresh   a startup   h help   q quit"
+                "p pinned core   i inbox   t test   n AnimaOS   s setup   c connect   d disconnect   r refresh   a startup   h help   q quit"
             }
             Page::Inbox => app.inbox.as_ref().map_or("Esc home", |inbox| inbox.hints()),
+            Page::Tend => app.tend.as_ref().map_or("Esc home", |tend| tend.hints()),
             Page::Animaos => app
                 .animaos
                 .as_ref()
@@ -177,6 +187,7 @@ fn home(frame: &mut Frame, area: Rect, app: &App) {
     };
     let lines = vec![
         Line::from(safe(&app.workspace)),
+        key("p", "  Pinned core · what she never loses, and handoffs"),
         key("i", "  Memory Inbox · review what matters"),
         key("n", "  Connect AnimaOS"),
         key("t", "  Test connection"),

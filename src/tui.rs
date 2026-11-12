@@ -2,6 +2,7 @@
 mod animaos;
 mod health;
 mod inbox;
+mod tend;
 #[cfg(test)]
 mod tests;
 mod view;
@@ -18,6 +19,7 @@ pub enum Launch {
     Setup,
     Inbox,
     Animaos,
+    Tend,
 }
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Page {
@@ -29,6 +31,7 @@ enum Page {
     Inbox,
     Animaos,
     Health,
+    Tend,
 }
 
 struct Form {
@@ -101,6 +104,7 @@ struct App {
     startup: Option<bool>,
     workspace: String,
     inbox: Option<inbox::Inbox>,
+    tend: Option<tend::Tend>,
     animaos: Option<animaos::Setup>,
     health: Option<health::Health>,
 }
@@ -110,6 +114,7 @@ impl App {
         Ok(Self {
             page: Page::Home,
             inbox: None,
+            tend: None,
             animaos: None,
             health: None,
             form: None,
@@ -128,6 +133,12 @@ impl App {
         let path = mother::config::data_directory()?.join("context.sqlite");
         self.inbox = Some(inbox::Inbox::open(path)?);
         self.page = Page::Inbox;
+        Ok(())
+    }
+    fn open_tend(&mut self) -> Result<()> {
+        let path = mother::config::data_directory()?.join("context.sqlite");
+        self.tend = Some(tend::Tend::open(path)?);
+        self.page = Page::Tend;
         Ok(())
     }
     fn open_setup(&mut self) -> Result<()> {
@@ -225,6 +236,9 @@ pub fn run(launch: Launch) -> Result<()> {
     if matches!(launch, Launch::Inbox) {
         app.open_inbox()?;
     }
+    if matches!(launch, Launch::Tend) {
+        app.open_tend()?;
+    }
     if matches!(launch, Launch::Animaos) {
         app.animaos = Some(animaos::Setup::new());
         app.page = Page::Animaos;
@@ -233,7 +247,7 @@ pub fn run(launch: Launch) -> Result<()> {
     let _guard = TerminalGuard;
     crossterm::execute!(std::io::stdout(), event::EnableBracketedPaste)?;
     let (sender, receiver) = mpsc::channel();
-    if !matches!(launch, Launch::Inbox | Launch::Animaos) {
+    if !matches!(launch, Launch::Inbox | Launch::Animaos | Launch::Tend) {
         dispatch(
             &mut app,
             &sender,
@@ -312,6 +326,15 @@ pub fn run(launch: Launch) -> Result<()> {
                     }
                 }
             }
+            Page::Tend => {
+                if let Some(tend) = &mut app.tend {
+                    match tend.input(key) {
+                        Ok(true) => app.page = Page::Home,
+                        Ok(false) => {}
+                        Err(error) => tend.message = error.to_string(),
+                    }
+                }
+            }
             Page::Inbox => {
                 if let Some(inbox) = &mut app.inbox {
                     match inbox.input(key) {
@@ -386,6 +409,11 @@ pub fn run(launch: Launch) -> Result<()> {
                 }
                 KeyCode::Char('i') => {
                     if let Err(error) = app.open_inbox() {
+                        app.message = error.to_string();
+                    }
+                }
+                KeyCode::Char('p') => {
+                    if let Err(error) = app.open_tend() {
                         app.message = error.to_string();
                     }
                 }

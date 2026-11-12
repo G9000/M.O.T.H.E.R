@@ -2,6 +2,7 @@
 
 ## 12 November 2026
 
+- Documented the owner's tend screen and the `records`, `pins`, `pin`, `unpin`, `handoffs`, `assign` and `history` commands in the terminal guide, with pointers from the shared-context guide and design notes.
 - Added the memory garden design reference: a standalone mockup with invented data under docs/mockups and a short spec. It is not built into the executable.
 
 ## 11 November 2026

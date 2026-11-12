@@ -4,6 +4,7 @@ fn fixture(page: Page) -> App {
     App {
         page,
         inbox: None,
+        tend: None,
         animaos: None,
         health: None,
         form: Some(Form::new(Settings {

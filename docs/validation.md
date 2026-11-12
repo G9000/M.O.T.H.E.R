@@ -1,3 +1,17 @@
+# Owner tending in the terminal — 12 November 2026
+
+Committed directly to main from `ef373a3`, at the owner's request. Still version 0.5.0. No MCP tool, schema, record-shape or grant change; README title, poem and artwork unchanged.
+
+- New owner commands that need no grant: `mother records` (list with pin and handoff state, optional kind, query and limit), `mother pins`, `mother pin`, `mother unpin`, `mother handoffs`, `mother assign --to <harness> | --clear` and `mother history`. They share the harness code paths and rules (pin limit, kinds, open tasks, current receiving grant) and record `@owner` as the actor.
+- New terminal screen, **p** at home or `mother tend`: tabs for Pinned, Memories, Decisions and Tasks; `p` pins or unpins; `a` opens a chooser to hand an open task to a harness or to nobody; record text is stripped of control characters before display.
+- The pin and history internals were split so harness and owner entry points share one implementation; the existing pin, history and handoff tests pass unchanged.
+- `tests/tend.rs` (seven store tests), `tests/tend_cli.rs` (four CLI tests) and six screen tests in `src/tui/tend/tests.rs` failed first. They cover owner pins and their limits, handoffs and closed handoffs, record listing and filters, history without a grant, export and restore with `@owner` entries, each command, and the screen's tabs, pin toggle, chooser, refusals and sanitizing.
+- The real screen was driven in a pseudo-terminal against a synthetic workspace: it opened, switched tabs, pinned a record with `p`, returned home and exited cleanly, and `mother pins` then listed the new pin.
+- Full locked suite on macOS with Rust 1.94.0 and 1.99.1: **272 passed**, two existing optional model tests ignored. Formatting and strict Clippy passed on both.
+
+Not exercised: the screen on Windows outside CI's unit tests, and on a real workspace. Owner commands print record text to the terminal. The screen lists at most 500 records and has no search of its own; use `mother records --query`.
+
+---
 # The hearth, stage 1: owner-triggered launches — 11 November 2026
 
 Committed directly to main from `d485ebb`, at the owner's request after reviewing the proposal. Still version 0.5.0. No MCP tool, schema, record-shape or grant change; README title, poem and artwork unchanged. This deliberately relaxes the original "runs nothing" rule for the owner CLI only, recorded in the design notes and contributor guide.

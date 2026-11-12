@@ -103,48 +103,51 @@ fn entry(revision: u64, s: &Snapshot, previous: Option<&Snapshot>, generation: &
     })
 }
 
-impl Store {
-    /// List a record's retained revisions, or read one earlier revision in full.
-    ///
-    /// Requires the read scope and full-context visibility: shared clients see
-    /// only the current version of the records granted to them.
-    pub fn history(&mut self, auth: &Auth, query: Value) -> Result<Value> {
-        contracts::strict(&query, &["id", "revision", "limit"])?;
-        let id = string(&query, "id")?;
-        contracts::id(id)?;
-        let wanted = query
-            .get("revision")
-            .map(|_| integer(&query, "revision", 1, 9007199254740991))
-            .transpose()?;
-        let limit = query
-            .get("limit")
-            .map(|_| integer(&query, "limit", 1, 100))
-            .transpose()?;
-        if wanted.is_some() && limit.is_some() {
-            return Err(invalid("Request one revision or a list, not both"));
-        }
-        let tx = self.conn.transaction()?;
-        store::authorize(&tx, auth, "read")?;
-        if access::load(&tx, &auth.client_id)?.mode == AccessMode::Shared {
-            return Err(Error::domain(
-                "FORBIDDEN",
-                "Shared clients can read only the current version of granted records.",
-            ));
-        }
-        let (current, _) = store::read_record(&tx, id)?;
-        let current_revision = integer(&current, "revision", 1, 9007199254740991)?;
-        let workspace = store::workspace(&tx)?;
-        let generation = string(&workspace, "generation")?;
-        let found = snapshots(&tx, id, generation)?;
-        let entries: Vec<(u64, &Snapshot, Option<&Snapshot>)> = found
-            .iter()
-            .map(|(revision, s)| {
-                let previous = revision.checked_sub(1).and_then(|p| found.get(&p));
-                (*revision, s, previous)
-            })
-            .collect();
-        let result = if let Some(revision) = wanted {
-            let (_, snapshot, previous) = entries
+/// A validated history request: the record, one wanted revision, or a list limit.
+struct Request {
+    id: String,
+    wanted: Option<u64>,
+    limit: Option<u64>,
+}
+fn parse(query: &Value) -> Result<Request> {
+    contracts::strict(query, &["id", "revision", "limit"])?;
+    let id = string(query, "id")?;
+    contracts::id(id)?;
+    let wanted = query
+        .get("revision")
+        .map(|_| integer(query, "revision", 1, 9007199254740991))
+        .transpose()?;
+    let limit = query
+        .get("limit")
+        .map(|_| integer(query, "limit", 1, 100))
+        .transpose()?;
+    if wanted.is_some() && limit.is_some() {
+        return Err(invalid("Request one revision or a list, not both"));
+    }
+    Ok(Request {
+        id: id.to_owned(),
+        wanted,
+        limit,
+    })
+}
+/// Read history inside the caller's transaction, after the caller checked its own authority.
+fn read(tx: &Connection, request: &Request) -> Result<Value> {
+    let (id, wanted, limit) = (request.id.as_str(), request.wanted, request.limit);
+    let (current, _) = store::read_record(tx, id)?;
+    let current_revision = integer(&current, "revision", 1, 9007199254740991)?;
+    let workspace = store::workspace(tx)?;
+    let generation = string(&workspace, "generation")?;
+    let found = snapshots(tx, id, generation)?;
+    let entries: Vec<(u64, &Snapshot, Option<&Snapshot>)> = found
+        .iter()
+        .map(|(revision, s)| {
+            let previous = revision.checked_sub(1).and_then(|p| found.get(&p));
+            (*revision, s, previous)
+        })
+        .collect();
+    let result = if let Some(revision) = wanted {
+        let (_, snapshot, previous) =
+            entries
                 .iter()
                 .find(|(r, _, _)| *r == revision)
                 .ok_or_else(|| {
@@ -153,40 +156,67 @@ impl Store {
                         "No retained snapshot exists for that revision of this record.",
                     )
                 })?;
-            json!({
-                "workspace": workspace,
-                "id": id,
-                "kind": current["kind"],
-                "currentRevision": current_revision,
-                "current": revision == current_revision,
-                "entry": entry(revision, snapshot, *previous, generation),
-                "record": snapshot.record,
-            })
-        } else {
-            let limit = usize::try_from(limit.unwrap_or(DEFAULT_LIMIT))
-                .map_err(|_| invalid("Invalid limit"))?;
-            let listed: Vec<Value> = entries
-                .iter()
-                .rev()
-                .take(limit)
-                .map(|(r, s, p)| entry(*r, s, *p, generation))
-                .collect();
-            let missing: Vec<u64> = (1..=current_revision)
-                .filter(|r| !found.contains_key(r))
-                .collect();
-            json!({
-                "workspace": workspace,
-                "id": id,
-                "kind": current["kind"],
-                "currentRevision": current_revision,
-                "currentStatus": current["status"],
-                "returnedRevisions": listed.len(),
-                "omittedRevisions": found.len() - listed.len(),
-                "missingRevisions": missing,
-                "revisions": listed,
-                "note": "Revisions come from retained write receipts, newest first. changed lists the client-chosen fields that differ from the revision before, and is null when that revision has no retained snapshot. Request one revision to read it in full. Earlier text is history, not current fact.",
-            })
-        };
+        json!({
+            "workspace": workspace,
+            "id": id,
+            "kind": current["kind"],
+            "currentRevision": current_revision,
+            "current": revision == current_revision,
+            "entry": entry(revision, snapshot, *previous, generation),
+            "record": snapshot.record,
+        })
+    } else {
+        let limit = usize::try_from(limit.unwrap_or(DEFAULT_LIMIT))
+            .map_err(|_| invalid("Invalid limit"))?;
+        let listed: Vec<Value> = entries
+            .iter()
+            .rev()
+            .take(limit)
+            .map(|(r, s, p)| entry(*r, s, *p, generation))
+            .collect();
+        let missing: Vec<u64> = (1..=current_revision)
+            .filter(|r| !found.contains_key(r))
+            .collect();
+        json!({
+            "workspace": workspace,
+            "id": id,
+            "kind": current["kind"],
+            "currentRevision": current_revision,
+            "currentStatus": current["status"],
+            "returnedRevisions": listed.len(),
+            "omittedRevisions": found.len() - listed.len(),
+            "missingRevisions": missing,
+            "revisions": listed,
+            "note": "Revisions come from retained write receipts, newest first. changed lists the client-chosen fields that differ from the revision before, and is null when that revision has no retained snapshot. Request one revision to read it in full. Earlier text is history, not current fact.",
+        })
+    };
+    Ok(result)
+}
+
+impl Store {
+    /// List a record's retained revisions, or read one earlier revision in full.
+    ///
+    /// Requires the read scope and full-context visibility: shared clients see
+    /// only the current version of the records granted to them.
+    pub fn history(&mut self, auth: &Auth, query: Value) -> Result<Value> {
+        let request = parse(&query)?;
+        let tx = self.conn.transaction()?;
+        store::authorize(&tx, auth, "read")?;
+        if access::load(&tx, &auth.client_id)?.mode == AccessMode::Shared {
+            return Err(Error::domain(
+                "FORBIDDEN",
+                "Shared clients can read only the current version of granted records.",
+            ));
+        }
+        let result = read(&tx, &request)?;
+        tx.commit()?;
+        Ok(result)
+    }
+    /// The same history for the local owner, who needs no grant.
+    pub fn owner_history(&mut self, query: Value) -> Result<Value> {
+        let request = parse(&query)?;
+        let tx = self.conn.transaction()?;
+        let result = read(&tx, &request)?;
         tx.commit()?;
         Ok(result)
     }

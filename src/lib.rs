@@ -14,3 +14,4 @@ mod pins;
 mod portability;
 pub mod search;
 pub mod store;
+pub mod tend;

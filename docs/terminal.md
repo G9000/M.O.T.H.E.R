@@ -8,6 +8,7 @@ Run `mother` in a terminal, or `mother tui`, to open M.O.T.H.E.R's dashboard. Pi
 | --- | --- |
 | n | Connect an AnimaOS agent through local MCP |
 | t | Test this executable's local MCP read using an existing client config |
+| p | Open the pinned core and handoffs (also `mother tend`) |
 | i | Open the Memory Inbox for Save, Edit or Dismiss |
 | s | Set up or inspect the ChatGPT connection |
 | c | Connect using saved settings and credential |
@@ -18,6 +19,37 @@ Run `mother` in a terminal, or `mother tui`, to open M.O.T.H.E.R's dashboard. Pi
 | q or Esc | Leave the dashboard; an established connection keeps running |
 
 In setup, use Tab/Shift+Tab or the arrow keys to move between fields. Ctrl+U clears a field. Enter reviews the settings before saving; Escape returns or cancels. Key input is masked, never included in the review screen, and stored in the native OS credential store. Blank key input preserves the existing credential for that connection.
+
+## Tend the pinned core and handoffs
+
+Press **p** at home, or run `mother tend`. This is your own view of what every harness reads first, and it needs no harness or grant.
+
+| Key | Action |
+| --- | --- |
+| Tab / Shift+Tab | Switch between Pinned, Memories, Decisions and Tasks |
+| Up / Down | Select a record; its text, who last saved it and its ID show on the right |
+| p | Pin or unpin the selected memory or decision |
+| a | Hand the selected open task to a harness, or to nobody |
+| r | Refresh |
+| Esc | Return home |
+
+At most twelve records can be pinned. Pins and handoffs you make here are recorded as `@owner`. A harness finds a task handed to it the next time it reads context; nothing runs by itself. The list shows the 500 most recently saved records.
+
+The same controls work as plain commands, which print JSON and may show private text:
+
+```powershell
+mother records --kind memory --query tea
+mother pins
+mother pin <record-id>
+mother unpin <record-id>
+mother handoffs
+mother assign <task-id> --to codex
+mother assign <task-id> --clear
+mother history <record-id>
+mother history <record-id> --revision 1
+```
+
+`mother records` is how you find a record's ID. Each command accepts `--db` for a workspace outside the default location.
 
 ## Connect ChatGPT once
 
