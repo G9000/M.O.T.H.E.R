@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="assets/mother-logo.png" alt="M.O.T.H.E.R logo: six ethereal wings in pearl white, blush pink and lavender surround a luminous pearl." width="240">
+</p>
+
 <h1 align="center">M.O.T.H.E.R.</h1>
 
 <p align="center">

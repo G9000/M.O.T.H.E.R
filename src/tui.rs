@@ -2,6 +2,7 @@
 mod animaos;
 mod health;
 mod inbox;
+mod logo;
 mod tend;
 #[cfg(test)]
 mod tests;

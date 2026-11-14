@@ -2,6 +2,10 @@
 
 Run `mother` in a terminal, or `mother tui`, to open M.O.T.H.E.R's dashboard. Piped invocations of bare `mother` still print help; all existing CLI and MCP commands remain available. M.O.T.H.E.R remains an independent context layer with your existing local database and owner-supplied persona.
 
+The home header shows the six-wing pearl logo in pink, white and lavender when the terminal is at least 34 rows tall. It uses colored Unicode half-blocks, so no terminal image protocol or separate image file is needed at runtime. Shorter windows and working screens keep the compact title to leave room for controls. Use a Unicode font and a true-color terminal for the intended appearance.
+
+The embedded thumbnail is generated from `assets/mother-logo.png`. After replacing that artwork, maintainers can regenerate it on Windows with `powershell -NoProfile -ExecutionPolicy Bypass -File assets/generate-terminal-logo.ps1` before building.
+
 ## Keys
 
 | Key | Action |

@@ -189,3 +189,32 @@ fn home_exposes_connection_test_and_health_page_handles_small_terminal() {
     assert!(screen(&fixture(Page::Home), 110, 32).contains("Test connection"));
     assert!(screen(&fixture(Page::Health), 25, 8).contains("Resize"));
 }
+
+#[test]
+fn home_logo_adapts_without_hiding_controls() {
+    for (width, height) in [(72, 24), (80, 34), (110, 44)] {
+        let output = screen(&fixture(Page::Home), width, height);
+        assert_eq!(output.contains('▀'), height >= 34, "{width}x{height}");
+        for label in [
+            "M.O.T.H.E.R",
+            "Your apps",
+            "Your memory",
+            "AnimaOS",
+            "Memory Inbox",
+            "q quit",
+        ] {
+            assert!(
+                output.contains(label),
+                "missing {label} at {width}x{height}"
+            );
+        }
+    }
+    for page in [
+        Page::Setup,
+        Page::ConfirmSave,
+        Page::Help,
+        Page::ConfirmStartup,
+    ] {
+        assert!(!screen(&fixture(page), 110, 44).contains('▀'));
+    }
+}

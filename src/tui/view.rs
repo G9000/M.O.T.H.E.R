@@ -11,6 +11,7 @@ use ratatui::{
 const INK: Color = Color::Rgb(236, 227, 216);
 const MUTED: Color = Color::Rgb(162, 150, 173);
 const VIOLET: Color = Color::Rgb(188, 160, 215);
+const PINK: Color = Color::Rgb(239, 174, 204);
 const GOLD: Color = Color::Rgb(225, 188, 139);
 const BACKGROUND: Color = Color::Rgb(25, 23, 32);
 
@@ -58,25 +59,19 @@ pub(super) fn render(frame: &mut Frame, app: &App) {
         width,
         area.height,
     );
+    let header_height = if app.page == Page::Home && area.height >= 34 {
+        if area.height >= 44 { 15 } else { 11 }
+    } else {
+        3
+    };
     let rows = Layout::vertical([
-        Constraint::Length(3),
+        Constraint::Length(header_height),
         Constraint::Min(14),
         Constraint::Length(3),
         Constraint::Length(2),
     ])
     .split(area);
-    frame.render_widget(
-        Paragraph::new(vec![
-            Line::from(Span::styled(
-                "M.O.T.H.E.R",
-                Style::default().fg(VIOLET).add_modifier(Modifier::BOLD),
-            )),
-            Line::from("Memory · Ontology · Temporal · Hearth · Experience · Remembrance")
-                .style(Style::default().fg(MUTED)),
-        ])
-        .alignment(Alignment::Center),
-        rows[0],
-    );
+    header(frame, rows[0]);
     match app.page {
         Page::Health => {
             if let Some(health) = &app.health {
@@ -166,6 +161,49 @@ pub(super) fn render(frame: &mut Frame, app: &App) {
         rows[3],
     );
 }
+fn header(frame: &mut Frame, area: Rect) {
+    let title =
+        Line::from("M.O.T.H.E.R").style(Style::default().fg(PINK).add_modifier(Modifier::BOLD));
+    if area.height <= 3 {
+        frame.render_widget(
+            Paragraph::new(vec![
+                title,
+                Line::from("Memory · Ontology · Temporal · Hearth · Experience · Remembrance")
+                    .style(Style::default().fg(MUTED)),
+            ])
+            .alignment(Alignment::Center),
+            area,
+        );
+        return;
+    }
+    let logo_height = area.height - 1;
+    let logo_width = logo_height * 2;
+    let group_width = (logo_width + 3 + 44).min(area.width);
+    let left = area.x + (area.width - group_width) / 2;
+    frame.render_widget(
+        super::logo::Logo {
+            background: (25, 23, 32),
+        },
+        Rect::new(left, area.y, logo_width, logo_height),
+    );
+    frame.render_widget(
+        Paragraph::new(vec![
+            title,
+            Line::from(""),
+            Line::from("A place to become.").style(Style::default().fg(VIOLET)),
+            Line::from(""),
+            Line::from("Memory · Ontology · Temporal").style(Style::default().fg(MUTED)),
+            Line::from("Hearth · Experience · Remembrance").style(Style::default().fg(MUTED)),
+        ]),
+        Rect::new(
+            left + logo_width + 3,
+            area.y + (logo_height - 6) / 2,
+            group_width - logo_width - 3,
+            6,
+        ),
+    );
+}
+
 fn home(frame: &mut Frame, area: Rect, app: &App) {
     use super::{ROWS, Row};
     use crate::apps::State;
