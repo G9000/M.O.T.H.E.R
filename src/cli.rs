@@ -37,7 +37,14 @@ enum Command {
     Inbox,
     /// Open the pinned core and handoffs: pin what she should never lose, and hand tasks to harnesses.
     Tend,
-    /// Connect a saved harness, or guide first-time setup in a terminal.
+    /// Show every agent app on this computer and whether it can read your memory.
+    Apps {
+        #[arg(long)]
+        json: bool,
+    },
+    /// Repair every app whose connection is broken (old program path, revoked access).
+    Fix,
+    /// Connect an app in one step: claude-code, codex, hermes, claude-desktop, animaos or chatgpt.
     Connect {
         #[arg(value_enum)]
         harness: Harness,
@@ -254,6 +261,48 @@ enum Command {
 enum Harness {
     Chatgpt,
     Animaos,
+    ClaudeCode,
+    Codex,
+    Hermes,
+    ClaudeDesktop,
+}
+impl Harness {
+    fn app(self) -> Option<crate::apps::AppId> {
+        use crate::apps::AppId;
+        match self {
+            Harness::ClaudeCode => Some(AppId::ClaudeCode),
+            Harness::Codex => Some(AppId::Codex),
+            Harness::Hermes => Some(AppId::Hermes),
+            Harness::ClaudeDesktop => Some(AppId::ClaudeDesktop),
+            Harness::Chatgpt | Harness::Animaos => None,
+        }
+    }
+}
+fn print_apps(json_output: bool) -> Result<()> {
+    use crate::apps::{self, State};
+    let paths = apps::Paths::detect();
+    let rows = apps::statuses(&paths);
+    if json_output {
+        let list: Vec<Value> = rows
+            .iter()
+            .map(|s| json!({"app": s.app.key(), "name": s.app.name(), "state": match s.state {
+                State::NotInstalled => "not_installed", State::NotConnected => "not_connected",
+                State::Working => "connected", State::Broken(_) => "broken" }, "summary": s.summary()}))
+            .collect();
+        return print_json(json!({"apps": list}));
+    }
+    for s in &rows {
+        let mark = match s.state {
+            State::Working => "✓",
+            State::Broken(_) => "!",
+            State::NotConnected => "○",
+            State::NotInstalled => " ",
+        };
+        println!("{mark} {:<16} {}", s.app.name(), s.summary());
+    }
+    println!("\nConnect one with `mother connect <app>`; repair broken ones with `mother fix`.");
+    println!("AnimaOS and ChatGPT: `mother connect animaos` / `mother connect chatgpt`.");
+    Ok(())
 }
 #[derive(Debug, Clone, Copy, ValueEnum)]
 enum StartupAction {
@@ -486,6 +535,65 @@ fn execute(command: Command) -> Result<()> {
                     "Local MCP check incomplete; inspect the redacted report.",
                 ))
             }
+        }
+        Command::Apps { json } => print_apps(json),
+        Command::Fix => {
+            use crate::apps;
+            let lines = apps::fix(
+                &apps::workspace_root()?,
+                &apps::Paths::detect(),
+                &apps::stable_exe()?,
+                &apps::RealRunner,
+            );
+            if lines.is_empty() {
+                println!("Nothing to fix: every connected app can read your memory.");
+            }
+            for line in &lines {
+                println!("{line}");
+            }
+            if lines.iter().any(|l| l.starts_with("Couldn't")) {
+                return Err(Error::domain(
+                    "FIX",
+                    "Some apps still need attention; see above.",
+                ));
+            }
+            Ok(())
+        }
+        Command::Disconnect {
+            harness:
+                harness @ (Harness::ClaudeCode
+                | Harness::Codex
+                | Harness::Hermes
+                | Harness::ClaudeDesktop),
+        } => {
+            let app = harness.app().expect("an app harness");
+            Err(Error::domain(
+                "CONNECTION",
+                format!(
+                    "Remove the `mother` entry in {}'s MCP settings, then revoke its access with `mother revoke <name>` if you want it gone for good.",
+                    app.name()
+                ),
+            ))
+        }
+        Command::Connect {
+            harness:
+                harness @ (Harness::ClaudeCode
+                | Harness::Codex
+                | Harness::Hermes
+                | Harness::ClaudeDesktop),
+            ..
+        } => {
+            use crate::apps;
+            let app = harness.app().expect("an app harness");
+            let message = apps::connect(
+                &apps::workspace_root()?,
+                &apps::Paths::detect(),
+                app,
+                &apps::stable_exe()?,
+                &apps::RealRunner,
+            )?;
+            println!("{message}");
+            Ok(())
         }
         Command::Inbox => crate::tui::run(crate::tui::Launch::Inbox),
         Command::Tend => crate::tui::run(crate::tui::Launch::Tend),

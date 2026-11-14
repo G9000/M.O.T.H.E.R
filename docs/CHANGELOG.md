@@ -1,5 +1,9 @@
 # Documentation changes
 
+## 14 November 2026
+
+- Added the "Connect your apps" guide for the new home screen, `mother apps`, `mother connect <app>` and `mother fix`, and the AnimaOS owner-key lookup and old-connection repair. Linked it first from the README.
+
 ## 12 November 2026
 
 - Documented the owner's tend screen and the `records`, `pins`, `pin`, `unpin`, `handoffs`, `assign` and `history` commands in the terminal guide, with pointers from the shared-context guide and design notes.

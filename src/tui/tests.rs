@@ -20,6 +20,9 @@ fn fixture(page: Page) -> App {
         busy: false,
         startup: Some(false),
         workspace: "Synthetic workspace".into(),
+        apps: vec![],
+        row: 0,
+        animaos_ready: false,
     }
 }
 fn screen(app: &App, width: u16, height: u16) -> String {
@@ -87,7 +90,52 @@ fn local_readiness_never_claims_chatgpt_acceptance() {
         ready: true,
     });
     let output = screen(&app, 110, 32);
-    assert!(output.contains("ChatGPT read/save: not verified here"));
+    assert!(output.contains("not verified in ChatGPT"));
+}
+
+#[test]
+fn home_lists_apps_in_plain_words_and_offers_fix() {
+    use crate::apps::{AppId, AppStatus, State};
+    let mut app = fixture(Page::Home);
+    app.apps = vec![
+        AppStatus {
+            app: AppId::ClaudeCode,
+            state: State::NotConnected,
+            registration: None,
+        },
+        AppStatus {
+            app: AppId::Codex,
+            state: State::Working,
+            registration: None,
+        },
+        AppStatus {
+            app: AppId::Hermes,
+            state: State::Broken("its access was revoked or is no longer valid".into()),
+            registration: None,
+        },
+        AppStatus {
+            app: AppId::ClaudeDesktop,
+            state: State::NotInstalled,
+            registration: None,
+        },
+    ];
+    let output = screen(&app, 110, 32);
+    for text in [
+        "Claude Code",
+        "installed, not connected",
+        "Codex",
+        "connected",
+        "needs fixing",
+        "not on this computer",
+        "AnimaOS",
+        "ChatGPT",
+        "1 app(s) need fixing. Press f.",
+    ] {
+        assert!(output.contains(text), "missing {text:?}");
+    }
+    for word in ["grant", "scope", "private.json"] {
+        assert!(!output.contains(word), "jargon {word:?} on the home screen");
+    }
 }
 
 #[test]
@@ -118,7 +166,7 @@ fn unknown_startup_is_never_displayed_as_off() {
     let mut app = fixture(Page::Home);
     app.startup = None;
     let output = screen(&app, 110, 32);
-    assert!(output.contains("Start at sign-in: unknown"));
+    assert!(output.contains("start at sign-in: unknown"));
 }
 
 #[test]

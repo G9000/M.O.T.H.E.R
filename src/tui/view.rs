@@ -167,90 +167,138 @@ pub(super) fn render(frame: &mut Frame, app: &App) {
     );
 }
 fn home(frame: &mut Frame, area: Rect, app: &App) {
+    use super::{ROWS, Row};
+    use crate::apps::State;
     let columns =
-        Layout::horizontal([Constraint::Percentage(58), Constraint::Percentage(42)]).split(area);
-    let (state, detail) = app.status.as_ref().map_or(
-        (
-            "Checking".to_owned(),
-            "Use refresh to inspect your saved connection.".to_owned(),
-        ),
-        |s| (s.state.to_string(), safe(&s.detail)),
-    );
-    let status_color = if app
+        Layout::horizontal([Constraint::Percentage(60), Constraint::Percentage(40)]).split(area);
+
+    let chatgpt_ready = app
         .status
         .as_ref()
-        .is_some_and(|s| s.state == crate::connection::ConnectionState::Ready)
-    {
-        Color::LightGreen
-    } else {
-        GOLD
-    };
-    let lines = vec![
-        Line::from(safe(&app.workspace)),
-        key("p", "  Pinned core · what she never loses, and handoffs"),
-        key("i", "  Memory Inbox · review what matters"),
-        key("n", "  Connect AnimaOS"),
-        key("t", "  Test connection"),
+        .is_some_and(|s| s.state == crate::connection::ConnectionState::Ready);
+    let mut lines = vec![
+        Line::from("Which apps can read your memory").style(Style::default().fg(VIOLET)),
         Line::from(""),
-        Line::from(vec![
-            Span::raw("ChatGPT   "),
+    ];
+    for (i, row) in ROWS.iter().enumerate() {
+        let (name, mark, status, color) = match row {
+            Row::App(id) => {
+                let s = app.apps.iter().find(|s| s.app == *id);
+                let (mark, color) = match s.map(|s| &s.state) {
+                    Some(State::Working) => ("✓", Color::LightGreen),
+                    Some(State::Broken(_)) => ("!", GOLD),
+                    Some(State::NotConnected) => ("○", INK),
+                    _ => (" ", MUTED),
+                };
+                (
+                    id.name().to_owned(),
+                    mark,
+                    s.map_or("checking".into(), |s| s.summary()),
+                    color,
+                )
+            }
+            Row::Animaos => {
+                if app.animaos_ready {
+                    (
+                        "AnimaOS".into(),
+                        "•",
+                        "set up before · Enter to check or repair".into(),
+                        INK,
+                    )
+                } else {
+                    ("AnimaOS".into(), "○", "not connected".into(), INK)
+                }
+            }
+            Row::Chatgpt => {
+                if chatgpt_ready {
+                    (
+                        "ChatGPT".into(),
+                        "✓",
+                        "tunnel ready · not verified in ChatGPT".into(),
+                        Color::LightGreen,
+                    )
+                } else {
+                    let state = app.status.as_ref().map_or("checking".to_owned(), |s| {
+                        s.state.to_string().to_lowercase()
+                    });
+                    ("ChatGPT".into(), "○", state, INK)
+                }
+            }
+        };
+        let selected = i == app.row;
+        let style = if selected {
+            Style::default()
+                .fg(BACKGROUND)
+                .bg(VIOLET)
+                .add_modifier(Modifier::BOLD)
+        } else {
+            Style::default().fg(color)
+        };
+        lines.push(Line::from(vec![
+            Span::styled(format!(" {mark} {name:<16}"), style),
             Span::styled(
-                state,
-                Style::default()
-                    .fg(status_color)
-                    .add_modifier(Modifier::BOLD),
+                format!(" {}", safe(&status)),
+                if selected {
+                    style
+                } else {
+                    Style::default().fg(MUTED)
+                },
             ),
-        ]),
-        Line::from(detail),
+        ]));
+    }
+    lines.push(Line::from(""));
+    lines.push(key("↑↓", "  choose an app"));
+    lines.push(key("Enter", " connect, or repair if something's wrong"));
+    lines.push(key("f", "  fix every app that needs it"));
+    frame.render_widget(text(lines).block(panel(" Your apps ")), columns[0]);
+
+    let broken = app
+        .apps
+        .iter()
+        .filter(|s| matches!(s.state, State::Broken(_)))
+        .count();
+    let mut lines = vec![
+        Line::from(safe(&app.workspace)),
+        Line::from(""),
+        key("i", "  Memory Inbox · review what's waiting for you"),
+        key("p", "  pinned core and handoffs"),
+        key("t", "  Test connection (deep check)"),
+        key("r", "  refresh"),
+        key("?", "  help"),
+        key("q", "  quit"),
         Line::from(""),
         Line::from(format!(
-            "Start at sign-in: {}",
+            "ChatGPT start at sign-in: {}",
             match app.startup {
                 Some(true) => "on",
                 Some(false) => "off",
                 None => "unknown - inspect before changing",
             }
-        )),
+        ))
+        .style(Style::default().fg(MUTED)),
         Line::from(""),
-        Line::from("ChatGPT read/save: not verified here").style(Style::default().fg(MUTED)),
-        Line::from("Use a real ChatGPT tool call to verify shared context."),
     ];
-    frame.render_widget(text(lines).block(panel(" Your workspace ")), columns[0]);
-    let ready = app
-        .status
-        .as_ref()
-        .is_some_and(|s| s.state == crate::connection::ConnectionState::Ready);
-    let lines = if ready {
-        vec![
-            Line::from("Ready for ChatGPT setup").style(Style::default().fg(VIOLET)),
-            Line::from(""),
-            Line::from("Open chatgpt.com/plugins"),
-            Line::from("Add custom MCP server"),
-            Line::from("Connection: Tunnel"),
-            Line::from("Authentication: No authentication"),
-            Line::from(""),
-            Line::from(
-                "Select this tunnel and install the plugin. Then test reading and saving a synthetic memory.",
-            ),
-            Line::from(""),
-            key("h", "  full guidance"),
-        ]
+    if broken > 0 {
+        lines.push(
+            Line::from(format!("{broken} app(s) need fixing. Press f."))
+                .style(Style::default().fg(GOLD)),
+        );
     } else {
-        vec![Line::from("A place to continue").style(Style::default().fg(VIOLET)), Line::from(""), key("s", "  set up your connection"), key("c", "  connect with saved settings"), key("r", "  check what is running"), Line::from(""), Line::from("Wait for local readiness before creating the ChatGPT plugin."), Line::from(""), Line::from("Your memories and persona stay in your local workspace. Context returned through tools is shared with ChatGPT.").style(Style::default().fg(MUTED))]
-    };
-    frame.render_widget(text(lines).block(panel(" Next step ")), columns[1]);
+        lines.push(Line::from("Your memory stays on this computer. Each app gets its own access, which you can revoke any time.").style(Style::default().fg(MUTED)));
+    }
+    frame.render_widget(text(lines).block(panel(" Your memory ")), columns[1]);
 }
 fn setup(frame: &mut Frame, area: Rect, app: &App) {
     let Some(form) = &app.form else {
         return;
     };
     let labels = [
-        "Tunnel ID",
-        "Platform organization ID (optional)",
-        "Separate ChatGPT client config",
-        "Official tunnel-client executable",
-        "Stable M.O.T.H.E.R executable",
-        "Runtime API key (blank keeps saved key)",
+        "Tunnel ID  (platform.openai.com → Settings → Tunnels)",
+        "Organization ID  (optional)",
+        "ChatGPT access file  (leave as suggested)",
+        "tunnel-client program  (download: github.com/openai/tunnel-client)",
+        "M.O.T.H.E.R program  (leave as suggested)",
+        "OpenAI runtime key  (blank keeps the saved one; never paste it in a chat)",
     ];
     let mut lines = Vec::new();
     for (i, label) in labels.iter().enumerate() {
@@ -314,5 +362,32 @@ fn confirm_save(frame: &mut Frame, area: Rect, app: &App) {
     );
 }
 fn help(frame: &mut Frame, area: Rect) {
-    frame.render_widget(text(vec![Line::from("Connect once. Continue across harnesses.").style(Style::default().fg(VIOLET)), Line::from(""), Line::from("1. Create a private tunnel at platform.openai.com/settings/organization/tunnels."), Line::from("   Associate your Platform organization AND ChatGPT workspace."), Line::from("2. Create a runtime API key with Tunnels Read + Use. Keep it out of chat."), Line::from("3. Use mother grant chatgpt --scopes read,memory:write,checkpoint:write"), Line::from("   once, or reuse your existing separate ChatGPT config."), Line::from("4. Set up here, save, and connect. Wait for Ready before adding the plugin."), Line::from("5. In ChatGPT: Connection = Tunnel; Authentication = No authentication."), Line::from("   The private tunnel and local M.O.T.H.E.R grant still authenticate access."), Line::from("6. Ask ChatGPT to save a synthetic memory and retrieve its record ID in Codex."), Line::from(""), Line::from("Quitting this dashboard leaves the managed connection running. Your computer must stay on."), Line::from("Uncertain effects are never automatically replayed. Refresh and inspect before retrying."), Line::from("More: docs/terminal.md and docs/chatgpt.md in the project repository.").style(Style::default().fg(MUTED))]).block(panel(" Connection guide ")), area);
+    frame.render_widget(
+        text(vec![
+            Line::from("Connect once. Continue in every app.").style(Style::default().fg(VIOLET)),
+            Line::from(""),
+            Line::from("Claude Code, Codex, Hermes, Claude Desktop").style(Style::default().fg(GOLD)),
+            Line::from("  Choose the app on the home screen and press Enter. M.O.T.H.E.R gives it its own"),
+            Line::from("  access, adds itself to the app's settings (keeping a backup), and checks it works."),
+            Line::from("  Restart the app afterwards. Press f any time something breaks."),
+            Line::from(""),
+            Line::from("AnimaOS").style(Style::default().fg(GOLD)),
+            Line::from("  Start AnimaOS, choose AnimaOS and press Enter. Your owner key is found on this"),
+            Line::from("  computer automatically. Pick the agent, choose \"Knows me\", and confirm. If old"),
+            Line::from("  connections are in the way, press f to turn them off and connect cleanly."),
+            Line::from(""),
+            Line::from("ChatGPT (needs two things from OpenAI's website)").style(Style::default().fg(GOLD)),
+            Line::from("  1. platform.openai.com → Settings → Tunnels: create a tunnel for your ChatGPT workspace."),
+            Line::from("  2. platform.openai.com → API keys: create a runtime key with Tunnels Read + Use."),
+            Line::from("  3. Install tunnel-client from github.com/openai/tunnel-client."),
+            Line::from("  4. Choose ChatGPT, fill in the tunnel ID and key, save, and wait for \"tunnel ready\"."),
+            Line::from("  5. In ChatGPT: Add custom MCP server → Connection: Tunnel → Authentication: none."),
+            Line::from(""),
+            Line::from("Your memory stays on this computer. Each app has its own access; `mother revoke <name>`")
+                .style(Style::default().fg(MUTED)),
+            Line::from("removes one without touching the others. Esc returns home.").style(Style::default().fg(MUTED)),
+        ])
+        .block(panel(" Help ")),
+        area,
+    );
 }

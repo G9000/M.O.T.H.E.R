@@ -868,6 +868,157 @@ impl Session {
     }
 }
 
+/// An older M.O.T.H.E.R connection in AnimaOS that blocks a clean setup for one agent.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct OldConnection {
+    pub id: String,
+    pub label: String,
+    /// The program it launches, so the owner can recognise it.
+    pub program: String,
+    version: u64,
+}
+
+/// The owner key a local AnimaOS keeps on this computer, if readable. Never printed.
+pub fn local_owner_token() -> Option<Zeroizing<String>> {
+    let home = std::env::var_os("USERPROFILE")
+        .or_else(|| std::env::var_os("HOME"))
+        .map(PathBuf::from);
+    let candidates = [
+        std::env::var_os("ANIMA_LOCAL_ADMIN_TOKEN_FILE").map(PathBuf::from),
+        std::env::var_os("ANIMAOS_RS_CONTROL_PLANE_FILE").map(|p| {
+            let mut p = p.into_string().unwrap_or_default();
+            p.push_str(".admin-token");
+            PathBuf::from(p)
+        }),
+        home.map(|h| {
+            h.join(".animaos-swarm")
+                .join("data")
+                .join("control-plane.json.admin-token")
+        }),
+    ];
+    owner_token_from(candidates.into_iter().flatten())
+}
+
+/// The first candidate file holding a plausible owner key.
+fn owner_token_from(candidates: impl IntoIterator<Item = PathBuf>) -> Option<Zeroizing<String>> {
+    candidates.into_iter().find_map(|path| {
+        let mut text = Zeroizing::new(String::new());
+        use std::io::Read;
+        fs::File::open(&path)
+            .ok()?
+            .take(8193)
+            .read_to_string(&mut text)
+            .ok()?;
+        let token = Zeroizing::new(text.trim().to_owned());
+        (!token.is_empty()
+            && token.len() <= 8192
+            && token.bytes().all(|b| (0x21..=0x7e).contains(&b)))
+        .then_some(token)
+    })
+}
+
+/// The exact launch entry setup would create for this agent and access choice.
+fn expected_spec(
+    agent_id: &str,
+    root: &Path,
+    exe: &Path,
+    access: Option<&ClientAccess>,
+) -> Result<Stdio> {
+    let root = normalized(root)?;
+    let exe = normalized(exe)?;
+    let digest = format!("{:x}", Sha256::digest(agent_id.as_bytes()));
+    let name = match access.map(|a| a.mode) {
+        Some(AccessMode::Companion) => format!("animaos-c-{digest}"),
+        Some(AccessMode::Shared) => format!("animaos-s-{digest}"),
+        _ => format!("animaos-{digest}"),
+    };
+    let config = root.join("clients").join(format!("{name}.private.json"));
+    Ok(Stdio {
+        executable: text_path(&exe)?,
+        args: vec!["mcp".into(), "--config".into(), text_path(&config)?],
+    })
+}
+
+impl Session {
+    /// The older M.O.T.H.E.R connections that would make Connect stop for this agent.
+    pub fn old_connections(
+        &self,
+        agent_id: &str,
+        root: &Path,
+        exe: &Path,
+        access: Option<&ClientAccess>,
+    ) -> Result<Vec<OldConnection>> {
+        valid_id(agent_id)?;
+        let spec = expected_spec(agent_id, root, exe, access)?;
+        let config = spec.args[2].clone();
+        let base = format!("/api/agents/{}/mcp-connections", segment(agent_id));
+        let value = self.request("GET", &base, None)?;
+        let connections: Vec<Connection> =
+            serde_json::from_value(value.get("connections").cloned().ok_or_else(unknown)?)
+                .map_err(|_| failure("AnimaOS MCP connection metadata is incompatible."))?;
+        let mut old = Vec::new();
+        for c in connections {
+            validate_connection(&c, agent_id)?;
+            let matches =
+                c.transport == "stdio" && c.endpoint.is_empty() && c.stdio.as_ref() == Some(&spec);
+            let relevant = c.label == LABEL
+                || c.label.eq_ignore_ascii_case("mother")
+                || c.stdio.as_ref().is_some_and(|s| {
+                    s.executable == spec.executable || s.args.iter().any(|a| a == &config)
+                });
+            if relevant && !matches && (c.enabled || access.is_none()) {
+                old.push(OldConnection {
+                    program: c
+                        .stdio
+                        .as_ref()
+                        .map_or_else(|| c.endpoint.clone(), |s| s.executable.clone()),
+                    id: c.id,
+                    label: c.label,
+                    version: c.version,
+                });
+            }
+        }
+        Ok(old)
+    }
+
+    /// Turn off the given old connections (they stay listed in AnimaOS, just disabled) and clear
+    /// this agent's identity binding if it points at one of them. Returns how many were turned off.
+    pub fn turn_off(&self, agent_id: &str, old: &[OldConnection]) -> Result<usize> {
+        valid_id(agent_id)?;
+        let base = format!("/api/agents/{}/mcp-connections", segment(agent_id));
+        let mut done = 0;
+        for c in old {
+            valid_id(&c.id)?;
+            let value = self.request(
+                "PATCH",
+                &format!("{base}/{}", segment(&c.id)),
+                Some(&json!({"expectedVersion": c.version, "enabled": false})),
+            )?;
+            let after: Connection =
+                serde_json::from_value(value.get("connection").cloned().ok_or_else(unknown)?)
+                    .map_err(|_| unknown())?;
+            if after.id != c.id || after.enabled {
+                return Err(unknown());
+            }
+            done += 1;
+        }
+        let path = format!("/api/agents/{}/workspace-context", segment(agent_id));
+        let current = self.workspace_context(&path)?;
+        if current
+            .binding
+            .as_ref()
+            .is_some_and(|b| old.iter().any(|c| c.id == b.connection_id))
+        {
+            self.request(
+                "PUT",
+                &path,
+                Some(&json!({"expectedRevision": current.revision, "binding": null})),
+            )?;
+        }
+        Ok(done)
+    }
+}
+
 fn reader_reviewed(connection: &Connection, digest: &str) -> bool {
     let matches =
         |tool: &&Tool| tool.remote_name == "mother_get_context" && tool.descriptor_digest == digest;

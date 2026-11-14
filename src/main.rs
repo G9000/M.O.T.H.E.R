@@ -1,4 +1,5 @@
 mod animaos;
+mod apps;
 mod cli;
 mod connection;
 mod health;

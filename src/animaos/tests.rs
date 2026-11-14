@@ -227,8 +227,8 @@ fn respond(socket: &mut TcpStream, state: &Mutex<Remote>) {
                 entry["toolAccess"] = json!("review");
             }
             if method == "PATCH" {
-                entry["enabled"] = json!(true);
-                entry["version"] = json!(2);
+                entry["enabled"] = json!(body["enabled"].as_bool().unwrap_or(true));
+                entry["version"] = json!(entry["version"].as_u64().unwrap() + 1);
             } else {
                 assert!(path.ends_with("/connect"));
                 // A fresh discovery is unreviewed even when the agent's automatic policy permits use.
@@ -1044,4 +1044,111 @@ fn differing_binding_and_active_old_connection_are_preserved() {
             .iter()
             .any(|(m, _, _)| m == "PUT")
     );
+}
+
+#[test]
+fn repair_turns_off_old_connections_clears_their_binding_and_connects() {
+    let server = Server::new();
+    server.state.lock().unwrap().binding_ready = true;
+    let (dir, exe) = fixture();
+    let session = server.session();
+    // An old-style connection, with the agent's identity link pointing at it.
+    session.connect("test-agent", dir.path(), &exe).unwrap();
+    let old_id = server.state.lock().unwrap().entries[0]["id"].clone();
+    server.state.lock().unwrap().binding = json!({"connectionId":old_id,"tool":"mother_get_context","mode":"companion","workspaceId":"w","generation":"g","subject":"test-agent"});
+    let access = scoped(AccessMode::Companion);
+    assert!(
+        session
+            .connect_with_access("test-agent", dir.path(), &exe, &access)
+            .is_err()
+    );
+
+    let old = session
+        .old_connections("test-agent", dir.path(), &exe, Some(&access))
+        .unwrap();
+    assert_eq!(old.len(), 1);
+    assert_eq!(json!(old[0].id), old_id);
+
+    // A stale version changes nothing.
+    let mut stale = old.clone();
+    stale[0].version += 7;
+    assert!(session.turn_off("test-agent", &stale).is_err());
+    assert_eq!(
+        server.state.lock().unwrap().entries[0]["enabled"],
+        json!(true)
+    );
+    assert_eq!(server.state.lock().unwrap().binding["connectionId"], old_id);
+
+    assert_eq!(session.turn_off("test-agent", &old).unwrap(), 1);
+    {
+        let remote = server.state.lock().unwrap();
+        assert_eq!(
+            remote.entries[0]["enabled"],
+            json!(false),
+            "turned off, not deleted"
+        );
+        assert!(
+            remote.binding.is_null(),
+            "binding to the old connection cleared"
+        );
+    }
+    session
+        .connect_with_access("test-agent", dir.path(), &exe, &access)
+        .unwrap();
+    {
+        let remote = server.state.lock().unwrap();
+        assert_eq!(remote.entries.len(), 2);
+        assert_ne!(remote.binding["connectionId"], old_id);
+        assert_eq!(remote.binding["mode"], "companion");
+    }
+    assert!(
+        session
+            .old_connections("test-agent", dir.path(), &exe, Some(&access))
+            .unwrap()
+            .is_empty()
+    );
+}
+
+#[test]
+fn turn_off_leaves_an_unrelated_binding_alone() {
+    let server = Server::new();
+    let (dir, exe) = fixture();
+    let session = server.session();
+    session.connect("test-agent", dir.path(), &exe).unwrap();
+    server.state.lock().unwrap().binding = json!({"connectionId":"someone-else","tool":"mother_get_context","mode":"companion","workspaceId":"w","generation":"g","subject":"test-agent"});
+    let old = session
+        .old_connections(
+            "test-agent",
+            dir.path(),
+            &exe,
+            Some(&scoped(AccessMode::Companion)),
+        )
+        .unwrap();
+    session.turn_off("test-agent", &old).unwrap();
+    assert_eq!(
+        server.state.lock().unwrap().binding["connectionId"],
+        "someone-else"
+    );
+    assert!(
+        !server
+            .state
+            .lock()
+            .unwrap()
+            .requests
+            .iter()
+            .any(|(m, _, _)| m == "PUT")
+    );
+}
+
+#[test]
+fn finds_the_local_owner_key_without_printing_it() {
+    let dir = tempfile::tempdir().unwrap();
+    let missing = dir.path().join("missing");
+    let bad = dir.path().join("bad");
+    std::fs::write(&bad, "has spaces inside").unwrap();
+    let good = dir.path().join("admin-token");
+    std::fs::write(&good, "  synthetic-owner-key\n").unwrap();
+    let token = owner_token_from([missing.clone(), bad, good]).unwrap();
+    assert_eq!(token.as_str(), "synthetic-owner-key");
+    assert!(owner_token_from([missing]).is_none());
 }

@@ -95,8 +95,40 @@ impl Form {
     }
 }
 
+/// One row on the home screen.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Row {
+    App(crate::apps::AppId),
+    Animaos,
+    Chatgpt,
+}
+const ROWS: [Row; 6] = [
+    Row::App(crate::apps::AppId::ClaudeCode),
+    Row::App(crate::apps::AppId::Codex),
+    Row::App(crate::apps::AppId::Hermes),
+    Row::App(crate::apps::AppId::ClaudeDesktop),
+    Row::Animaos,
+    Row::Chatgpt,
+];
+
+/// Has AnimaOS been connected from this workspace before? (Local files only; no network.)
+fn animaos_set_up() -> bool {
+    mother::config::data_directory()
+        .ok()
+        .and_then(|d| std::fs::read_dir(d.join("clients")).ok())
+        .is_some_and(|entries| {
+            entries.filter_map(|e| e.ok()).any(|e| {
+                let name = e.file_name().to_string_lossy().to_string();
+                name.starts_with("animaos-") && name.ends_with(".binding.json")
+            })
+        })
+}
+
 struct App {
     page: Page,
+    apps: Vec<crate::apps::AppStatus>,
+    row: usize,
+    animaos_ready: bool,
     form: Option<Form>,
     status: Option<Status>,
     message: String,
@@ -113,6 +145,9 @@ impl App {
         let home = mother::config::data_directory()?;
         Ok(Self {
             page: Page::Home,
+            apps: crate::apps::statuses(&crate::apps::Paths::detect()),
+            row: 0,
+            animaos_ready: animaos_set_up(),
             inbox: None,
             tend: None,
             animaos: None,
@@ -128,6 +163,10 @@ impl App {
                 "No default workspace yet - use mother init --soul <your file>".into()
             },
         })
+    }
+    fn refresh_apps(&mut self) {
+        self.apps = crate::apps::statuses(&crate::apps::Paths::detect());
+        self.animaos_ready = animaos_set_up();
     }
     fn open_inbox(&mut self) -> Result<()> {
         let path = mother::config::data_directory()?.join("context.sqlite");
@@ -204,6 +243,37 @@ fn work(action: Action) -> Result<Status> {
         }
     }
 }
+/// Connect one app, or repair every broken one, off the UI thread.
+fn dispatch_app(app: &mut App, sender: &mpsc::Sender<String>, target: Option<crate::apps::AppId>) {
+    use crate::apps;
+    app.busy = true;
+    app.message = match target {
+        Some(id) => format!("Connecting {}… this can take a few seconds.", id.name()),
+        None => "Checking and repairing every app…".into(),
+    };
+    let sender = sender.clone();
+    std::thread::spawn(move || {
+        let result = (|| -> Result<String> {
+            let (root, paths, exe) = (
+                apps::workspace_root()?,
+                apps::Paths::detect(),
+                apps::stable_exe()?,
+            );
+            Ok(match target {
+                Some(id) => apps::connect(&root, &paths, id, &exe, &apps::RealRunner)?,
+                None => {
+                    let lines = apps::fix(&root, &paths, &exe, &apps::RealRunner);
+                    if lines.is_empty() {
+                        "Nothing to fix: every connected app can read your memory.".into()
+                    } else {
+                        lines.join(" ")
+                    }
+                }
+            })
+        })();
+        let _ = sender.send(result.unwrap_or_else(|e| e.to_string()));
+    });
+}
 fn dispatch(app: &mut App, sender: &mpsc::Sender<Result<Status>>, action: Action, message: &str) {
     app.busy = true;
     app.message = message.into();
@@ -240,13 +310,14 @@ pub fn run(launch: Launch) -> Result<()> {
         app.open_tend()?;
     }
     if matches!(launch, Launch::Animaos) {
-        app.animaos = Some(animaos::Setup::new());
+        app.animaos = Some(animaos::Setup::with_local_key());
         app.page = Page::Animaos;
     }
     let mut terminal = ratatui::try_init()?;
     let _guard = TerminalGuard;
     crossterm::execute!(std::io::stdout(), event::EnableBracketedPaste)?;
     let (sender, receiver) = mpsc::channel();
+    let (app_sender, app_receiver) = mpsc::channel::<String>();
     if !matches!(launch, Launch::Inbox | Launch::Animaos | Launch::Tend) {
         dispatch(
             &mut app,
@@ -264,6 +335,11 @@ pub fn run(launch: Launch) -> Result<()> {
         }
         if let Ok(result) = receiver.try_recv() {
             app.finish(result);
+        }
+        if let Ok(message) = app_receiver.try_recv() {
+            app.busy = false;
+            app.message = message;
+            app.refresh_apps();
         }
         terminal.draw(|frame| view::render(frame, &app))?;
         if !event::poll(Duration::from_millis(100))? {
@@ -398,13 +474,47 @@ pub fn run(launch: Launch) -> Result<()> {
                 _ => {}
             },
             Page::Home => match key.code {
+                KeyCode::Up => app.row = app.row.saturating_sub(1),
+                KeyCode::Down => app.row = (app.row + 1).min(ROWS.len() - 1),
+                KeyCode::Enter => match ROWS[app.row] {
+                    Row::App(id) => {
+                        let installed = app
+                            .apps
+                            .iter()
+                            .any(|s| s.app == id && s.state != crate::apps::State::NotInstalled);
+                        if installed {
+                            dispatch_app(&mut app, &app_sender, Some(id));
+                        } else {
+                            app.message =
+                                format!("{} isn't installed on this computer.", id.name());
+                        }
+                    }
+                    Row::Animaos => {
+                        app.animaos = Some(animaos::Setup::with_local_key());
+                        app.page = Page::Animaos;
+                    }
+                    Row::Chatgpt => {
+                        let configured = connection::load_settings().ok().flatten().is_some();
+                        if configured {
+                            dispatch(
+                                &mut app,
+                                &sender,
+                                Action::Connect,
+                                "Connecting ChatGPT with your saved settings...",
+                            );
+                        } else if let Err(error) = app.open_setup() {
+                            app.message = error.to_string();
+                        }
+                    }
+                },
+                KeyCode::Char('f') => dispatch_app(&mut app, &app_sender, None),
                 KeyCode::Char('t') => {
                     app.health = Some(health::Health::open(&mother::config::data_directory()?));
                     app.page = Page::Health;
                 }
                 KeyCode::Char('q') | KeyCode::Esc => break,
                 KeyCode::Char('n') => {
-                    app.animaos = Some(animaos::Setup::new());
+                    app.animaos = Some(animaos::Setup::with_local_key());
                     app.page = Page::Animaos;
                 }
                 KeyCode::Char('i') => {
@@ -422,12 +532,15 @@ pub fn run(launch: Launch) -> Result<()> {
                         app.message = error.to_string();
                     }
                 }
-                KeyCode::Char('r') => dispatch(
-                    &mut app,
-                    &sender,
-                    Action::Refresh,
-                    "Checking connection state...",
-                ),
+                KeyCode::Char('r') => {
+                    app.refresh_apps();
+                    dispatch(
+                        &mut app,
+                        &sender,
+                        Action::Refresh,
+                        "Checking connection state...",
+                    )
+                }
                 KeyCode::Char('c') => dispatch(
                     &mut app,
                     &sender,
