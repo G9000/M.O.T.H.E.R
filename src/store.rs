@@ -2,7 +2,7 @@
 use crate::{
     access::{self, AccessMode, ClientAccess},
     config::{ClientConfig, create_private_file},
-    contracts::{self, Auth, Kind, SCOPES},
+    contracts::{self, Auth, Kind},
     error::{Error, Result, invalid},
     limits::Usage,
 };
@@ -79,19 +79,25 @@ pub(crate) fn authorize(conn: &Connection, auth: &Auth, scope: &str) -> Result<(
         ));
     }
     if access::load(conn, &auth.client_id)?.mode == AccessMode::Shared
-        && !matches!(scope, "read" | "context:propose")
+        && !matches!(
+            scope,
+            "read" | "context:propose" | "garden:read" | "garden:propose"
+        )
     {
         return Err(Error::domain(
             "FORBIDDEN",
             "Shared clients cannot write canonical records.",
         ));
     }
+    if contracts::GARDEN_SCOPES.contains(&scope) {
+        crate::garden::access::load(conn, &auth.client_id)?;
+    }
     Ok(())
 }
-fn grant(conn: &Connection, client: &str, scopes: &[String]) -> Result<Value> {
+pub(crate) fn grant(conn: &Connection, client: &str, scopes: &[String]) -> Result<Value> {
     if !contracts::valid_client(client)
         || scopes.is_empty()
-        || scopes.iter().any(|s| !SCOPES.contains(&s.as_str()))
+        || scopes.iter().any(|s| !contracts::valid_scope(s))
     {
         return Err(invalid("Invalid client name or scopes"));
     }
@@ -311,6 +317,14 @@ impl Store {
         scopes: &[String],
         access: &ClientAccess,
     ) -> Result<Value> {
+        if scopes
+            .iter()
+            .any(|scope| contracts::GARDEN_SCOPES.contains(&scope.as_str()))
+        {
+            return Err(invalid(
+                "Graph scopes require an explicit graph access policy",
+            ));
+        }
         let tx = self
             .conn
             .transaction_with_behavior(TransactionBehavior::Immediate)?;
@@ -347,9 +361,17 @@ impl Store {
     ) -> Result<()> {
         if !contracts::valid_client(client)
             || scopes.is_empty()
-            || scopes.iter().any(|s| !SCOPES.contains(&s.as_str()))
+            || scopes.iter().any(|s| !contracts::valid_scope(s))
         {
             return Err(invalid("Invalid client name or scopes"));
+        }
+        if scopes
+            .iter()
+            .any(|scope| contracts::GARDEN_SCOPES.contains(&scope.as_str()))
+        {
+            return Err(invalid(
+                "Graph scopes require an explicit graph access policy",
+            ));
         }
         let mut file = create_private_file(path)?;
         let result = (|| -> Result<()> {

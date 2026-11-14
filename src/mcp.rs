@@ -1,4 +1,6 @@
 //! Official MCP SDK adapter for the independent workspace store.
+mod garden;
+pub use garden::serve as serve_garden;
 
 use mother::{
     config::{ClientConfig, load_config},
@@ -107,6 +109,23 @@ fn dispatch(
     args: Value,
 ) -> Result<Value> {
     match name {
+        "mother_get_capabilities" => {
+            if args.as_object().is_none_or(|fields| !fields.is_empty()) {
+                return Err(input_error());
+            }
+            store.authorize(auth, "read")?;
+            Ok(json!({
+                "version":1,
+                "v1":{"available":true,"contractVersion":1},
+                "garden":{
+                    "contractVersion":2,"status":"contracts_only","available":false,
+                    "capabilities":[],"availableTools":[],
+                    "definedCapabilities":["garden.entities.v2","garden.assertions.v2","garden.query.v2","garden.changes.v2","garden.proposals.v2"],
+                    "definedTools":["mother_garden_get","mother_garden_query","mother_garden_apply","mother_garden_propose","mother_garden_get_proposal","mother_garden_get_receipt","mother_garden_changes"],
+                    "reason":"garden_runtime_not_installed"
+                }
+            }))
+        }
         "mother_get_context" => store.context(auth, args),
         "mother_search_context" => search.search(store, auth, args),
         "mother_get_record" => store.get(auth, single_id(&args, "id")?),
@@ -133,6 +152,9 @@ fn dispatch(
 // Preserve that source contract while advertising the current MCP schema dialect.
 fn advertised_tools() -> Result<Vec<Tool>> {
     let mut tools: Vec<Value> = serde_json::from_str(include_str!("../contracts/mcp-tools.json"))?;
+    tools.push(serde_json::from_str(include_str!(
+        "../contracts/capabilities-tool.json"
+    ))?);
     for tool in &mut tools {
         let schema = tool["inputSchema"]
             .as_object_mut()
@@ -146,6 +168,9 @@ fn advertised_tools() -> Result<Vec<Tool>> {
 }
 /// Authenticate a client once at startup, then recheck grants on every operation.
 pub async fn serve(config_path: &Path) -> Result<()> {
+    if mother::garden::config::uses_garden_backend(config_path)? {
+        return garden::serve(config_path).await;
+    }
     let path = config_path.to_owned();
     let server = tokio::task::spawn_blocking(move || -> Result<WorkspaceServer> {
         let config = load_config(&path)?;

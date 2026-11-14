@@ -1,0 +1,16 @@
+{
+  "name": "mother_get_capabilities",
+  "description": "Discover available workspace features and defined future contracts without reading persona or record content. Garden v2 contracts are defined but graph operations are unavailable in this runtime. Capability discovery never grants access or installs a personality.",
+  "inputSchema": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "type": "object",
+    "properties": {},
+    "additionalProperties": false
+  },
+  "annotations": {
+    "readOnlyHint": true,
+    "destructiveHint": false,
+    "idempotentHint": true,
+    "openWorldHint": false
+  }
+}

@@ -280,3 +280,43 @@ fn inbox_selection_stays_visible_when_other_titles_are_multiline() {
     inbox.selected = 2;
     assert!(render(&inbox, 72, 14).contains("> Selected proposal"));
 }
+
+#[test]
+fn explicit_native_inbox_reuses_review_flow_without_opening_sqlite() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("native.redb");
+    let workspace = uuid::Uuid::new_v4().to_string();
+    let generation = uuid::Uuid::new_v4().to_string();
+    let store =
+        mother::garden::store::GardenStore::initialize(&path, &workspace, &generation).unwrap();
+    store.v1_initialize("Synthetic owner soul").unwrap();
+    let auth = store
+        .v1_grant(
+            "synthetic",
+            &["read".into(), "context:propose".into()],
+            &mother::access::ClientAccess::default(),
+            None,
+        )
+        .unwrap();
+    let proposal=store.v1_call(&auth,"mother_propose_memory",json!({"workspaceId":workspace,"generation":generation,"operationId":uuid::Uuid::new_v4().to_string(),"expectedRevision":0,"source":"Synthetic explicitly requested capture","basis":"owner_statement","record":{"kind":"memory","title":"Tea","content":"Green tea","status":"active","basis":"owner_statement"}})).unwrap();
+    drop(store);
+    let mut inbox = Inbox::open_native(path.clone()).unwrap();
+    assert_eq!(inbox.items.len(), 1);
+    inbox.input(press(KeyCode::Enter)).unwrap();
+    assert_eq!(inbox.proposal["id"], proposal["proposal"]["id"]);
+    assert!(render(&inbox, 100, 30).contains("synthetic"));
+    inbox.input(press(KeyCode::Char('s'))).unwrap();
+    assert_eq!(inbox.page, InboxPage::ConfirmSave);
+    assert!(inbox.pending.is_none());
+    inbox.input(press(KeyCode::Enter)).unwrap();
+    assert_eq!(inbox.page, InboxPage::List);
+    assert!(inbox.pending.is_none());
+    let store = mother::garden::store::GardenStore::open(path).unwrap();
+    assert_eq!(
+        store
+            .v1_call(&auth, "mother_get_context", json!({}))
+            .unwrap()["inventory"]["totalRecords"],
+        1
+    );
+    assert!(!dir.path().join("context.sqlite").exists());
+}

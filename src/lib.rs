@@ -5,6 +5,7 @@ pub mod config;
 pub mod contracts;
 pub mod embedding;
 pub mod error;
+pub mod garden;
 mod handoffs;
 mod history;
 mod inbox;

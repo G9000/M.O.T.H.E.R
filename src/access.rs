@@ -223,11 +223,14 @@ pub(crate) fn save(
 ) -> Result<()> {
     p.validate()?;
     if p.mode == AccessMode::Shared
-        && scopes
-            .iter()
-            .any(|s| !matches!(s.as_str(), "read" | "context:propose"))
+        && scopes.iter().any(|s| {
+            !matches!(
+                s.as_str(),
+                "read" | "context:propose" | "garden:read" | "garden:propose"
+            )
+        })
     {
-        return Err(invalid("Shared grants allow only read and context:propose"));
+        return Err(invalid("Shared grants allow only read and proposal scopes"));
     }
     for id in &p.records {
         crate::store::read_record(conn, id)?;

@@ -1,5 +1,5 @@
 //! Local semantic retrieval over authorized canonical records, with truthful literal fallback.
-mod cache;
+pub(crate) mod cache;
 use crate::{
     access::{self, AccessMode, ClientAccess},
     contracts::{self, Auth, Kind},
@@ -15,6 +15,15 @@ const QUERY_RECORDS: usize = 8;
 const QUERY_PASSAGES: usize = 32;
 const INDEX_PASSAGES: usize = 1024;
 
+/// Describe the optional local candidate space without changing v1 search defaults.
+pub fn embedding_profile() -> crate::embedding::EmbeddingProfile {
+    crate::embedding::profile()
+}
+/// Shared cache identity for callers keeping separate rebuildable derived indexes.
+pub fn embedding_profile_fingerprint() -> String {
+    cache::profile_fingerprint()
+}
+
 /// Reuses one local model; concurrent searches fall back instead of blocking writes.
 pub struct Search {
     model_dir: Option<PathBuf>,
@@ -28,13 +37,13 @@ impl std::fmt::Debug for Search {
     }
 }
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum Mode {
+pub(crate) enum Mode {
     Hybrid,
     Semantic,
     Literal,
 }
 impl Mode {
-    fn name(self) -> &'static str {
+    pub(crate) fn name(self) -> &'static str {
         match self {
             Self::Hybrid => "hybrid",
             Self::Semantic => "semantic",
@@ -43,16 +52,16 @@ impl Mode {
     }
 }
 #[derive(Debug)]
-struct Query {
-    text: String,
-    kind: Option<String>,
-    limit: usize,
-    mode: Mode,
-    updated_since: Option<String>,
-    updated_before: Option<String>,
+pub(crate) struct Query {
+    pub(crate) text: String,
+    pub(crate) kind: Option<String>,
+    pub(crate) limit: usize,
+    pub(crate) mode: Mode,
+    pub(crate) updated_since: Option<String>,
+    pub(crate) updated_before: Option<String>,
 }
 impl Query {
-    fn parse(v: Value) -> Result<Self> {
+    pub(crate) fn parse(v: Value) -> Result<Self> {
         contracts::strict(
             &v,
             &[
@@ -98,7 +107,7 @@ impl Query {
             updated_before,
         })
     }
-    fn includes(&self, r: &Record) -> bool {
+    pub(crate) fn includes(&self, r: &Record) -> bool {
         // Stored and bound times share one fixed-width UTC form, so text order is time order.
         let updated = r.value["updatedAt"].as_str().unwrap_or_default();
         self.kind
@@ -115,20 +124,20 @@ impl Query {
     }
 }
 #[derive(Debug)]
-struct Record {
-    id: String,
-    revision: u64,
-    digest: String,
-    text: String,
-    value: Value,
-    literal: bool,
+pub(crate) struct Record {
+    pub(crate) id: String,
+    pub(crate) revision: u64,
+    pub(crate) digest: String,
+    pub(crate) text: String,
+    pub(crate) value: Value,
+    pub(crate) literal: bool,
 }
 #[derive(Debug)]
-struct Snapshot {
-    access: ClientAccess,
-    records: Vec<Record>,
-    base: Value,
-    fingerprint: String,
+pub(crate) struct Snapshot {
+    pub(crate) access: ClientAccess,
+    pub(crate) records: Vec<Record>,
+    pub(crate) base: Value,
+    pub(crate) fingerprint: String,
 }
 impl Snapshot {
     fn capture(store: &mut Store, auth: &Auth, query: &Query) -> Result<Self> {
@@ -213,7 +222,7 @@ impl Snapshot {
             self.base["workspace"]["id"], self.base["workspace"]["generation"]
         )
     }
-    fn literal_response(self, query: &Query, reason: Option<&str>) -> Value {
+    pub(crate) fn literal_response(self, query: &Query, reason: Option<&str>) -> Value {
         let eligible = self.records.iter().filter(|r| query.includes(r)).count();
         let hits = self
             .records
@@ -341,10 +350,10 @@ struct Hit {
     span: Option<(usize, usize)>,
 }
 #[derive(Debug, Default)]
-struct Progress {
-    new_records: usize,
-    new_passages: usize,
-    capacity: bool,
+pub(crate) struct Progress {
+    pub(crate) new_records: usize,
+    pub(crate) new_passages: usize,
+    pub(crate) capacity: bool,
 }
 fn cache_path(store: &Store, auth: &Auth, snapshot: &Snapshot) -> Result<PathBuf> {
     store.authorize(auth, "read")?;
@@ -436,7 +445,7 @@ fn prepare(
     }
     Ok((cached, progress))
 }
-fn semantic_response(
+pub(crate) fn semantic_response(
     snapshot: Snapshot,
     query: &Query,
     cached: &HashMap<String, Entry>,
@@ -444,6 +453,15 @@ fn semantic_response(
     progress: &Progress,
 ) -> Result<Value> {
     cache::validate_vector(query_vector)?;
+    semantic_response_validated(snapshot, query, cached, query_vector, progress)
+}
+pub(crate) fn semantic_response_validated(
+    snapshot: Snapshot,
+    query: &Query,
+    cached: &HashMap<String, Entry>,
+    query_vector: &[f32],
+    progress: &Progress,
+) -> Result<Value> {
     let mut hits = vec![];
     let mut eligible = 0;
     let mut indexed = 0;

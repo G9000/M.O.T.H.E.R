@@ -26,6 +26,38 @@ pub const PROFILE: &str =
     "minilm-l6-v2-candle-f32-mean-l2-window192-overlap32-sentence96-pair192-max32-v2";
 /// Number of coordinates produced by the pinned encoder.
 pub const DIMENSIONS: usize = 384;
+
+/// Versioned identity of a derived embedding space. Model names include their immutable revision.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct EmbeddingProfile {
+    pub version: u32,
+    pub model: String,
+    pub profile: String,
+    pub dimensions: usize,
+}
+impl EmbeddingProfile {
+    /// Fingerprint model, processing policy, dimensions and descriptor version together.
+    pub fn fingerprint(&self) -> String {
+        let mut hash = Sha256::new();
+        hash.update(self.version.to_be_bytes());
+        for value in [&self.model, &self.profile] {
+            hash.update((value.len() as u64).to_be_bytes());
+            hash.update(value.as_bytes());
+        }
+        hash.update((self.dimensions as u64).to_be_bytes());
+        format!("{:x}", hash.finalize())
+    }
+}
+/// Describe the optional pinned encoder without loading assets or accessing a network.
+pub fn profile() -> EmbeddingProfile {
+    EmbeddingProfile {
+        version: 1,
+        model: format!("{MODEL_ID}@{MODEL_REVISION}"),
+        profile: PROFILE.into(),
+        dimensions: DIMENSIONS,
+    }
+}
 const WINDOW_TOKENS: usize = 192;
 const WINDOW_OVERLAP: usize = 32;
 const MAX_WINDOWS: usize = 32;

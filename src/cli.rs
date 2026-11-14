@@ -31,6 +31,11 @@ struct Cli {
 }
 #[derive(Debug, Subcommand)]
 enum Command {
+    /// Provision and review the separate graph workspace explicitly.
+    Garden {
+        #[command(subcommand)]
+        command: GardenCommand,
+    },
     /// Open the interactive workspace and connection dashboard.
     Tui,
     /// Open the owner review inbox for proposed memories.
@@ -257,6 +262,133 @@ enum Command {
         config: PathBuf,
     },
 }
+#[derive(Debug, Subcommand)]
+enum GardenCommand {
+    /// Enable the native v1 compatibility view with an explicit owner persona.
+    CompatInit {
+        #[arg(long)]
+        db: PathBuf,
+        #[arg(long)]
+        soul: PathBuf,
+    },
+    /// Provision native v1 scopes and an optional independent graph policy.
+    GrantV1 {
+        client: String,
+        #[arg(long)]
+        db: PathBuf,
+        #[arg(long)]
+        out: PathBuf,
+        #[arg(long, default_value = "read", value_delimiter = ',', action = clap::ArgAction::Set)]
+        scopes: Vec<String>,
+        #[arg(long, value_parser = ["companion", "shared"])]
+        access: Option<String>,
+        #[arg(long, requires = "access")]
+        subject: Option<String>,
+        #[arg(long, value_delimiter = ',', requires = "access")]
+        records: Vec<String>,
+        /// Explicit JSON array of typed graph references, independent of v1 record IDs.
+        #[arg(long, conflicts_with = "all")]
+        objects: Option<PathBuf>,
+        /// Explicit full graph visibility, requiring --access companion.
+        #[arg(long)]
+        all: bool,
+    },
+    /// Stream a credential-free full snapshot to a new directory.
+    Backup {
+        #[arg(long)]
+        db: PathBuf,
+        #[arg(long)]
+        out: PathBuf,
+    },
+    /// Verify every chunk and canonical relationship without publishing a store.
+    Verify {
+        #[arg(long)]
+        backup: PathBuf,
+    },
+    /// Restore a full snapshot to a nonexistent file with fresh generation and no grants.
+    Restore {
+        #[arg(long)]
+        backup: PathBuf,
+        #[arg(long)]
+        db: PathBuf,
+    },
+    /// Ingest owner-selected artifact bytes into this database by content address.
+    Blob {
+        #[arg(long)]
+        db: PathBuf,
+        #[arg(long)]
+        file: PathBuf,
+    },
+    /// Export the small v1 format, refusing state that requires a full backup.
+    ExportV1 {
+        #[arg(long)]
+        db: PathBuf,
+        #[arg(long)]
+        out: PathBuf,
+    },
+    /// Import a small v1 bundle into an empty view with the same explicit identity.
+    ImportV1 {
+        #[arg(long)]
+        db: PathBuf,
+        #[arg(long)]
+        file: PathBuf,
+    },
+    /// Review native v1 proposals using the owner inbox.
+    V1Inbox {
+        #[arg(long)]
+        db: PathBuf,
+    },
+    /// Prepare optional local vectors for selected authorized graph objects.
+    Index {
+        #[arg(long)]
+        config: PathBuf,
+        /// Bounded JSON array of typed {kind,id} source references.
+        #[arg(long)]
+        objects: PathBuf,
+    },
+    /// Initialize a fresh graph file with a new workspace identity.
+    Init {
+        #[arg(long)]
+        db: PathBuf,
+    },
+    /// Create graph-only credentials in an exclusive private file.
+    Grant {
+        client: String,
+        #[arg(long)]
+        db: PathBuf,
+        #[arg(long, default_value = "garden:read,garden:propose", value_delimiter = ',', action = clap::ArgAction::Set)]
+        scopes: Vec<String>,
+        #[arg(long, value_parser = ["companion", "shared"])]
+        access: String,
+        #[arg(long)]
+        subject: String,
+        /// JSON array of typed {kind,id} references; omitted means no objects.
+        #[arg(long, conflicts_with = "all")]
+        objects: Option<PathBuf>,
+        /// Explicit full graph visibility, available to companion clients only.
+        #[arg(long)]
+        all: bool,
+        #[arg(long)]
+        out: PathBuf,
+    },
+    /// Revoke a graph credential without changing v1 grants.
+    Revoke {
+        client: String,
+        #[arg(long)]
+        db: PathBuf,
+    },
+    /// Review graph proposals locally as the owner.
+    Inbox {
+        #[arg(long)]
+        db: PathBuf,
+    },
+    /// Serve graph MCP tools using graph-only private credentials.
+    Mcp {
+        #[arg(long)]
+        config: PathBuf,
+    },
+}
+
 #[derive(Debug, Clone, Copy, ValueEnum)]
 enum Harness {
     Chatgpt,
@@ -359,6 +491,9 @@ pub async fn run() -> Result<()> {
     let cli = Cli::parse();
     match cli.command {
         Some(Command::Mcp { config }) => crate::mcp::serve(&config).await,
+        Some(Command::Garden {
+            command: GardenCommand::Mcp { config },
+        }) => crate::mcp::serve_garden(&config).await,
         Some(command) => execute(command),
         None if std::io::stdin().is_terminal() && std::io::stdout().is_terminal() => {
             crate::tui::run(crate::tui::Launch::Home)
@@ -516,6 +651,7 @@ fn print_harness_setup(format: Format, config_path: &Path) -> Result<()> {
 }
 fn execute(command: Command) -> Result<()> {
     match command {
+        Command::Garden { command } => execute_garden(command),
         Command::Doctor { config, json } => {
             let report = crate::health::probe(&config);
             if json {
@@ -925,5 +1061,192 @@ fn execute(command: Command) -> Result<()> {
             )
         }
         Command::Mcp { .. } => unreachable!("MCP is dispatched before synchronous owner commands"),
+    }
+}
+
+fn execute_garden(command: GardenCommand) -> Result<()> {
+    use mother::garden::{
+        access::GardenAccess, config::domain_error, contracts::ExternalReference,
+        store::GardenStore,
+    };
+    match command {
+        GardenCommand::CompatInit { db, soul } => {
+            let store = GardenStore::open(absolute(&db)?).map_err(domain_error)?;
+            print_json(store.v1_initialize(&read_soul(&absolute(&soul)?)?)?)
+        }
+        GardenCommand::GrantV1 {
+            client,
+            db,
+            out,
+            scopes,
+            access,
+            subject,
+            records,
+            objects,
+            all,
+        } => {
+            valid_client(&client)?;
+            if all && access.as_deref() != Some("companion") {
+                return Err(Error::domain(
+                    "FORBIDDEN",
+                    "Full graph visibility requires explicit companion access.",
+                ));
+            }
+            let policy = ClientAccess {
+                mode: match access.as_deref() {
+                    Some("companion") => AccessMode::Companion,
+                    Some("shared") => AccessMode::Shared,
+                    _ => AccessMode::Legacy,
+                },
+                subject,
+                records,
+            };
+            let garden = if all {
+                Some(GardenAccess::All {})
+            } else {
+                objects
+                    .map(|path| -> Result<GardenAccess> {
+                        let objects: Vec<ExternalReference> =
+                            serde_json::from_value(read_json(&absolute(&path)?, 1_048_576)?)?;
+                        Ok(GardenAccess::Allowlist { objects })
+                    })
+                    .transpose()?
+            };
+            let db = absolute(&db)?;
+            let out = absolute(&out)?;
+            let store = GardenStore::open(&db).map_err(domain_error)?;
+            private_parent(&out)?;
+            store.v1_grant_to_file_with_access(
+                &client,
+                &scopes,
+                &out,
+                &db,
+                &policy,
+                garden.as_ref(),
+            )?;
+            print_json(json!({"clientId":client,"scopes":scopes,"configPath":out}))
+        }
+        GardenCommand::Backup { db, out } => {
+            let store = GardenStore::open(absolute(&db)?).map_err(domain_error)?;
+            let out = absolute(&out)?;
+            private_parent(&out)?;
+            print_json(serde_json::to_value(
+                store.backup_to(&out).map_err(domain_error)?,
+            )?)
+        }
+        GardenCommand::Verify { backup } => print_json(serde_json::to_value(
+            GardenStore::verify_backup(&absolute(&backup)?).map_err(domain_error)?,
+        )?),
+        GardenCommand::Restore { backup, db } => {
+            let db = absolute(&db)?;
+            private_parent(&db)?;
+            let store =
+                GardenStore::restore_backup(&absolute(&backup)?, &db).map_err(domain_error)?;
+            let identity = store.owner_inbox_list().map_err(domain_error)?;
+            print_json(json!({"databasePath":db,"workspace":identity["workspace"]}))
+        }
+        GardenCommand::Blob { db, file } => {
+            let store = GardenStore::open(absolute(&db)?).map_err(domain_error)?;
+            print_json(serde_json::to_value(
+                store
+                    .put_blob_file(&absolute(&file)?)
+                    .map_err(domain_error)?,
+            )?)
+        }
+        GardenCommand::ExportV1 { db, out } => {
+            let store = GardenStore::open(absolute(&db)?).map_err(domain_error)?;
+            let bundle = store.v1_export()?;
+            let out = absolute(&out)?;
+            private_parent(&out)?;
+            exclusive_json(&out, bundle)?;
+            print_json(json!({"path":out,"formatVersion":1}))
+        }
+        GardenCommand::ImportV1 { db, file } => {
+            let bundle = read_json(&absolute(&file)?, MAX_EXPORT_BYTES)?;
+            let store = GardenStore::open(absolute(&db)?).map_err(domain_error)?;
+            store.import_v1_bundle(bundle)?;
+            print_json(json!({"imported":true,"formatVersion":1}))
+        }
+        GardenCommand::V1Inbox { db } => crate::tui::run_native_inbox(absolute(&db)?),
+        GardenCommand::Init { db } => {
+            let db = absolute(&db)?;
+            private_parent(&db)?;
+            let workspace = uuid::Uuid::new_v4().to_string();
+            let generation = uuid::Uuid::new_v4().to_string();
+            let store =
+                GardenStore::initialize(&db, &workspace, &generation).map_err(domain_error)?;
+            let identity = store.owner_inbox_list().map_err(domain_error)?;
+            print_json(json!({"databasePath":db,"workspace":identity["workspace"]}))
+        }
+        GardenCommand::Grant {
+            client,
+            db,
+            scopes,
+            access,
+            subject,
+            objects,
+            all,
+            out,
+        } => {
+            valid_client(&client)?;
+            let db = absolute(&db)?;
+            let out = absolute(&out)?;
+            let policy = ClientAccess {
+                mode: if access == "companion" {
+                    AccessMode::Companion
+                } else {
+                    AccessMode::Shared
+                },
+                subject: Some(subject),
+                records: vec![],
+            };
+            let garden = if all {
+                GardenAccess::All {}
+            } else {
+                let objects: Vec<ExternalReference> = match objects {
+                    Some(path) => {
+                        let file = fs::File::open(path)?;
+                        let mut bytes = Vec::new();
+                        file.take(1_048_577).read_to_end(&mut bytes)?;
+                        if bytes.len() > 1_048_576 {
+                            return Err(Error::domain(
+                                "LIMIT_EXCEEDED",
+                                "Graph allowlist file is too large.",
+                            ));
+                        }
+                        serde_json::from_slice(&bytes)?
+                    }
+                    None => vec![],
+                };
+                GardenAccess::Allowlist { objects }
+            };
+            let store = GardenStore::open(&db).map_err(domain_error)?;
+            private_parent(&out)?;
+            store
+                .grant_to_file_with_access(&client, &scopes, &out, &db, &policy, &garden)
+                .map_err(domain_error)?;
+            print_json(json!({"clientId":client,"scopes":scopes,"configPath":out}))
+        }
+        GardenCommand::Revoke { client, db } => {
+            valid_client(&client)?;
+            GardenStore::open(absolute(&db)?)
+                .map_err(domain_error)?
+                .revoke(&client)
+                .map_err(domain_error)?;
+            print_json(json!({"clientId":client,"revoked":true}))
+        }
+        GardenCommand::Index { config, objects } => {
+            let config = mother::garden::config::load_garden_config(&absolute(&config)?)?;
+            let references: Vec<ExternalReference> =
+                serde_json::from_value(read_json(&absolute(&objects)?, 16_384)?)?;
+            let store = GardenStore::open(&config.database_path).map_err(domain_error)?;
+            config.authorize(&store)?;
+            let report = store
+                .prepare_search(&config.auth(), &references)
+                .map_err(domain_error)?;
+            print_json(serde_json::to_value(report)?)
+        }
+        GardenCommand::Inbox { db } => crate::tui::run_garden(absolute(&db)?),
+        GardenCommand::Mcp { .. } => unreachable!("Graph MCP is dispatched asynchronously"),
     }
 }

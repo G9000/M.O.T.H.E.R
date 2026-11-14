@@ -64,6 +64,11 @@ pub const SCOPES: [&str; 8] = [
     "artifact:write",
     "action:write",
 ];
+/// Graph authority is opt-in and never added to existing v1 scope collections.
+pub const GARDEN_SCOPES: [&str; 3] = ["garden:read", "garden:propose", "garden:write"];
+pub(crate) fn valid_scope(scope: &str) -> bool {
+    SCOPES.contains(&scope) || GARDEN_SCOPES.contains(&scope)
+}
 pub(crate) fn valid_client(s: &str) -> bool {
     !s.is_empty()
         && s.len() <= 80

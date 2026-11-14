@@ -14,14 +14,18 @@ use std::{
 pub(super) const MAX_PASSAGES: usize = 32_000;
 const MAX_WINDOWS: usize = 32;
 const WINDOW_BYTES: usize = 8 + DIMENSIONS * 4;
-#[derive(Debug, Clone)]
-pub(super) struct Vector {
+
+pub(super) fn profile_fingerprint() -> String {
+    crate::embedding::profile().fingerprint()
+}
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub(crate) struct Vector {
     pub start: usize,
     pub end: usize,
     pub values: Vec<f32>,
 }
-#[derive(Debug, Clone)]
-pub(super) struct Entry {
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub(crate) struct Entry {
     pub partial: bool,
     pub vectors: Vec<Vector>,
 }

@@ -10,6 +10,9 @@ use std::{
 use tempfile::TempDir;
 use uuid::Uuid;
 
+#[path = "mcp/capabilities.rs"]
+mod capabilities;
+
 struct Client {
     child: Child,
     stdin: ChildStdin,
@@ -177,7 +180,16 @@ fn real_stdio_round_trip_handoff_correction_task_progress_restart_and_connected_
         tool["inputSchema"]["$schema"] = json!("https://json-schema.org/draft/2020-12/schema");
     }
     assert_eq!(
-        catalog["tools"], expected,
+        Value::Array(
+            catalog["tools"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .filter(|tool| tool["name"] != "mother_get_capabilities")
+                .cloned()
+                .collect()
+        ),
+        expected,
         "preserve all advertised tool names, descriptions, schemas and annotations"
     );
     let first = a.call("mother_write_record", f.request(memory("Green tea")));
@@ -553,7 +565,7 @@ fn connected_harnesses_observe_owner_soul_updates_without_restarting() {
                 .as_array()
                 .unwrap()
                 .len(),
-            11
+            12
         );
     }
     let saved = a.call(

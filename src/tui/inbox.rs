@@ -3,7 +3,11 @@
 mod tests;
 
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
-use mother::{error::Result, store::Store};
+use mother::{
+    error::Result,
+    garden::{config::domain_error, store::GardenStore},
+    store::Store,
+};
 use ratatui::{
     Frame,
     layout::Rect,
@@ -22,8 +26,15 @@ enum InboxPage {
     ConfirmDismiss,
 }
 
+#[derive(Debug, Clone, Copy)]
+enum InboxBackend {
+    Sqlite,
+    Native,
+}
+
 pub(super) struct Inbox {
     path: PathBuf,
+    backend: InboxBackend,
     page: InboxPage,
     workspace: Value,
     items: Vec<Value>,
@@ -41,6 +52,7 @@ impl Inbox {
     fn empty(path: PathBuf) -> Self {
         Self {
             path,
+            backend: InboxBackend::Sqlite,
             page: InboxPage::List,
             workspace: Value::Null,
             items: vec![],
@@ -60,8 +72,41 @@ impl Inbox {
         inbox.reload()?;
         Ok(inbox)
     }
+    pub(super) fn open_native(path: PathBuf) -> Result<Self> {
+        let mut inbox = Self::empty(path);
+        inbox.backend = InboxBackend::Native;
+        inbox.reload()?;
+        Ok(inbox)
+    }
+    pub(super) fn uncertain(&self) -> bool {
+        self.pending.is_some()
+    }
+    fn list(&self) -> Result<Value> {
+        match self.backend {
+            InboxBackend::Sqlite => Store::open(&self.path)?.inbox_list(),
+            InboxBackend::Native => GardenStore::open(&self.path)
+                .map_err(domain_error)?
+                .v1_inbox_list(),
+        }
+    }
+    fn get(&self, id: &str) -> Result<Value> {
+        match self.backend {
+            InboxBackend::Sqlite => Store::open(&self.path)?.inbox_get(id),
+            InboxBackend::Native => GardenStore::open(&self.path)
+                .map_err(domain_error)?
+                .v1_inbox_get(id),
+        }
+    }
+    fn review(&self, request: Value) -> Result<Value> {
+        match self.backend {
+            InboxBackend::Sqlite => Store::open(&self.path)?.review_proposal(request),
+            InboxBackend::Native => GardenStore::open(&self.path)
+                .map_err(domain_error)?
+                .v1_review_proposal(request),
+        }
+    }
     fn reload(&mut self) -> Result<()> {
-        let list = Store::open(&self.path)?.inbox_list()?;
+        let list = self.list()?;
         self.workspace = list["workspace"].clone();
         self.items = list["proposals"].as_array().cloned().unwrap_or_default();
         self.omitted = list["omitted"].as_u64().unwrap_or(0);
@@ -98,7 +143,7 @@ impl Inbox {
             .as_ref()
             .expect("review request initialized")
             .clone();
-        let outcome = Store::open(&self.path).and_then(|mut store| store.review_proposal(request));
+        let outcome = self.review(request);
         match outcome {
             Ok(receipt) => {
                 self.pending = None;
@@ -144,7 +189,7 @@ impl Inbox {
                 }
                 KeyCode::Enter => {
                     if let Some(id) = self.items.get(self.selected).and_then(|p| p["id"].as_str()) {
-                        let proposal = Store::open(&self.path)?.inbox_get(id)?;
+                        let proposal = self.get(id)?;
                         self.open_proposal(proposal);
                     }
                 }
@@ -162,7 +207,7 @@ impl Inbox {
                 KeyCode::Home => self.scroll = 0,
                 KeyCode::Char('r') => {
                     let id = self.proposal["id"].as_str().unwrap_or_default();
-                    let current = Store::open(&self.path)?.inbox_get(id)?;
+                    let current = self.get(id)?;
                     // Keep the owner's unsaved edit. Refresh only current-state evidence.
                     self.proposal = current;
                     self.reload()?;
