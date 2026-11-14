@@ -34,6 +34,8 @@ struct Remote {
     drop_without_binding: bool,
     drop_after_review: bool,
     drop_without_review: bool,
+    refuse_create: bool,
+    cap: Option<usize>,
 }
 
 struct Server {
@@ -166,6 +168,28 @@ fn respond(socket: &mut TcpStream, state: &Mutex<Remote>) {
         )
     } else if method == "GET" && path.ends_with("mcp-connections") {
         (200, json!({"connections":state.entries}))
+    } else if method == "POST"
+        && path.ends_with("mcp-connections")
+        && state.cap.is_some_and(|c| state.entries.len() >= c)
+    {
+        (429, json!({"error":"MCP connection is busy"}))
+    } else if method == "DELETE" {
+        let index = state
+            .entries
+            .iter()
+            .position(|e| path.split('/').any(|s| Some(s) == e["id"].as_str()))
+            .unwrap();
+        if body["expectedVersion"] != state.entries[index]["version"] {
+            (409, json!({"error":"stale"}))
+        } else {
+            state.entries.remove(index);
+            (204, Value::Null)
+        }
+    } else if method == "POST" && path.ends_with("mcp-connections") && state.refuse_create {
+        (
+            400,
+            json!({"error":"invalid MCP request near owner-secret"}),
+        )
     } else if method == "POST" && path.ends_with("mcp-connections") {
         let id = format!("conn-{}", state.entries.len() + 1);
         let entry = json!({"id":id,"agentId":"test-agent","label":body["label"],"transport":"stdio","stdio":body["stdio"],"endpoint":"","enabled":false,"version":1,"toolAccess":"automatic","state":"disconnected","physicalCallsActive":false,"discoveryId":null,"candidates":[],"reviewedTools":[]});
@@ -1047,7 +1071,7 @@ fn differing_binding_and_active_old_connection_are_preserved() {
 }
 
 #[test]
-fn repair_turns_off_old_connections_clears_their_binding_and_connects() {
+fn repair_replaces_old_connections_clears_their_binding_and_connects() {
     let server = Server::new();
     server.state.lock().unwrap().binding_ready = true;
     let (dir, exe) = fixture();
@@ -1064,29 +1088,26 @@ fn repair_turns_off_old_connections_clears_their_binding_and_connects() {
     );
 
     let old = session
-        .old_connections("test-agent", dir.path(), &exe, Some(&access))
+        .old_connections("test-agent", dir.path(), &exe, Some(&access), true)
         .unwrap();
     assert_eq!(old.len(), 1);
     assert_eq!(json!(old[0].id), old_id);
 
-    // A stale version changes nothing.
+    // A stale version changes nothing at all: not the connection, not the identity link.
     let mut stale = old.clone();
     stale[0].version += 7;
-    assert!(session.turn_off("test-agent", &stale).is_err());
-    assert_eq!(
-        server.state.lock().unwrap().entries[0]["enabled"],
-        json!(true)
-    );
+    let error = session
+        .remove("test-agent", &stale)
+        .unwrap_err()
+        .to_string();
+    assert!(error.contains("Nothing was removed"), "{error}");
+    assert_eq!(server.state.lock().unwrap().entries.len(), 1);
     assert_eq!(server.state.lock().unwrap().binding["connectionId"], old_id);
 
-    assert_eq!(session.turn_off("test-agent", &old).unwrap(), 1);
+    assert_eq!(session.remove("test-agent", &old).unwrap(), 1);
     {
         let remote = server.state.lock().unwrap();
-        assert_eq!(
-            remote.entries[0]["enabled"],
-            json!(false),
-            "turned off, not deleted"
-        );
+        assert!(remote.entries.is_empty());
         assert!(
             remote.binding.is_null(),
             "binding to the old connection cleared"
@@ -1097,20 +1118,26 @@ fn repair_turns_off_old_connections_clears_their_binding_and_connects() {
         .unwrap();
     {
         let remote = server.state.lock().unwrap();
-        assert_eq!(remote.entries.len(), 2);
-        assert_ne!(remote.binding["connectionId"], old_id);
+        assert_eq!(remote.entries.len(), 1);
+        assert!(
+            remote.entries[0]["stdio"]["args"][2]
+                .as_str()
+                .unwrap()
+                .contains("animaos-c-"),
+            "replaced by the Knows me connection"
+        );
         assert_eq!(remote.binding["mode"], "companion");
     }
     assert!(
         session
-            .old_connections("test-agent", dir.path(), &exe, Some(&access))
+            .old_connections("test-agent", dir.path(), &exe, Some(&access), true)
             .unwrap()
             .is_empty()
     );
 }
 
 #[test]
-fn turn_off_leaves_an_unrelated_binding_alone() {
+fn replacing_leaves_an_unrelated_binding_alone() {
     let server = Server::new();
     let (dir, exe) = fixture();
     let session = server.session();
@@ -1122,9 +1149,10 @@ fn turn_off_leaves_an_unrelated_binding_alone() {
             dir.path(),
             &exe,
             Some(&scoped(AccessMode::Companion)),
+            true,
         )
         .unwrap();
-    session.turn_off("test-agent", &old).unwrap();
+    session.remove("test-agent", &old).unwrap();
     assert_eq!(
         server.state.lock().unwrap().binding["connectionId"],
         "someone-else"
@@ -1151,4 +1179,117 @@ fn finds_the_local_owner_key_without_printing_it() {
     let token = owner_token_from([missing.clone(), bad, good]).unwrap();
     assert_eq!(token.as_str(), "synthetic-owner-key");
     assert!(owner_token_from([missing]).is_none());
+}
+
+#[test]
+fn refusals_name_the_step_and_animaos_reason_without_secrets() {
+    let server = Server::new();
+    server.state.lock().unwrap().refuse_create = true;
+    let (dir, exe) = fixture();
+    let error = server
+        .session()
+        .connect("test-agent", dir.path(), &exe)
+        .unwrap_err()
+        .to_string();
+    assert!(
+        error.contains("creating the M.O.T.H.E.R connection"),
+        "{error}"
+    );
+    assert!(error.contains("HTTP 400"), "{error}");
+    assert!(error.contains("invalid MCP request"), "{error}");
+    assert!(
+        !error.contains("owner-secret") && error.contains("[hidden]"),
+        "{error}"
+    );
+}
+
+#[test]
+fn full_animaos_offers_to_remove_this_agents_leftovers_then_connects() {
+    let server = Server::new();
+    server.state.lock().unwrap().binding_ready = true;
+    let (dir, exe) = fixture();
+    let session = server.session();
+    // A leftover M.O.T.H.E.R connection, already turned off, fills AnimaOS's last slot.
+    session.connect("test-agent", dir.path(), &exe).unwrap();
+    {
+        let mut remote = server.state.lock().unwrap();
+        remote.entries[0]["enabled"] = json!(false);
+        remote.cap = Some(1);
+    }
+    let access = scoped(AccessMode::Companion);
+    let error = session
+        .connect_with_access("test-agent", dir.path(), &exe, &access)
+        .unwrap_err()
+        .to_string();
+    assert!(
+        error.contains("creating the M.O.T.H.E.R connection") && error.contains("HTTP 429"),
+        "{error}"
+    );
+
+    // Turned-off leftovers only show up when asked for.
+    assert!(
+        session
+            .old_connections("test-agent", dir.path(), &exe, Some(&access), false)
+            .unwrap()
+            .is_empty()
+    );
+    let leftovers = session
+        .old_connections("test-agent", dir.path(), &exe, Some(&access), true)
+        .unwrap();
+    assert_eq!(leftovers.len(), 1);
+
+    // A stale version removes nothing.
+    let mut stale = leftovers.clone();
+    stale[0].version += 3;
+    assert!(session.remove("test-agent", &stale).is_err());
+    assert_eq!(server.state.lock().unwrap().entries.len(), 1);
+
+    assert_eq!(session.remove("test-agent", &leftovers).unwrap(), 1);
+    assert!(server.state.lock().unwrap().entries.is_empty());
+    session
+        .connect_with_access("test-agent", dir.path(), &exe, &access)
+        .unwrap();
+    let remote = server.state.lock().unwrap();
+    assert_eq!(remote.entries.len(), 1, "still within the limit");
+    assert_eq!(remote.binding["mode"], "companion");
+}
+
+#[test]
+fn replacing_an_old_program_path_reuses_its_slot_and_sets_the_identity_link() {
+    // The real case: the agent's only M.O.T.H.E.R connection is ON but launches an older
+    // program path, and AnimaOS has no free slot. Replacing must not need a second slot.
+    let server = Server::new();
+    server.state.lock().unwrap().binding_ready = true;
+    let (dir, exe) = fixture();
+    let session = server.session();
+    let access = scoped(AccessMode::Companion);
+    session
+        .connect_with_access("test-agent", dir.path(), &exe, &access)
+        .unwrap();
+    {
+        let mut remote = server.state.lock().unwrap();
+        remote.entries[0]["stdio"]["executable"] = json!("C:/old/mother.exe");
+        remote.binding = Value::Null;
+        remote.cap = Some(1);
+    }
+    let error = session
+        .connect_with_access("test-agent", dir.path(), &exe, &access)
+        .unwrap_err()
+        .to_string();
+    assert!(error.contains("Duplicate or conflicting"), "{error}");
+    let old = session
+        .old_connections("test-agent", dir.path(), &exe, Some(&access), true)
+        .unwrap();
+    assert_eq!(old.len(), 1);
+    session.remove("test-agent", &old).unwrap();
+    session
+        .connect_with_access("test-agent", dir.path(), &exe, &access)
+        .unwrap();
+    let remote = server.state.lock().unwrap();
+    assert_eq!(remote.entries.len(), 1);
+    assert_ne!(
+        remote.entries[0]["stdio"]["executable"],
+        json!("C:/old/mother.exe")
+    );
+    assert_eq!(remote.binding["mode"], "companion");
 }

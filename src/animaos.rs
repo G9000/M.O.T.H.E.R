@@ -483,6 +483,15 @@ impl Session {
                 .header("connection", "close")
                 .header("content-type", "application/json")
                 .send(body.unwrap_or(&Value::Null).to_string().as_bytes()),
+            "DELETE" => self
+                .http
+                .delete(&url)
+                .header("authorization", authorization.as_str())
+                .header("x-api-key", self.api_key.as_str())
+                .header("connection", "close")
+                .header("content-type", "application/json")
+                .force_send_body()
+                .send(body.unwrap_or(&Value::Null).to_string().as_bytes()),
             _ => return Err(failure("Unsupported connection operation.")),
         };
         let mut response = response.map_err(|_| unknown())?;
@@ -503,10 +512,22 @@ impl Session {
                     "AnimaOS redirected the request. Redirects are disabled; enter the direct loopback daemon address.",
                 ));
             }
-            400 | 404 | 405 | 413 | 429 => {
-                return Err(failure(
-                    "AnimaOS rejected this connection request. Check the agent, connection and daemon compatibility.",
-                ));
+            status @ (400 | 404 | 405 | 413 | 429) => {
+                let reason = response
+                    .body_mut()
+                    .with_config()
+                    .limit(16 * 1024)
+                    .read_to_string()
+                    .ok()
+                    .and_then(|text| serde_json::from_str::<Value>(&text).ok())
+                    .and_then(|v| v.get("error").and_then(Value::as_str).map(str::to_owned))
+                    .map(|r| self.redact(&r))
+                    .filter(|r| !r.is_empty())
+                    .unwrap_or_else(|| "no reason given".into());
+                return Err(failure(&format!(
+                    "AnimaOS refused while {} (HTTP {status}): {reason}.",
+                    step(method, path)
+                )));
             }
             _ => return Err(unknown()),
         }
@@ -516,7 +537,21 @@ impl Session {
             .limit(MAX_BODY)
             .read_to_string()
             .map_err(|_| unknown())?;
+        if text.trim().is_empty() {
+            // 204 No Content, e.g. a removal.
+            return Ok(Value::Null);
+        }
         serde_json::from_str(&text).map_err(|_| unknown())
+    }
+    /// Daemon text, bounded, printable, and never containing this session's credentials.
+    fn redact(&self, text: &str) -> String {
+        let mut out: String = text.chars().filter(|c| !c.is_control()).take(200).collect();
+        for secret in [self.owner_token.as_str(), self.api_key.as_str()] {
+            if !secret.is_empty() && out.contains(secret) {
+                out = out.replace(secret, "[hidden]");
+            }
+        }
+        out
     }
     /// List agent names and IDs without requesting conversation transcripts.
     pub fn agents(&self) -> Result<Vec<Agent>> {
@@ -940,13 +975,15 @@ fn expected_spec(
 }
 
 impl Session {
-    /// The older M.O.T.H.E.R connections that would make Connect stop for this agent.
+    /// The older M.O.T.H.E.R connections for this agent. With `include_off`, also the ones that
+    /// are already turned off (they still use one of AnimaOS's limited connection slots).
     pub fn old_connections(
         &self,
         agent_id: &str,
         root: &Path,
         exe: &Path,
         access: Option<&ClientAccess>,
+        include_off: bool,
     ) -> Result<Vec<OldConnection>> {
         valid_id(agent_id)?;
         let spec = expected_spec(agent_id, root, exe, access)?;
@@ -966,7 +1003,7 @@ impl Session {
                 || c.stdio.as_ref().is_some_and(|s| {
                     s.executable == spec.executable || s.args.iter().any(|a| a == &config)
                 });
-            if relevant && !matches && (c.enabled || access.is_none()) {
+            if relevant && !matches && (include_off || c.enabled || access.is_none()) {
                 old.push(OldConnection {
                     program: c
                         .stdio
@@ -981,27 +1018,41 @@ impl Session {
         Ok(old)
     }
 
-    /// Turn off the given old connections (they stay listed in AnimaOS, just disabled) and clear
-    /// this agent's identity binding if it points at one of them. Returns how many were turned off.
-    pub fn turn_off(&self, agent_id: &str, old: &[OldConnection]) -> Result<usize> {
+    /// Remove the given old connections from AnimaOS to free a connection slot (AnimaOS allows
+    /// only a few in total), clearing an identity binding that points at one of them.
+    pub fn remove(&self, agent_id: &str, old: &[OldConnection]) -> Result<usize> {
         valid_id(agent_id)?;
         let base = format!("/api/agents/{}/mcp-connections", segment(agent_id));
+        // Check every connection is exactly as shown before changing anything.
+        let value = self.request("GET", &base, None)?;
+        let current: Vec<Connection> =
+            serde_json::from_value(value.get("connections").cloned().ok_or_else(unknown)?)
+                .map_err(|_| failure("AnimaOS MCP connection metadata is incompatible."))?;
+        for c in old {
+            if !current
+                .iter()
+                .any(|now| now.id == c.id && now.version == c.version)
+            {
+                return Err(failure(
+                    "An old connection changed since it was shown. Nothing was removed; look again before replacing it.",
+                ));
+            }
+        }
+        self.clear_binding_to(agent_id, old)?;
         let mut done = 0;
         for c in old {
             valid_id(&c.id)?;
-            let value = self.request(
-                "PATCH",
+            self.request(
+                "DELETE",
                 &format!("{base}/{}", segment(&c.id)),
-                Some(&json!({"expectedVersion": c.version, "enabled": false})),
+                Some(&json!({"expectedVersion": c.version})),
             )?;
-            let after: Connection =
-                serde_json::from_value(value.get("connection").cloned().ok_or_else(unknown)?)
-                    .map_err(|_| unknown())?;
-            if after.id != c.id || after.enabled {
-                return Err(unknown());
-            }
             done += 1;
         }
+        Ok(done)
+    }
+
+    fn clear_binding_to(&self, agent_id: &str, old: &[OldConnection]) -> Result<()> {
         let path = format!("/api/agents/{}/workspace-context", segment(agent_id));
         let current = self.workspace_context(&path)?;
         if current
@@ -1015,7 +1066,7 @@ impl Session {
                 Some(&json!({"expectedRevision": current.revision, "binding": null})),
             )?;
         }
-        Ok(done)
+        Ok(())
     }
 }
 
@@ -1031,6 +1082,23 @@ fn binding_status(mode: AccessMode) -> String {
         AccessMode::Companion => "Companion configured for this agent. MOTHER supplies personality and primary durable memory. If unavailable, the same chat uses the agent's configured local personality; memory is unavailable and writes are not mirrored or replayed. Conversation host test pending.".into(),
         AccessMode::Shared => "Shared context configured for this agent's explicit record allowlist; its personality stays local. Empty allowlist shares no records. Conversation host test pending.".into(),
         AccessMode::Legacy => "Legacy context tools connected; no companion identity binding.".into(),
+    }
+}
+
+/// The step a request belongs to, in plain words, for error messages.
+fn step(method: &str, path: &str) -> &'static str {
+    let tail = path.rsplit('/').next().unwrap_or_default();
+    match (method, tail) {
+        ("GET", t) if t.starts_with("agents") => "loading your agents",
+        ("GET", "mcp-connections") => "reading this agent's connections",
+        ("POST", "mcp-connections") => "creating the M.O.T.H.E.R connection",
+        ("POST", "connect") => "starting the M.O.T.H.E.R connection",
+        ("POST", "review") => "approving the context reader tool",
+        ("PATCH", _) => "turning a connection on or off",
+        ("DELETE", _) => "removing an old connection",
+        ("GET", "workspace-context") => "reading the agent's identity link",
+        ("PUT", "workspace-context") => "saving the agent's identity link",
+        _ => "talking to AnimaOS",
     }
 }
 

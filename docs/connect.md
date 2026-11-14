@@ -39,7 +39,7 @@ Start AnimaOS, choose **AnimaOS** and press Enter.
 - Pick the agent, then choose:
   - **Knows me** (recommended): the agent uses your M.O.T.H.E.R persona and memory.
   - **Only what I share**: the agent reads only the records you pick and keeps its own personality.
-- If older M.O.T.H.E.R connections are in the way, the screen lists them. Press **f** to turn them off and connect cleanly. They are disabled, not deleted, so they stay visible in AnimaOS's Connectors > MCP screen. An identity link pointing at one of them is cleared so the new one can be set. Esc changes nothing.
+- If the agent has an older M.O.T.H.E.R connection (an earlier setup, or one that launches an old program path), the screen shows it. Press **f** to replace it: the old one is removed and a fresh one takes its place, with the identity link set. This matters because AnimaOS allows only 4 MCP connections in total, and a turned-off connection still uses one. Only that agent's own M.O.T.H.E.R connections are touched; if every slot belongs to other tools, the screen says so and you free one in AnimaOS. A connection that changed since it was shown is never removed. Esc changes nothing.
 
 ## ChatGPT
 

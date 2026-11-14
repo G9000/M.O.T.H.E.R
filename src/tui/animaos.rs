@@ -29,6 +29,15 @@ enum Reply {
     Old(Session, Result<Vec<OldConnection>>),
 }
 /// Errors that mean "older connections are in the way", which the repair step can resolve.
+/// AnimaOS's total connection limit across all agents (it answers "busy" when it's reached).
+const ANIMAOS_SLOTS: usize = 4;
+/// AnimaOS refused to create a connection because every slot is in use.
+fn out_of_slots(error: &mother::error::Error) -> bool {
+    let text = error.to_string();
+    error.code() == "ANIMAOS_CONNECTION"
+        && text.contains("creating the M.O.T.H.E.R connection")
+        && text.contains("HTTP 429")
+}
 fn needs_repair(error: &mother::error::Error) -> bool {
     let text = error.to_string();
     error.code() == "ANIMAOS_CONNECTION"
@@ -55,6 +64,8 @@ pub(super) struct Setup {
     shareable: Vec<(String, String)>,
     scroll: u16,
     old: Vec<OldConnection>,
+    /// AnimaOS had no free connection slot (changes the explanation, not the action).
+    slots_full: bool,
     /// The agent and access of the last connect attempt, reused by the repair step.
     pending: Option<(String, ClientAccess)>,
     pub(super) message: String,
@@ -113,6 +124,7 @@ impl Setup {
             shareable: vec![],
             scroll: 0,
             old: vec![],
+            slots_full: false,
             pending: None,
             message:
                 "Start AnimaOS, then load your agents. Owner credentials stay only in this session."
@@ -149,16 +161,22 @@ impl Setup {
                     }
                 }
                 Reply::Connected(session, result) => match result {
-                    Err(error) if needs_repair(&error) && self.pending.is_some() => {
+                    Err(error)
+                        if (needs_repair(&error) || out_of_slots(&error))
+                            && self.pending.is_some() =>
+                    {
+                        self.slots_full = out_of_slots(&error);
                         let (id, access) = self.pending.clone().expect("checked");
                         let (root, exe) = (self.root.clone(), self.exe.clone());
                         self.busy = true;
                         self.message =
-                            "Older M.O.T.H.E.R connections are in the way. Looking them up…".into();
+                            "Looking for this agent's older M.O.T.H.E.R connections…".into();
                         let sender = self.sender.clone();
                         std::thread::spawn(move || {
                             let access = (access.mode != AccessMode::Legacy).then_some(access);
-                            let result = session.old_connections(&id, &root, &exe, access.as_ref());
+                            // Turned-off ones too: they still use one of AnimaOS's few slots.
+                            let result =
+                                session.old_connections(&id, &root, &exe, access.as_ref(), true);
                             let _ = sender.send(Reply::Old(session, result));
                         });
                     }
@@ -179,7 +197,13 @@ impl Setup {
                         Ok(old) if !old.is_empty() => {
                             self.old = old;
                             self.stage = Stage::Repair;
-                            self.message = "Press f to turn the old connections off and connect, or Esc to leave everything as it is.".into();
+                            self.message = "Press f to replace the old connection and connect, or Esc to leave everything as it is.".into();
+                        }
+                        Ok(_) if self.slots_full => {
+                            self.stage = Stage::Result;
+                            self.message = format!(
+                                "AnimaOS allows only {ANIMAOS_SLOTS} connections in total, and all of them are used by other tools. Remove one you don't need in AnimaOS (Settings > Connectors > MCP), then try again."
+                            );
                         }
                         Ok(_) => {
                             self.stage = Stage::Result;
@@ -353,16 +377,18 @@ impl Setup {
                     let old = std::mem::take(&mut self.old);
                     let (root, exe) = (self.root.clone(), self.exe.clone());
                     self.busy = true;
-                    self.message = "Turning off the old connections, then connecting…".into();
+                    self.message = "Replacing the old connection, then connecting…".into();
                     let sender = self.sender.clone();
                     std::thread::spawn(move || {
-                        let result = session.turn_off(&id, &old).and_then(|n| {
+                        // Replace, not just turn off: a turned-off connection still uses one of
+                        // AnimaOS's few slots, so the new one couldn't be created.
+                        let result = session.remove(&id, &old).and_then(|n| {
                             let connected = if access.mode == AccessMode::Legacy {
                                 session.connect(&id, &root, &exe)
                             } else {
                                 session.connect_with_access(&id, &root, &exe, &access)
                             }?;
-                            Ok(format!("Turned off {n} old connection(s). {connected}"))
+                            Ok(format!("Replaced {n} old connection(s). {connected}"))
                         });
                         let _ = sender.send(Reply::Connected(session, result));
                     });
@@ -414,7 +440,7 @@ impl Setup {
             }
             Stage::Confirm => "↑↓ scroll details   Enter connect this agent   Esc back",
             Stage::Result => "Enter / Esc agent list",
-            Stage::Repair => "f turn the old ones off and connect   Esc change nothing",
+            Stage::Repair => "f replace the old connection and connect   Esc change nothing",
         }
     }
     fn selected_access(&self) -> Result<ClientAccess> {
@@ -625,21 +651,30 @@ impl Setup {
                 lines.push(safe(&self.message));
             }
             Stage::Repair => {
-                lines.push("Older M.O.T.H.E.R connections are in the way for this agent:".into());
+                if self.slots_full {
+                    lines.push(format!(
+                        "AnimaOS allows only {ANIMAOS_SLOTS} connections in total, and all are in use."
+                    ));
+                }
+                lines.push(
+                    "This agent has an older M.O.T.H.E.R connection (an earlier setup, or an"
+                        .into(),
+                );
+                lines.push("old program path):".into());
                 lines.push(String::new());
                 for c in &self.old {
                     lines.push(format!("  • {}  ({})", safe(&c.label), safe(&c.program)));
                 }
                 lines.push(String::new());
                 lines.push(
-                    "Press f to turn them off and connect cleanly. They stay listed in AnimaOS's"
+                    "Press f to replace it: the old one is removed and a fresh one takes its"
                         .into(),
                 );
                 lines.push(
-                    "Connectors > MCP screen, just disabled, so you can turn one back on later."
+                    "slot, with the \"Knows me\" identity link. Other tools' connections are"
                         .into(),
                 );
-                lines.push("An identity link pointing at one of them is cleared so the new one can be set.".into());
+                lines.push("not touched. Esc leaves everything as it is.".into());
             }
         }
         frame.render_widget(
