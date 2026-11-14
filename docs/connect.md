@@ -36,10 +36,13 @@ mother fix                     # repair broken entries (old program path, revoke
 Start AnimaOS, choose **AnimaOS** and press Enter.
 
 - Your AnimaOS owner key is read from this computer (`ANIMA_LOCAL_ADMIN_TOKEN_FILE`, or `~/.animaos-swarm/data/control-plane.json.admin-token`). It stays in memory and is never shown. If it isn't found, paste it into the masked field.
-- Pick the agent, then choose:
-  - **Knows me** (recommended): the agent uses your M.O.T.H.E.R persona and memory.
-  - **Only what I share**: the agent reads only the records you pick and keeps its own personality.
-- If older M.O.T.H.E.R connections are in the way, the screen lists them. Press **f** to turn them off and connect cleanly. They are disabled, not deleted, so they stay visible in AnimaOS's Connectors > MCP screen. An identity link pointing at one of them is cleared so the new one can be set. Esc changes nothing.
+- Pick the agent, then choose **Shared garden (additive)** access:
+  - **Full garden**: the agent can read canonical garden records through a companion grant.
+  - **Only selected records**: the agent reads only the records you pick.
+- AnimaOS keeps its native memory, learning and local personality. Press **p** to separately choose Mother's personality with full garden access. Selected memories are proposed to Mother's inbox for owner review. If an existing primary binding is found, review it and press **c** to explicitly authorize conversion before confirming.
+- If the agent has an older M.O.T.H.E.R connection (an earlier setup, or one that launches an old program path), the screen shows it. Press **f** to replace it: the old one is removed and a fresh one takes its place, using the access and personality choices you reviewed. This matters because AnimaOS allows only 4 MCP connections in total, and a turned-off connection still uses one. Only that agent's own M.O.T.H.E.R connections are touched; if every slot belongs to other tools, the screen says so and you free one in AnimaOS. A connection that changed since it was shown is never removed. Esc changes nothing.
+
+Disable the provider in AnimaOS to stop automatic garden use. Removing its MCP connection and revoking its Mother key are separate owner actions; disabling alone retains pending shares and grants.
 
 ## ChatGPT
 

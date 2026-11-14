@@ -1,5 +1,13 @@
 # Client context policies
 
+AnimaOS pairing installs an additive shared-garden provider by default. Its
+companion/full-garden and shared/allowlist choices select these access policies;
+they do not replace AnimaOS's native memory or learning. Personality adoption is
+a separate owner choice, local by default, and available only with a
+persona-visible companion grant. Existing primary-memory bindings require
+explicit conversion after setup displays their current identity. Pairing retains
+the existing grant scopes and does not widen an allowlist.
+
 M.O.T.H.E.R remains an independent workspace. Owners can bind a new private client credential to an external agent identity without depending on any particular host. Existing grants stay `legacy`; opening an older database does not change its schema version, generation, scopes, or persona access.
 
 Create a companion credential with full canonical context and the stored persona:

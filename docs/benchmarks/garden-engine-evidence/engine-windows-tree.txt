@@ -1,0 +1,25 @@
+garden-store v0.1.0 (isolated qualification package)
+├── redb v4.6.0
+├── serde v1.0.229
+│   ├── serde_core v1.0.229
+│   └── serde_derive v1.0.229 (proc-macro)
+│       ├── proc-macro2 v1.0.107
+│       │   └── unicode-ident v1.0.27
+│       ├── quote v1.0.47
+│       │   └── proc-macro2 v1.0.107 (*)
+│       └── syn v3.0.10
+│           ├── proc-macro2 v1.0.107 (*)
+│           ├── quote v1.0.47 (*)
+│           └── unicode-ident v1.0.27
+├── serde_json v1.0.154
+│   ├── itoa v1.0.19
+│   ├── memchr v2.8.3
+│   ├── serde_core v1.0.229
+│   └── zmij v1.0.23
+└── tempfile v3.27.0
+    ├── fastrand v2.5.0
+    ├── getrandom v0.4.3
+    │   └── cfg-if v1.0.5
+    ├── once_cell v1.21.4
+    └── windows-sys v0.61.2
+        └── windows-link v0.2.1

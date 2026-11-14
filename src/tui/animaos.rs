@@ -1,7 +1,7 @@
 //! Native setup UI for the optional loopback AnimaOS adapter.
 #[cfg(test)]
 mod tests;
-use crate::animaos::{Agent, OldConnection, Session, local_owner_token};
+use crate::animaos::{Agent, OldConnection, PersonaSource, Session, local_owner_token};
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use mother::access::{AccessMode, ClientAccess};
 use mother::error::Result;
@@ -29,6 +29,15 @@ enum Reply {
     Old(Session, Result<Vec<OldConnection>>),
 }
 /// Errors that mean "older connections are in the way", which the repair step can resolve.
+/// AnimaOS's total connection limit across all agents (it answers "busy" when it's reached).
+const ANIMAOS_SLOTS: usize = 4;
+/// AnimaOS refused to create a connection because every slot is in use.
+fn out_of_slots(error: &mother::error::Error) -> bool {
+    let text = error.to_string();
+    error.code() == "ANIMAOS_CONNECTION"
+        && text.contains("creating the M.O.T.H.E.R connection")
+        && text.contains("HTTP 429")
+}
 fn needs_repair(error: &mother::error::Error) -> bool {
     let text = error.to_string();
     error.code() == "ANIMAOS_CONNECTION"
@@ -51,12 +60,17 @@ pub(super) struct Setup {
     workspace: String,
     generation: String,
     access_mode: AccessMode,
+    persona_source: PersonaSource,
+    convert_legacy: bool,
+    primary_preview: Option<String>,
     records: String,
     shareable: Vec<(String, String)>,
     scroll: u16,
     old: Vec<OldConnection>,
+    /// AnimaOS had no free connection slot (changes the explanation, not the action).
+    slots_full: bool,
     /// The agent and access of the last connect attempt, reused by the repair step.
-    pending: Option<(String, ClientAccess)>,
+    pending: Option<(String, ClientAccess, PersonaSource, bool)>,
     pub(super) message: String,
 }
 impl Setup {
@@ -109,10 +123,14 @@ impl Setup {
             workspace: String::new(),
             generation: String::new(),
             access_mode: AccessMode::Shared,
+            persona_source: PersonaSource::Local,
+            convert_legacy: false,
+            primary_preview: None,
             records: String::new(),
             shareable: vec![],
             scroll: 0,
             old: vec![],
+            slots_full: false,
             pending: None,
             message:
                 "Start AnimaOS, then load your agents. Owner credentials stay only in this session."
@@ -149,16 +167,29 @@ impl Setup {
                     }
                 }
                 Reply::Connected(session, result) => match result {
-                    Err(error) if needs_repair(&error) && self.pending.is_some() => {
-                        let (id, access) = self.pending.clone().expect("checked");
+                    Err(error) if error.code() == "ANIMAOS_PRIMARY_BINDING" => {
+                        self.session = Some(session);
+                        self.primary_preview = Some(error.to_string());
+                        self.convert_legacy = false;
+                        self.stage = Stage::Confirm;
+                        self.message = "Review the existing primary binding. Press c to authorize conversion, then Enter.".into();
+                    }
+                    Err(error)
+                        if (needs_repair(&error) || out_of_slots(&error))
+                            && self.pending.is_some() =>
+                    {
+                        self.slots_full = out_of_slots(&error);
+                        let (id, access, _, _) = self.pending.clone().expect("checked");
                         let (root, exe) = (self.root.clone(), self.exe.clone());
                         self.busy = true;
                         self.message =
-                            "Older M.O.T.H.E.R connections are in the way. Looking them up…".into();
+                            "Looking for this agent's older M.O.T.H.E.R connections…".into();
                         let sender = self.sender.clone();
                         std::thread::spawn(move || {
                             let access = (access.mode != AccessMode::Legacy).then_some(access);
-                            let result = session.old_connections(&id, &root, &exe, access.as_ref());
+                            // Turned-off ones too: they still use one of AnimaOS's few slots.
+                            let result =
+                                session.old_connections(&id, &root, &exe, access.as_ref(), true);
                             let _ = sender.send(Reply::Old(session, result));
                         });
                     }
@@ -179,7 +210,13 @@ impl Setup {
                         Ok(old) if !old.is_empty() => {
                             self.old = old;
                             self.stage = Stage::Repair;
-                            self.message = "Press f to turn the old connections off and connect, or Esc to leave everything as it is.".into();
+                            self.message = "Press f to replace the old connection and connect, or Esc to leave everything as it is.".into();
+                        }
+                        Ok(_) if self.slots_full => {
+                            self.stage = Stage::Result;
+                            self.message = format!(
+                                "AnimaOS allows only {ANIMAOS_SLOTS} connections in total, and all of them are used by other tools. Remove one you don't need in AnimaOS (Settings > Connectors > MCP), then try again."
+                            );
                         }
                         Ok(_) => {
                             self.stage = Stage::Result;
@@ -258,6 +295,9 @@ impl Setup {
                     self.shareable = shareable_records(&self.root)?;
                     self.records.clear();
                     self.access_mode = AccessMode::Companion;
+                    self.persona_source = PersonaSource::Local;
+                    self.convert_legacy = false;
+                    self.primary_preview = None;
                     self.scroll = 0;
                     self.stage = Stage::Access;
                 }
@@ -273,6 +313,17 @@ impl Setup {
                         AccessMode::Shared => AccessMode::Legacy,
                         AccessMode::Legacy => AccessMode::Companion,
                     };
+                    if self.access_mode != AccessMode::Companion {
+                        self.persona_source = PersonaSource::Local;
+                    }
+                }
+                KeyCode::Char('p') => {
+                    if self.access_mode == AccessMode::Companion {
+                        self.persona_source = match self.persona_source {
+                            PersonaSource::Local => PersonaSource::Workspace,
+                            PersonaSource::Workspace => PersonaSource::Local,
+                        };
+                    }
                 }
                 KeyCode::Backspace if self.access_mode == AccessMode::Shared => {
                     self.records.pop();
@@ -292,48 +343,68 @@ impl Setup {
                 }
                 _ => {}
             },
-            Stage::Confirm => {
-                match key.code {
-                    KeyCode::Down => self.scroll = self.scroll.saturating_add(1),
-                    KeyCode::Up => self.scroll = self.scroll.saturating_sub(1),
-                    KeyCode::Esc => self.stage = Stage::Access,
-                    KeyCode::Enter => {
-                        let Some(agent) = self.agents.get(self.selected) else {
-                            return Ok(false);
-                        };
-                        let id = agent.id.clone();
-                        let access = self.selected_access()?;
-                        let root = self.root.clone();
-                        let exe = self.exe.clone();
-                        let current = mother::store::Store::open(&root.join("context.sqlite"))?
-                            .workspace()?;
-                        if current["id"].as_str() != Some(self.workspace.as_str())
-                            || current["generation"].as_str() != Some(self.generation.as_str())
-                        {
-                            return Err(mother::error::Error::domain(
-                                "CONNECTION",
-                                "Workspace changed; return to the agent list and review again.",
-                            ));
-                        }
-                        let Some(session) = self.session.take() else {
-                            return Ok(false);
-                        };
-                        self.pending = Some((id.clone(), access.clone()));
-                        self.busy = true;
-                        self.message="Connecting M.O.T.H.E.R. Keep this window open until the result is known.".into();
-                        let sender = self.sender.clone();
-                        std::thread::spawn(move || {
-                            let result = if access.mode == AccessMode::Legacy {
-                                session.connect(&id, &root, &exe)
-                            } else {
-                                session.connect_with_access(&id, &root, &exe, &access)
-                            };
-                            let _ = sender.send(Reply::Connected(session, result));
-                        });
-                    }
-                    _ => {}
+            Stage::Confirm => match key.code {
+                KeyCode::Down => self.scroll = self.scroll.saturating_add(1),
+                KeyCode::Up => self.scroll = self.scroll.saturating_sub(1),
+                KeyCode::Esc => {
+                    self.convert_legacy = false;
+                    self.primary_preview = None;
+                    self.stage = Stage::Access;
                 }
-            }
+                KeyCode::Char('c')
+                    if self.access_mode != AccessMode::Legacy && self.primary_preview.is_some() =>
+                {
+                    self.convert_legacy = !self.convert_legacy;
+                }
+                KeyCode::Enter => {
+                    let Some(agent) = self.agents.get(self.selected) else {
+                        return Ok(false);
+                    };
+                    let id = agent.id.clone();
+                    let access = self.selected_access()?;
+                    let root = self.root.clone();
+                    let exe = self.exe.clone();
+                    let current =
+                        mother::store::Store::open(&root.join("context.sqlite"))?.workspace()?;
+                    if current["id"].as_str() != Some(self.workspace.as_str())
+                        || current["generation"].as_str() != Some(self.generation.as_str())
+                    {
+                        return Err(mother::error::Error::domain(
+                            "CONNECTION",
+                            "Workspace changed; return to the agent list and review again.",
+                        ));
+                    }
+                    let Some(session) = self.session.take() else {
+                        return Ok(false);
+                    };
+                    let persona = self.persona_source;
+                    let convert_legacy = self.convert_legacy;
+                    self.pending = Some((id.clone(), access.clone(), persona, convert_legacy));
+                    self.busy = true;
+                    self.message =
+                        "Connecting M.O.T.H.E.R. Keep this window open until the result is known."
+                            .into();
+                    let sender = self.sender.clone();
+                    std::thread::spawn(move || {
+                        let result = if access.mode == AccessMode::Legacy {
+                            session.connect(&id, &root, &exe)
+                        } else if persona == PersonaSource::Local && !convert_legacy {
+                            session.connect_with_access(&id, &root, &exe, &access)
+                        } else {
+                            session.connect_additive(
+                                &id,
+                                &root,
+                                &exe,
+                                &access,
+                                persona,
+                                convert_legacy,
+                            )
+                        };
+                        let _ = sender.send(Reply::Connected(session, result));
+                    });
+                }
+                _ => {}
+            },
             Stage::Result => match key.code {
                 KeyCode::Esc | KeyCode::Enter => self.stage = Stage::Agents,
                 _ => {}
@@ -345,7 +416,7 @@ impl Setup {
                     self.message = "Nothing was changed.".into();
                 }
                 KeyCode::Char('f') | KeyCode::Enter => {
-                    let (Some((id, access)), Some(session)) =
+                    let (Some((id, access, persona, convert_legacy)), Some(session)) =
                         (self.pending.clone(), self.session.take())
                     else {
                         return Ok(false);
@@ -353,16 +424,27 @@ impl Setup {
                     let old = std::mem::take(&mut self.old);
                     let (root, exe) = (self.root.clone(), self.exe.clone());
                     self.busy = true;
-                    self.message = "Turning off the old connections, then connecting…".into();
+                    self.message = "Replacing the old connection, then connecting…".into();
                     let sender = self.sender.clone();
                     std::thread::spawn(move || {
-                        let result = session.turn_off(&id, &old).and_then(|n| {
+                        // Replace, not just turn off: a turned-off connection still uses one of
+                        // AnimaOS's few slots, so the new one couldn't be created.
+                        let result = session.remove(&id, &old).and_then(|n| {
                             let connected = if access.mode == AccessMode::Legacy {
                                 session.connect(&id, &root, &exe)
-                            } else {
+                            } else if persona == PersonaSource::Local && !convert_legacy {
                                 session.connect_with_access(&id, &root, &exe, &access)
+                            } else {
+                                session.connect_additive(
+                                    &id,
+                                    &root,
+                                    &exe,
+                                    &access,
+                                    persona,
+                                    convert_legacy,
+                                )
                             }?;
-                            Ok(format!("Turned off {n} old connection(s). {connected}"))
+                            Ok(format!("Replaced {n} old connection(s). {connected}"))
                         });
                         let _ = sender.send(Reply::Connected(session, result));
                     });
@@ -410,11 +492,13 @@ impl Setup {
             }
             Stage::Agents => "↑↓ choose agent   Enter choose access   Esc account",
             Stage::Access => {
-                "↑↓ / Tab role   type/paste numbers or UUIDs   PgDn/PgUp scroll   Enter review   Esc back"
+                "↑↓ / Tab access   p personality   type/paste records   PgDn/PgUp scroll   Enter review   Esc back"
             }
-            Stage::Confirm => "↑↓ scroll details   Enter connect this agent   Esc back",
+            Stage::Confirm => {
+                "↑↓ scroll details   c allow primary conversion   Enter connect this agent   Esc back"
+            }
             Stage::Result => "Enter / Esc agent list",
-            Stage::Repair => "f turn the old ones off and connect   Esc change nothing",
+            Stage::Repair => "f replace the old connection and connect   Esc change nothing",
         }
     }
     fn selected_access(&self) -> Result<ClientAccess> {
@@ -521,8 +605,15 @@ impl Setup {
                 }
             }
             Stage::Access => {
+                if self.access_mode != AccessMode::Legacy {
+                    lines.push(
+                        "Shared garden (additive): Native AnimaOS memory stays active.".into(),
+                    );
+                } else {
+                    lines.push("Legacy tools-only connection.".into());
+                }
                 lines.push(format!(
-                    "{} Knows me: uses your M.O.T.H.E.R persona and memory (recommended)",
+                    "{} Full garden: companion access to canonical records",
                     if self.access_mode == AccessMode::Companion {
                         ">"
                     } else {
@@ -530,7 +621,7 @@ impl Setup {
                     }
                 ));
                 lines.push(format!(
-                    "{} Only what I share: reads just the records you pick, keeps its own personality",
+                    "{} Only selected records: an explicit record allowlist",
                     if self.access_mode == AccessMode::Shared {
                         ">"
                     } else {
@@ -538,11 +629,19 @@ impl Setup {
                     }
                 ));
                 lines.push(format!(
-                    "{} Old style (not recommended): full context tools, no identity link",
+                    "{} Legacy tools only: full context tools, no automatic provider",
                     if self.access_mode == AccessMode::Legacy {
                         ">"
                     } else {
                         " "
+                    }
+                ));
+                lines.push(format!(
+                    "Personality: {}",
+                    if self.persona_source == PersonaSource::Workspace {
+                        "Mother workspace (explicitly selected)"
+                    } else {
+                        "AnimaOS local (default)"
                     }
                 ));
                 lines.push(String::new());
@@ -566,7 +665,7 @@ impl Setup {
                 if self.shareable.len() > 6 {
                     lines.push("More records below: use PgDn/PgUp to scroll this page.".into());
                 }
-                lines.push("Companion offline: same chat, configured local personality, unavailable durable memory. No automatic write mirroring or replay.".into());
+                lines.push("Offline: local memory and learning continue. Selected shares wait for delivery/review.".into());
                 lines.push("Existing grants and bindings are preserved. Disable an old connection explicitly in AnimaOS before replacing it.".into());
                 for (index, (id, title)) in self.shareable.iter().enumerate().skip(6) {
                     lines.push(format!("{}. {} [{}]", index + 1, safe(title), safe(id)));
@@ -587,6 +686,35 @@ impl Setup {
                 ));
                 lines.push(format!("Workspace: {}", safe(&self.workspace)));
                 lines.push(format!("Data: {}", safe(&self.root.display().to_string())));
+                if self.access_mode != AccessMode::Legacy {
+                    lines.push(
+                        "Shared garden (additive). Native AnimaOS memory stays active.".into(),
+                    );
+                    lines.push(format!(
+                        "Personality: {}",
+                        if self.persona_source == PersonaSource::Workspace {
+                            "Mother workspace"
+                        } else {
+                            "AnimaOS local"
+                        }
+                    ));
+                    if let Some(preview) = &self.primary_preview {
+                        lines.push(safe(preview));
+                        lines.push(format!(
+                            "Convert this primary binding: {} (press c to change)",
+                            if self.convert_legacy {
+                                "YES, explicitly authorized"
+                            } else {
+                                "NO, preserve it"
+                            }
+                        ));
+                    } else {
+                        lines.push(
+                            "Existing primary bindings require a separate conversion review."
+                                .into(),
+                        );
+                    }
+                }
                 lines.push(
                     "Access: read shared context + propose memories for owner review.".into(),
                 );
@@ -609,14 +737,14 @@ impl Setup {
                         }
                     ));
                 } else if self.access_mode == AccessMode::Companion {
-                    lines.push("Offline: same chat, complete configured local personality, MOTHER memory unavailable. No write mirroring or replay.".into());
+                    lines.push("Offline: native memory and learning continue. Mother proposals need owner review.".into());
                 } else {
                     lines.push("Legacy tools expose full context and persona under existing v1 behavior. They do not activate companion identity or primary-memory isolation.".into());
                 }
                 lines.push("M.O.T.H.E.R runs locally using this executable. AnimaOS keeps its own agent permissions.".into());
                 lines.push("Enter creates/reuses a separate role-specific grant and starts this agent's local MCP connection.".into());
                 if self.access_mode != AccessMode::Legacy {
-                    lines.push("Under Automatic tool policy, this also reviews the exact discovered mother_get_context reader for the identity binding; no extra execution grants are created. Review policy keeps manual tool review and grants.".into());
+                    lines.push("Automatic tool policy reviews six exact tools: context, search, record, proposal, proposal outcome and receipt. No direct-write/approval tools or extra execution grants. Review policy requires manual tool review in AnimaOS.".into());
                 }
             }
             Stage::Result => {
@@ -625,21 +753,30 @@ impl Setup {
                 lines.push(safe(&self.message));
             }
             Stage::Repair => {
-                lines.push("Older M.O.T.H.E.R connections are in the way for this agent:".into());
+                if self.slots_full {
+                    lines.push(format!(
+                        "AnimaOS allows only {ANIMAOS_SLOTS} connections in total, and all are in use."
+                    ));
+                }
+                lines.push(
+                    "This agent has an older M.O.T.H.E.R connection (an earlier setup, or an"
+                        .into(),
+                );
+                lines.push("old program path):".into());
                 lines.push(String::new());
                 for c in &self.old {
                     lines.push(format!("  • {}  ({})", safe(&c.label), safe(&c.program)));
                 }
                 lines.push(String::new());
                 lines.push(
-                    "Press f to turn them off and connect cleanly. They stay listed in AnimaOS's"
+                    "Press f to replace it: the old one is removed and a fresh one takes its"
                         .into(),
                 );
                 lines.push(
-                    "Connectors > MCP screen, just disabled, so you can turn one back on later."
+                    "slot, using the access and personality choices you reviewed. Other tools are"
                         .into(),
                 );
-                lines.push("An identity link pointing at one of them is cleared so the new one can be set.".into());
+                lines.push("not touched. Esc leaves everything as it is.".into());
             }
         }
         frame.render_widget(

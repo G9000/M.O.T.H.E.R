@@ -1,0 +1,197 @@
+{
+  "bulk_ingest": {
+    "assertion_phase_ms": 334228.90959999996,
+    "entity_phase_ms": 2522.3667,
+    "milliseconds": 336751.27629999997,
+    "note": "bulk timing is not a small durable batch measurement",
+    "transactions": 7814
+  },
+  "contention": {
+    "assertions_per_batch": 32,
+    "note": "bounded operations start together; overlap and scheduling are measured, not guaranteed",
+    "reader_query_latency": {
+      "p50": 0.5622,
+      "p95": 2.2656,
+      "p99": 13.579799999999999,
+      "samples": 512,
+      "total": 564.4333000000003,
+      "unit": "milliseconds"
+    },
+    "reader_threads": 4,
+    "writer_batch_latency": {
+      "p50": 17.3864,
+      "p95": 140.20360000000002,
+      "p99": 259.0167,
+      "samples": 64,
+      "total": 2101.3119999999994,
+      "unit": "milliseconds"
+    },
+    "writer_begin_transaction_wait": {
+      "p50": 0.0021,
+      "p95": 118.8498,
+      "p99": 244.2971,
+      "samples": 64,
+      "total": 964.8696000000001,
+      "unit": "milliseconds"
+    },
+    "writer_threads": 2
+  },
+  "database_file_bytes_before_cleanup": 2646085632,
+  "dataset": {
+    "edges_per_entity": 5,
+    "entities": 1000000,
+    "generated_edges": 5000000,
+    "seed": 14,
+    "streaming_entity_chunk": 256
+  },
+  "durability": "Immediate transaction commit",
+  "durable_32_assertion_batch": {
+    "p50": 16.4961,
+    "p95": 21.771800000000002,
+    "p99": 26.5426,
+    "samples": 64,
+    "total": 1084.6641000000002,
+    "unit": "milliseconds"
+  },
+  "engine": "redb 4.6.0",
+  "experiment": "G2 synthetic graph storage kernel qualification",
+  "final_counts": {
+    "assertions": 5004224,
+    "entities": 1000000,
+    "history": 5004224,
+    "receipts": 7946,
+    "sequence": 7946
+  },
+  "lexical_candidates": {
+    "reason": "no text corpus or lexical index implemented; no lexical performance claim",
+    "status": "deferred"
+  },
+  "limitations": [
+    "synthetic unsigned IDs and logical known-at transaction sequence are not a promoted wire contract",
+    "kernel microbenchmark excludes authentication, grants, sources validation and existing M.O.T.H.E.R API overhead",
+    "OS cache state is uncontrolled; reopened-process figures are not cold-disk measurements",
+    "power loss, torn filesystem writes and hardware fsync behavior are not established by process-kill tests"
+  ],
+  "reopened_process": {
+    "label": "reopened process/application cache; OS and disk caches uncontrolled",
+    "open_ms": 8.4974,
+    "reads": {
+      "bounded_temporal_neighbors": {
+        "p50": 0.147,
+        "p95": 0.2312,
+        "p99": 0.25730000000000003,
+        "samples": 128,
+        "total": 19.509100000000007,
+        "unit": "milliseconds"
+      },
+      "bounds": {
+        "hops": 2,
+        "known_at_sequence": 7814,
+        "results": 32,
+        "valid_at": 5000,
+        "work": 128
+      },
+      "exact_assertion_lookup": {
+        "p50": 0.0084,
+        "p95": 0.0287,
+        "p99": 0.0628,
+        "samples": 256,
+        "total": 3.084900000000001,
+        "unit": "milliseconds"
+      },
+      "fanout": {
+        "max_returned_edges": 30,
+        "max_visited_nodes": 31,
+        "returned_edges_total": 3840,
+        "visited_nodes_total": 3968
+      },
+      "query_work_total": 3840,
+      "truncated_queries": 0
+    }
+  },
+  "rss": {
+    "reason": "portable Rust std does not expose peak process RSS",
+    "status": "external monitor required"
+  },
+  "sqlite_baseline": null,
+  "storage": "owned temporary directory; removed on exit",
+  "uncontended_begin_transaction_wait": {
+    "p50": 0.0022,
+    "p95": 0.0031999999999999997,
+    "p99": 0.0048,
+    "samples": 64,
+    "total": 0.13920000000000005,
+    "unit": "milliseconds"
+  },
+  "warm_reads": {
+    "bounded_temporal_neighbors": {
+      "p50": 0.1072,
+      "p95": 0.1467,
+      "p99": 0.1873,
+      "samples": 128,
+      "total": 14.144700000000002,
+      "unit": "milliseconds"
+    },
+    "bounds": {
+      "hops": 2,
+      "known_at_sequence": 7814,
+      "results": 32,
+      "valid_at": 5000,
+      "work": 128
+    },
+    "exact_assertion_lookup": {
+      "p50": 0.0053,
+      "p95": 0.0092,
+      "p99": 0.0115,
+      "samples": 256,
+      "total": 1.434500000000001,
+      "unit": "milliseconds"
+    },
+    "fanout": {
+      "max_returned_edges": 30,
+      "max_visited_nodes": 31,
+      "returned_edges_total": 3840,
+      "visited_nodes_total": 3968
+    },
+    "query_work_total": 3840,
+    "truncated_queries": 0
+  },
+  "warmup": {
+    "assertions_per_batch": 32,
+    "reads": {
+      "bounded_temporal_neighbors": {
+        "p50": 0.1001,
+        "p95": 0.1514,
+        "p99": 0.1514,
+        "samples": 16,
+        "total": 1.6746999999999999,
+        "unit": "milliseconds"
+      },
+      "bounds": {
+        "hops": 2,
+        "known_at_sequence": 7814,
+        "results": 32,
+        "valid_at": 5000,
+        "work": 128
+      },
+      "exact_assertion_lookup": {
+        "p50": 0.0081,
+        "p95": 0.022500000000000003,
+        "p99": 0.0348,
+        "samples": 32,
+        "total": 0.29960000000000003,
+        "unit": "milliseconds"
+      },
+      "fanout": {
+        "max_returned_edges": 30,
+        "max_visited_nodes": 31,
+        "returned_edges_total": 480,
+        "visited_nodes_total": 496
+      },
+      "query_work_total": 480,
+      "truncated_queries": 0
+    },
+    "write_batches": 4,
+    "write_ms": 68.0449
+  }
+}

@@ -29,11 +29,17 @@ struct Remote {
     unchanged_update_version: bool,
     excessive_agents: bool,
     binding: Value,
+    provider_binding: Value,
+    old_daemon: bool,
+    stale_binding: bool,
     binding_ready: bool,
     drop_after_binding: bool,
     drop_without_binding: bool,
     drop_after_review: bool,
+    drop_review_name: Option<String>,
     drop_without_review: bool,
+    refuse_create: bool,
+    cap: Option<usize>,
 }
 
 struct Server {
@@ -151,21 +157,56 @@ fn respond(socket: &mut TcpStream, state: &Mutex<Remote>) {
     } else if path.ends_with("/workspace-context") {
         if method == "PUT" {
             assert_eq!(body["expectedRevision"], "synthetic-revision");
+            if state.stale_binding {
+                let reply = "{\"error\":\"stale revision\"}";
+                let _ = write!(
+                    socket,
+                    "HTTP/1.1 409 Test\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{reply}",
+                    reply.len()
+                );
+                return;
+            }
             if state.drop_without_binding {
                 return;
             }
             state.binding = body["binding"].clone();
+            if let Some(provider) = body.get("providerBinding") {
+                state.provider_binding = provider.clone();
+            }
             if state.drop_after_binding {
                 state.drop_after_binding = false;
                 return;
             }
         }
-        (
-            200,
-            json!({"revision":"synthetic-revision","binding":state.binding,"status":if state.binding.is_null(){"independent"}else{"configured"},"connections":state.entries.iter().filter(|e| e["reviewedTools"].as_array().is_some_and(|tools| tools.iter().any(|tool|tool["remoteName"]=="mother_get_context"))).map(|e| json!({"id":e["id"],"label":"MOTHER","state":e["state"],"tool":"mother_get_context"})).collect::<Vec<_>>()}),
-        )
+        let mut reply = json!({"revision":"synthetic-revision","binding":state.binding,"status":if state.binding.is_null(){"independent"}else{"configured"},"connections":state.entries.iter().filter(|e| e["reviewedTools"].as_array().is_some_and(|tools| tools.iter().any(|tool|tool["remoteName"]=="mother_get_context"))).map(|e| json!({"id":e["id"],"label":"MOTHER","state":e["state"],"tool":"mother_get_context"})).collect::<Vec<_>>()});
+        if !state.old_daemon {
+            reply["providerBinding"] = state.provider_binding.clone();
+        }
+        (200, reply)
     } else if method == "GET" && path.ends_with("mcp-connections") {
         (200, json!({"connections":state.entries}))
+    } else if method == "POST"
+        && path.ends_with("mcp-connections")
+        && state.cap.is_some_and(|c| state.entries.len() >= c)
+    {
+        (429, json!({"error":"MCP connection is busy"}))
+    } else if method == "DELETE" {
+        let index = state
+            .entries
+            .iter()
+            .position(|e| path.split('/').any(|s| Some(s) == e["id"].as_str()))
+            .unwrap();
+        if body["expectedVersion"] != state.entries[index]["version"] {
+            (409, json!({"error":"stale"}))
+        } else {
+            state.entries.remove(index);
+            (204, Value::Null)
+        }
+    } else if method == "POST" && path.ends_with("mcp-connections") && state.refuse_create {
+        (
+            400,
+            json!({"error":"invalid MCP request near owner-secret"}),
+        )
     } else if method == "POST" && path.ends_with("mcp-connections") {
         let id = format!("conn-{}", state.entries.len() + 1);
         let entry = json!({"id":id,"agentId":"test-agent","label":body["label"],"transport":"stdio","stdio":body["stdio"],"endpoint":"","enabled":false,"version":1,"toolAccess":"automatic","state":"disconnected","physicalCallsActive":false,"discoveryId":null,"candidates":[],"reviewedTools":[]});
@@ -194,7 +235,7 @@ fn respond(socket: &mut TcpStream, state: &Mutex<Remote>) {
             .as_array()
             .unwrap()
             .iter()
-            .find(|tool| tool["remoteName"] == "mother_get_context")
+            .find(|tool| tool["descriptorDigest"] == body["descriptorDigest"])
             .unwrap()
             .clone();
         assert_eq!(body["descriptorDigest"], reader["descriptorDigest"]);
@@ -202,10 +243,17 @@ fn respond(socket: &mut TcpStream, state: &Mutex<Remote>) {
             return;
         }
         let entry = &mut state.entries[index];
-        entry["reviewedTools"] = json!([reader]);
+        entry["reviewedTools"].as_array_mut().unwrap().push(reader);
         entry["version"] = json!(entry["version"].as_u64().unwrap() + 1);
         entry["state"] = json!("ready");
         let reply = entry.clone();
+        if state.drop_review_name.as_deref()
+            == reply["reviewedTools"].as_array().unwrap().last().unwrap()["remoteName"].as_str()
+            && state.drop_review_name.is_some()
+        {
+            state.drop_review_name = None;
+            return;
+        }
         if state.drop_after_review {
             state.drop_after_review = false;
             return;
@@ -234,7 +282,7 @@ fn respond(socket: &mut TcpStream, state: &Mutex<Remote>) {
                 // A fresh discovery is unreviewed even when the agent's automatic policy permits use.
                 entry["state"] = json!(if ready { "ready" } else { "needs_review" });
                 entry["discoveryId"] = json!("discovery-1");
-                entry["candidates"] = json!([{"remoteName":"mother_get_context","descriptorDigest":"a".repeat(64)},{"remoteName":"mother_search_context"},{"remoteName":"mother_get_record"},{"remoteName":"mother_get_receipt"},{"remoteName":"mother_propose_memory"},{"remoteName":"mother_get_proposal"}]);
+                entry["candidates"] = json!(REQUIRED_TOOLS.iter().enumerate().map(|(index,name)| json!({"remoteName":name,"descriptorDigest":if index == 0 { "a".repeat(64) } else { format!("{:064x}",index+10) }})).collect::<Vec<_>>());
             }
             let mut reply = entry.clone();
             if method == "PATCH" {
@@ -657,7 +705,7 @@ fn large_shared_allowlist_roundtrips_and_reconciles_unknown_binding_without_repl
     let session = server.session();
     assert!(
         session
-            .connect_with_access("test-agent", dir.path(), &exe, &access)
+            .connect_primary_with_access("test-agent", dir.path(), &exe, &access)
             .is_err()
     );
     let binding_path = fs::read_dir(dir.path().join("clients"))
@@ -668,7 +716,7 @@ fn large_shared_allowlist_roundtrips_and_reconciles_unknown_binding_without_repl
     assert!(fs::metadata(&binding_path).unwrap().len() > 16384);
     assert!(
         session
-            .connect_with_access("test-agent", dir.path(), &exe, &access)
+            .connect_primary_with_access("test-agent", dir.path(), &exe, &access)
             .is_err()
     );
     {
@@ -682,7 +730,7 @@ fn large_shared_allowlist_roundtrips_and_reconciles_unknown_binding_without_repl
             .clone();
     }
     session
-        .connect_with_access("test-agent", dir.path(), &exe, &access)
+        .connect_primary_with_access("test-agent", dir.path(), &exe, &access)
         .unwrap();
     assert_eq!(
         server
@@ -719,7 +767,7 @@ fn oversized_binding_is_rejected_before_provisioning_a_grant() {
     };
     let error = server
         .session()
-        .connect_with_access("test-agent", dir.path(), &exe, &access)
+        .connect_primary_with_access("test-agent", dir.path(), &exe, &access)
         .unwrap_err();
     assert!(error.to_string().contains("512 KiB"));
     let database = rusqlite::Connection::open(dir.path().join("context.sqlite")).unwrap();
@@ -749,7 +797,7 @@ fn scoped_binding_requires_current_ready_owner_review() {
     let (dir, exe) = fixture();
     let status = server
         .session()
-        .connect_with_access(
+        .connect_primary_with_access(
             "test-agent",
             dir.path(),
             &exe,
@@ -774,7 +822,7 @@ fn scoped_binding_requires_current_ready_owner_review() {
     }
     let status = server
         .session()
-        .connect_with_access(
+        .connect_primary_with_access(
             "test-agent",
             dir.path(),
             &exe,
@@ -799,7 +847,7 @@ fn automatic_setup_pins_only_the_context_reader_once_without_changing_grants() {
     let session = server.session();
     for _ in 0..2 {
         let status = session
-            .connect_with_access(
+            .connect_primary_with_access(
                 "test-agent",
                 dir.path(),
                 &exe,
@@ -848,7 +896,12 @@ fn uncertain_reader_review_reconciles_only_the_exact_descriptor_discovery_and_ve
         let session = server.session();
         assert!(
             session
-                .connect_with_access("test-agent", dir.path(), &exe, &scoped(AccessMode::Shared))
+                .connect_primary_with_access(
+                    "test-agent",
+                    dir.path(),
+                    &exe,
+                    &scoped(AccessMode::Shared)
+                )
                 .is_err()
         );
         {
@@ -862,7 +915,7 @@ fn uncertain_reader_review_reconciles_only_the_exact_descriptor_discovery_and_ve
                 _ => {}
             }
         }
-        let result = session.connect_with_access(
+        let result = session.connect_primary_with_access(
             "test-agent",
             dir.path(),
             &exe,
@@ -901,14 +954,14 @@ fn dropped_binding_save_is_read_and_never_blindly_repeated() {
         }
         let (dir, exe) = fixture();
         let session = server.session();
-        let result = session.connect_with_access(
+        let result = session.connect_primary_with_access(
             "test-agent",
             dir.path(),
             &exe,
             &scoped(AccessMode::Shared),
         );
         assert_eq!(result.is_ok(), applied);
-        let repeated = session.connect_with_access(
+        let repeated = session.connect_primary_with_access(
             "test-agent",
             dir.path(),
             &exe,
@@ -1007,7 +1060,7 @@ fn differing_binding_and_active_old_connection_are_preserved() {
     let original = server.state.lock().unwrap().entries[0].clone();
     assert!(
         session
-            .connect_with_access(
+            .connect_primary_with_access(
                 "test-agent",
                 dir.path(),
                 &exe,
@@ -1023,7 +1076,7 @@ fn differing_binding_and_active_old_connection_are_preserved() {
     }
     assert!(
         session
-            .connect_with_access(
+            .connect_primary_with_access(
                 "test-agent",
                 dir.path(),
                 &exe,
@@ -1047,7 +1100,7 @@ fn differing_binding_and_active_old_connection_are_preserved() {
 }
 
 #[test]
-fn repair_turns_off_old_connections_clears_their_binding_and_connects() {
+fn repair_replaces_old_connections_clears_their_binding_and_connects() {
     let server = Server::new();
     server.state.lock().unwrap().binding_ready = true;
     let (dir, exe) = fixture();
@@ -1059,58 +1112,61 @@ fn repair_turns_off_old_connections_clears_their_binding_and_connects() {
     let access = scoped(AccessMode::Companion);
     assert!(
         session
-            .connect_with_access("test-agent", dir.path(), &exe, &access)
+            .connect_primary_with_access("test-agent", dir.path(), &exe, &access)
             .is_err()
     );
 
     let old = session
-        .old_connections("test-agent", dir.path(), &exe, Some(&access))
+        .old_connections("test-agent", dir.path(), &exe, Some(&access), true)
         .unwrap();
     assert_eq!(old.len(), 1);
     assert_eq!(json!(old[0].id), old_id);
 
-    // A stale version changes nothing.
+    // A stale version changes nothing at all: not the connection, not the identity link.
     let mut stale = old.clone();
     stale[0].version += 7;
-    assert!(session.turn_off("test-agent", &stale).is_err());
-    assert_eq!(
-        server.state.lock().unwrap().entries[0]["enabled"],
-        json!(true)
-    );
+    let error = session
+        .remove("test-agent", &stale)
+        .unwrap_err()
+        .to_string();
+    assert!(error.contains("Nothing was removed"), "{error}");
+    assert_eq!(server.state.lock().unwrap().entries.len(), 1);
     assert_eq!(server.state.lock().unwrap().binding["connectionId"], old_id);
 
-    assert_eq!(session.turn_off("test-agent", &old).unwrap(), 1);
+    assert_eq!(session.remove("test-agent", &old).unwrap(), 1);
     {
         let remote = server.state.lock().unwrap();
-        assert_eq!(
-            remote.entries[0]["enabled"],
-            json!(false),
-            "turned off, not deleted"
-        );
+        assert!(remote.entries.is_empty());
         assert!(
             remote.binding.is_null(),
             "binding to the old connection cleared"
         );
     }
     session
-        .connect_with_access("test-agent", dir.path(), &exe, &access)
+        .connect_primary_with_access("test-agent", dir.path(), &exe, &access)
         .unwrap();
     {
         let remote = server.state.lock().unwrap();
-        assert_eq!(remote.entries.len(), 2);
-        assert_ne!(remote.binding["connectionId"], old_id);
+        assert_eq!(remote.entries.len(), 1);
+        assert!(
+            remote.entries[0]["stdio"]["args"][2]
+                .as_str()
+                .unwrap()
+                .contains("animaos-c-"),
+            "replaced by the Knows me connection"
+        );
         assert_eq!(remote.binding["mode"], "companion");
     }
     assert!(
         session
-            .old_connections("test-agent", dir.path(), &exe, Some(&access))
+            .old_connections("test-agent", dir.path(), &exe, Some(&access), true)
             .unwrap()
             .is_empty()
     );
 }
 
 #[test]
-fn turn_off_leaves_an_unrelated_binding_alone() {
+fn replacing_leaves_an_unrelated_binding_alone() {
     let server = Server::new();
     let (dir, exe) = fixture();
     let session = server.session();
@@ -1122,9 +1178,10 @@ fn turn_off_leaves_an_unrelated_binding_alone() {
             dir.path(),
             &exe,
             Some(&scoped(AccessMode::Companion)),
+            true,
         )
         .unwrap();
-    session.turn_off("test-agent", &old).unwrap();
+    session.remove("test-agent", &old).unwrap();
     assert_eq!(
         server.state.lock().unwrap().binding["connectionId"],
         "someone-else"
@@ -1151,4 +1208,469 @@ fn finds_the_local_owner_key_without_printing_it() {
     let token = owner_token_from([missing.clone(), bad, good]).unwrap();
     assert_eq!(token.as_str(), "synthetic-owner-key");
     assert!(owner_token_from([missing]).is_none());
+}
+
+#[test]
+fn refusals_name_the_step_and_animaos_reason_without_secrets() {
+    let server = Server::new();
+    server.state.lock().unwrap().refuse_create = true;
+    let (dir, exe) = fixture();
+    let error = server
+        .session()
+        .connect("test-agent", dir.path(), &exe)
+        .unwrap_err()
+        .to_string();
+    assert!(
+        error.contains("creating the M.O.T.H.E.R connection"),
+        "{error}"
+    );
+    assert!(error.contains("HTTP 400"), "{error}");
+    assert!(error.contains("invalid MCP request"), "{error}");
+    assert!(
+        !error.contains("owner-secret") && error.contains("[hidden]"),
+        "{error}"
+    );
+}
+
+#[test]
+fn full_animaos_offers_to_remove_this_agents_leftovers_then_connects() {
+    let server = Server::new();
+    server.state.lock().unwrap().binding_ready = true;
+    let (dir, exe) = fixture();
+    let session = server.session();
+    // A leftover M.O.T.H.E.R connection, already turned off, fills AnimaOS's last slot.
+    session.connect("test-agent", dir.path(), &exe).unwrap();
+    {
+        let mut remote = server.state.lock().unwrap();
+        remote.entries[0]["enabled"] = json!(false);
+        remote.cap = Some(1);
+    }
+    let access = scoped(AccessMode::Companion);
+    let error = session
+        .connect_primary_with_access("test-agent", dir.path(), &exe, &access)
+        .unwrap_err()
+        .to_string();
+    assert!(
+        error.contains("creating the M.O.T.H.E.R connection") && error.contains("HTTP 429"),
+        "{error}"
+    );
+
+    // Turned-off leftovers only show up when asked for.
+    assert!(
+        session
+            .old_connections("test-agent", dir.path(), &exe, Some(&access), false)
+            .unwrap()
+            .is_empty()
+    );
+    let leftovers = session
+        .old_connections("test-agent", dir.path(), &exe, Some(&access), true)
+        .unwrap();
+    assert_eq!(leftovers.len(), 1);
+
+    // A stale version removes nothing.
+    let mut stale = leftovers.clone();
+    stale[0].version += 3;
+    assert!(session.remove("test-agent", &stale).is_err());
+    assert_eq!(server.state.lock().unwrap().entries.len(), 1);
+
+    assert_eq!(session.remove("test-agent", &leftovers).unwrap(), 1);
+    assert!(server.state.lock().unwrap().entries.is_empty());
+    session
+        .connect_primary_with_access("test-agent", dir.path(), &exe, &access)
+        .unwrap();
+    let remote = server.state.lock().unwrap();
+    assert_eq!(remote.entries.len(), 1, "still within the limit");
+    assert_eq!(remote.binding["mode"], "companion");
+}
+
+#[test]
+fn replacing_an_old_program_path_reuses_its_slot_and_sets_the_identity_link() {
+    // The real case: the agent's only M.O.T.H.E.R connection is ON but launches an older
+    // program path, and AnimaOS has no free slot. Replacing must not need a second slot.
+    let server = Server::new();
+    server.state.lock().unwrap().binding_ready = true;
+    let (dir, exe) = fixture();
+    let session = server.session();
+    let access = scoped(AccessMode::Companion);
+    session
+        .connect_primary_with_access("test-agent", dir.path(), &exe, &access)
+        .unwrap();
+    {
+        let mut remote = server.state.lock().unwrap();
+        remote.entries[0]["stdio"]["executable"] = json!("C:/old/mother.exe");
+        remote.binding = Value::Null;
+        remote.cap = Some(1);
+    }
+    let error = session
+        .connect_primary_with_access("test-agent", dir.path(), &exe, &access)
+        .unwrap_err()
+        .to_string();
+    assert!(error.contains("Duplicate or conflicting"), "{error}");
+    let old = session
+        .old_connections("test-agent", dir.path(), &exe, Some(&access), true)
+        .unwrap();
+    assert_eq!(old.len(), 1);
+    session.remove("test-agent", &old).unwrap();
+    session
+        .connect_primary_with_access("test-agent", dir.path(), &exe, &access)
+        .unwrap();
+    let remote = server.state.lock().unwrap();
+    assert_eq!(remote.entries.len(), 1);
+    assert_ne!(
+        remote.entries[0]["stdio"]["executable"],
+        json!("C:/old/mother.exe")
+    );
+    assert_eq!(remote.binding["mode"], "companion");
+}
+
+#[test]
+fn additive_pairing_defaults_to_native_personality_and_selected_publication() {
+    let server = Server::new();
+    let (dir, exe) = fixture();
+    server
+        .session()
+        .connect_with_access(
+            "test-agent",
+            dir.path(),
+            &exe,
+            &scoped(AccessMode::Companion),
+        )
+        .unwrap();
+    let remote = server.state.lock().unwrap();
+    let put = &remote
+        .requests
+        .iter()
+        .find(|(m, _, _)| m == "PUT")
+        .unwrap()
+        .2;
+    assert_eq!(put["binding"], Value::Null);
+    assert_eq!(put["providerBinding"]["version"], 1);
+    assert_eq!(put["providerBinding"]["personaSource"], "local");
+    assert_eq!(put["providerBinding"]["publication"], "selected");
+    assert_eq!(put["providerBinding"]["subject"], "test-agent");
+    assert_eq!(put["providerBinding"]["accessMode"], "companion");
+    let reviewed = remote.entries[0]["reviewedTools"].as_array().unwrap();
+    assert_eq!(reviewed.len(), REQUIRED_TOOLS.len());
+    assert!(
+        REQUIRED_TOOLS
+            .iter()
+            .all(|name| reviewed.iter().any(|tool| tool["remoteName"] == *name))
+    );
+}
+
+#[test]
+fn additive_personality_is_independent_and_shared_access_cannot_adopt_it() {
+    let server = Server::new();
+    let (dir, exe) = fixture();
+    let session = server.session();
+    assert!(
+        session
+            .connect_additive(
+                "test-agent",
+                dir.path(),
+                &exe,
+                &scoped(AccessMode::Shared),
+                PersonaSource::Workspace,
+                false
+            )
+            .is_err()
+    );
+    assert!(server.state.lock().unwrap().requests.is_empty());
+    session
+        .connect_additive(
+            "test-agent",
+            dir.path(),
+            &exe,
+            &scoped(AccessMode::Companion),
+            PersonaSource::Workspace,
+            false,
+        )
+        .unwrap();
+    assert_eq!(
+        server.state.lock().unwrap().provider_binding["personaSource"],
+        "workspace"
+    );
+}
+
+#[test]
+fn additive_old_daemon_wrong_subject_and_stale_save_do_not_change_binding() {
+    let server = Server::new();
+    let (dir, exe) = fixture();
+    let session = server.session();
+    let mut wrong = scoped(AccessMode::Companion);
+    wrong.subject = Some("other-agent".into());
+    assert!(
+        session
+            .connect_with_access("test-agent", dir.path(), &exe, &wrong)
+            .is_err()
+    );
+    assert!(server.state.lock().unwrap().requests.is_empty());
+    server.state.lock().unwrap().old_daemon = true;
+    assert!(
+        session
+            .connect_with_access(
+                "test-agent",
+                dir.path(),
+                &exe,
+                &scoped(AccessMode::Companion)
+            )
+            .unwrap_err()
+            .to_string()
+            .contains("does not support")
+    );
+    assert_eq!(server.state.lock().unwrap().requests.len(), 1);
+    assert!(!dir.path().join("clients").exists());
+    server.state.lock().unwrap().old_daemon = false;
+    server.state.lock().unwrap().stale_binding = true;
+    assert!(
+        session
+            .connect_with_access(
+                "test-agent",
+                dir.path(),
+                &exe,
+                &scoped(AccessMode::Companion)
+            )
+            .is_err()
+    );
+    assert!(server.state.lock().unwrap().provider_binding.is_null());
+}
+
+#[test]
+fn additive_conversion_is_explicit_atomic_and_preserves_existing_grant() {
+    let server = Server::new();
+    let (dir, exe) = fixture();
+    let session = server.session();
+    let access = scoped(AccessMode::Companion);
+    session
+        .connect_primary_with_access("test-agent", dir.path(), &exe, &access)
+        .unwrap();
+    let configs: Vec<_> = fs::read_dir(dir.path().join("clients"))
+        .unwrap()
+        .map(|e| e.unwrap().path())
+        .filter(|p| p.to_string_lossy().ends_with(".private.json"))
+        .collect();
+    let original = fs::read(&configs[0]).unwrap();
+    let old = server.state.lock().unwrap().binding.clone();
+    assert!(
+        session
+            .connect_with_access("test-agent", dir.path(), &exe, &access)
+            .is_err()
+    );
+    assert_eq!(server.state.lock().unwrap().binding, old);
+    session
+        .connect_additive(
+            "test-agent",
+            dir.path(),
+            &exe,
+            &access,
+            PersonaSource::Local,
+            true,
+        )
+        .unwrap();
+    let remote = server.state.lock().unwrap();
+    assert!(remote.binding.is_null());
+    assert_eq!(remote.provider_binding["connectionId"], old["connectionId"]);
+    assert_eq!(remote.entries.len(), 1);
+    assert_eq!(fs::read(&configs[0]).unwrap(), original);
+}
+
+#[test]
+fn additive_lost_save_ack_is_reread_without_replay_or_new_key() {
+    for applied in [true, false] {
+        let server = Server::new();
+        let (dir, exe) = fixture();
+        {
+            let mut remote = server.state.lock().unwrap();
+            remote.drop_after_binding = applied;
+            remote.drop_without_binding = !applied;
+        }
+        let session = server.session();
+        let first = session.connect_with_access(
+            "test-agent",
+            dir.path(),
+            &exe,
+            &scoped(AccessMode::Companion),
+        );
+        assert_eq!(first.is_ok(), applied);
+        let second = session.connect_with_access(
+            "test-agent",
+            dir.path(),
+            &exe,
+            &scoped(AccessMode::Companion),
+        );
+        assert_eq!(second.is_ok(), applied);
+        let remote = server.state.lock().unwrap();
+        assert_eq!(
+            remote
+                .requests
+                .iter()
+                .filter(|(m, _, _)| m == "PUT")
+                .count(),
+            1
+        );
+        assert_eq!(remote.entries.len(), 1);
+    }
+}
+
+#[test]
+fn additive_conversion_preserves_wrong_generation_and_different_provider() {
+    let server = Server::new();
+    let (dir, exe) = fixture();
+    let session = server.session();
+    let access = scoped(AccessMode::Companion);
+    session
+        .connect_primary_with_access("test-agent", dir.path(), &exe, &access)
+        .unwrap();
+    server.state.lock().unwrap().binding["generation"] = json!("other-generation");
+    assert!(
+        session
+            .connect_additive(
+                "test-agent",
+                dir.path(),
+                &exe,
+                &access,
+                PersonaSource::Local,
+                true
+            )
+            .is_err()
+    );
+    assert_eq!(
+        server.state.lock().unwrap().binding["generation"],
+        "other-generation"
+    );
+    server.state.lock().unwrap().binding = Value::Null;
+    session
+        .connect_with_access("test-agent", dir.path(), &exe, &access)
+        .unwrap();
+    server.state.lock().unwrap().provider_binding["subject"] = json!("other-agent");
+    assert!(
+        session
+            .connect_with_access("test-agent", dir.path(), &exe, &access)
+            .is_err()
+    );
+    assert_eq!(
+        server.state.lock().unwrap().provider_binding["subject"],
+        "other-agent"
+    );
+}
+
+#[test]
+fn additive_repair_clears_only_the_selected_provider_binding() {
+    let server = Server::new();
+    let (dir, exe) = fixture();
+    let session = server.session();
+    session
+        .connect_with_access(
+            "test-agent",
+            dir.path(),
+            &exe,
+            &scoped(AccessMode::Companion),
+        )
+        .unwrap();
+    let id = server.state.lock().unwrap().entries[0]["id"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+    let old = vec![OldConnection {
+        id: id.clone(),
+        version: server.state.lock().unwrap().entries[0]["version"]
+            .as_u64()
+            .unwrap(),
+        label: "Synthetic".into(),
+        program: "old".into(),
+    }];
+    session.remove("test-agent", &old).unwrap();
+    let remote = server.state.lock().unwrap();
+    assert!(remote.provider_binding.is_null());
+    assert!(remote.entries.is_empty());
+}
+
+#[test]
+fn additive_shared_defaults_preserve_empty_allowlist_and_local_personality() {
+    let server = Server::new();
+    let (dir, exe) = fixture();
+    let session = server.session();
+    let access = scoped(AccessMode::Shared);
+    session
+        .connect_with_access("test-agent", dir.path(), &exe, &access)
+        .unwrap();
+    let remote = server.state.lock().unwrap();
+    assert_eq!(remote.provider_binding["accessMode"], "shared");
+    assert_eq!(remote.provider_binding["personaSource"], "local");
+    let local = Local::open_with_access(
+        "test-agent",
+        dir.path(),
+        &exe,
+        &session.endpoint,
+        Some(&access),
+    )
+    .unwrap();
+    let store = Store::open(&dir.path().join("context.sqlite")).unwrap();
+    let config = load_config(&local.config_path).unwrap();
+    assert_eq!(store.access_for(&config.auth()).unwrap(), access);
+}
+
+#[test]
+fn additive_repair_preserves_unrelated_provider_binding() {
+    let server = Server::new();
+    let (dir, exe) = fixture();
+    let session = server.session();
+    session
+        .connect_with_access(
+            "test-agent",
+            dir.path(),
+            &exe,
+            &scoped(AccessMode::Companion),
+        )
+        .unwrap();
+    let old = {
+        let mut remote = server.state.lock().unwrap();
+        let entry = &remote.entries[0];
+        let old = OldConnection {
+            id: entry["id"].as_str().unwrap().into(),
+            version: entry["version"].as_u64().unwrap(),
+            label: "Synthetic".into(),
+            program: "old".into(),
+        };
+        remote.provider_binding["connectionId"] = json!("unrelated");
+        old
+    };
+    session.remove("test-agent", &[old]).unwrap();
+    assert_eq!(
+        server.state.lock().unwrap().provider_binding["connectionId"],
+        "unrelated"
+    );
+}
+
+#[test]
+fn additive_partial_tool_review_recovers_the_exact_non_reader_snapshot() {
+    let server = Server::new();
+    let (dir, exe) = fixture();
+    server.state.lock().unwrap().drop_review_name = Some("mother_search_context".into());
+    let session = server.session();
+    let access = scoped(AccessMode::Companion);
+    assert_eq!(
+        session
+            .connect_with_access("test-agent", dir.path(), &exe, &access)
+            .unwrap_err()
+            .code(),
+        "ANIMAOS_UNKNOWN"
+    );
+    session
+        .connect_with_access("test-agent", dir.path(), &exe, &access)
+        .unwrap();
+    let remote = server.state.lock().unwrap();
+    assert_eq!(remote.entries.len(), 1);
+    assert_eq!(
+        remote.entries[0]["reviewedTools"].as_array().unwrap().len(),
+        6
+    );
+    assert_eq!(
+        remote
+            .requests
+            .iter()
+            .filter(|(m, p, _)| m == "POST" && p.ends_with("/review"))
+            .count(),
+        6
+    );
 }

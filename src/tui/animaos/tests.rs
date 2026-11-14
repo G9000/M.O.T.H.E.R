@@ -81,15 +81,15 @@ fn role_selection_and_allowlist_are_explicit_and_no_paste_connects() {
     assert!(screen(&setup).contains("Synthetic record title"));
     setup.records = "0".into();
     assert!(setup.selected_access().is_err());
-    // Order: Knows me (companion) → Only what I share (shared) → Old style (legacy).
+    // Full garden (companion) → selected records (shared) → legacy tools.
     setup.input(press(KeyCode::Down)).unwrap();
     assert_eq!(setup.selected_access().unwrap(), ClientAccess::default());
-    assert!(screen(&setup).contains("Old style (not recommended)"));
+    assert!(screen(&setup).contains("Legacy tools only"));
     setup.input(press(KeyCode::Down)).unwrap();
     assert_eq!(setup.access_mode, AccessMode::Companion);
     assert!(setup.selected_access().unwrap().records.is_empty());
-    assert!(screen(&setup).contains("Knows me"));
-    assert!(screen(&setup).contains("same chat"));
+    assert!(screen(&setup).contains("Full garden"));
+    assert!(screen(&setup).contains("local memory"));
     assert!(!setup.busy);
     setup.input(press(KeyCode::Down)).unwrap();
     setup.records = "bad-id".into();
@@ -105,5 +105,52 @@ fn paste_cannot_trigger_connect_and_controls_are_filtered() {
     assert!(!setup.busy);
     setup.stage = Stage::Confirm;
     setup.paste("\r\n");
+    assert!(!setup.busy);
+}
+
+#[test]
+fn additive_persona_and_conversion_require_separate_owner_choices() {
+    let mut setup = Setup::new();
+    setup.stage = Stage::Access;
+    setup.access_mode = AccessMode::Companion;
+    setup.agents = vec![Agent {
+        id: "synthetic-a".into(),
+        name: "Synthetic".into(),
+    }];
+    assert_eq!(setup.persona_source, PersonaSource::Local);
+    assert!(screen(&setup).contains("Shared garden (additive)"));
+    setup.input(press(KeyCode::Char('p'))).unwrap();
+    assert_eq!(setup.persona_source, PersonaSource::Workspace);
+    setup.input(press(KeyCode::Down)).unwrap();
+    assert_eq!(setup.access_mode, AccessMode::Shared);
+    assert_eq!(setup.persona_source, PersonaSource::Local);
+    setup.input(press(KeyCode::Char('p'))).unwrap();
+    assert_eq!(setup.persona_source, PersonaSource::Local);
+    setup.records.clear();
+    setup.input(press(KeyCode::Enter)).unwrap();
+    assert!(!setup.convert_legacy);
+    assert!(screen(&setup).contains("Native AnimaOS memory stays active"));
+    setup.input(press(KeyCode::Char('c'))).unwrap();
+    assert!(
+        !setup.convert_legacy,
+        "conversion requires a concrete current binding preview"
+    );
+    let session = Session::new("http://127.0.0.1:8080", "synthetic-owner").unwrap();
+    setup
+        .sender
+        .send(Reply::Connected(
+            session,
+            Err(mother::error::Error::domain(
+                "ANIMAOS_PRIMARY_BINDING",
+                "Existing primary binding: synthetic connection / companion / synthetic-a",
+            )),
+        ))
+        .unwrap();
+    setup.poll();
+    assert_eq!(setup.stage, Stage::Confirm);
+    setup.input(press(KeyCode::Char('c'))).unwrap();
+    assert!(setup.convert_legacy);
+    setup.input(press(KeyCode::Char('c'))).unwrap();
+    assert!(!setup.convert_legacy);
     assert!(!setup.busy);
 }
