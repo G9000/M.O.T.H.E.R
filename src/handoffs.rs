@@ -101,10 +101,17 @@ pub(crate) fn export(conn: &Connection) -> Result<Option<Value>> {
 
 /// Check an export's assignments against its records before anything is restored.
 pub(crate) fn validate(assignments: &Value, records: &[Value]) -> Result<()> {
+    validate_with_limits(assignments, records, true)
+}
+pub(crate) fn validate_with_limits(
+    assignments: &Value,
+    records: &[Value],
+    small: bool,
+) -> Result<()> {
     let list = assignments
         .as_array()
         .ok_or_else(|| invalid("Invalid assignments"))?;
-    if list.len() > 10_000 {
+    if small && list.len() > 10_000 {
         return Err(invalid("Too many assignments"));
     }
     let mut seen = HashSet::new();

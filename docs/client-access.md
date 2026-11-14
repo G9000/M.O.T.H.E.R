@@ -1,5 +1,13 @@
 # Client context policies
 
+AnimaOS pairing installs an additive shared-garden provider by default. Its
+companion/full-garden and shared/allowlist choices select these access policies;
+they do not replace AnimaOS's native memory or learning. Personality adoption is
+a separate owner choice, local by default, and available only with a
+persona-visible companion grant. Existing primary-memory bindings require
+explicit conversion after setup displays their current identity. Pairing retains
+the existing grant scopes and does not widen an allowlist.
+
 M.O.T.H.E.R remains an independent workspace. Owners can bind a new private client credential to an external agent identity without depending on any particular host. Existing grants stay `legacy`; opening an older database does not change its schema version, generation, scopes, or persona access.
 
 Create a companion credential with full canonical context and the stored persona:
@@ -22,4 +30,12 @@ Shared proposal readers can retrieve only their own proposals and only while ref
 
 New companion/shared private configuration files use `version: 2`, with the same flat credential fields. Legacy files remain `version: 1`. Older executables that only accept version 1 reject these scoped files before serving context. The current loader accepts both versions and authenticates version 2 against an existing companion/shared policy; a missing policy cannot silently become legacy access. MCP rechecks this requirement on every request. Use a policy-aware executable with scoped files; changing a scoped file to version 1 removes the older-binary launch guard. This guard does not constrain trusted local owners who can edit credential files or access tokens and the database directly.
 
-The policy lives in an additive local table, alongside private grants. A separate scoped-grant requirement marker is committed with each new scoped grant. Every transactional policy read checks that marker: removing policy content or replacing it with legacy content fails closed, including withdrawal between predispatch authentication and record retrieval. Portable exports and restores omit grants, policies and requirement markers. Restores preserve canonical data and persona, create a fresh generation and require new owner-created credentials. No new MCP tool or caller-supplied agent filter is introduced.
+The policy lives in an additive local table, alongside private grants. A separate scoped-grant requirement marker is committed with each new scoped grant. Every transactional policy read checks that marker: removing policy content or replacing it with legacy content fails closed, including withdrawal between predispatch authentication and record retrieval. Portable exports and restores omit grants, policies and requirement markers. Restores preserve canonical data and persona, create a fresh generation and require new owner-created credentials. No caller-supplied agent filter is introduced.
+
+Graph v2 contracts use separate `garden:read`, `garden:propose` and `garden:write`
+scopes and graph-object policies. Existing context scopes do not grant graph
+access. The explicit owner library provisioning API and its independent policies
+are described in [the v2 contract guide](garden-v2-contracts.md). The default v1
+connection still reports graph operations as unavailable. The separate
+[G5 graph prototype](garden-proposals.md) provides explicit `mother garden`
+provisioning and transport without upgrading existing keys or v1 connections.

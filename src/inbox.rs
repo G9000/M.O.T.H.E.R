@@ -99,7 +99,7 @@ fn authenticate_proposal(conn: &Connection, auth: &Auth, kind: Kind) -> Result<(
         Err(e) => Err(e),
     }
 }
-fn parse_proposal(mut raw: Value) -> Result<Value> {
+pub(crate) fn parse_proposal(mut raw: Value) -> Result<Value> {
     let source = string(&raw, "source")?.trim().to_owned();
     if source.is_empty() || source.encode_utf16().count() > 500 {
         return Err(invalid("Source must contain 1 to 500 characters"));
@@ -130,7 +130,7 @@ fn parse_proposal(mut raw: Value) -> Result<Value> {
     }
     Ok(v)
 }
-fn parse_review(mut v: Value) -> Result<Value> {
+pub(crate) fn parse_review(mut v: Value) -> Result<Value> {
     contracts::strict(
         &v,
         &[
@@ -181,7 +181,7 @@ fn refs(conn: &Connection, draft: &Value) -> Result<()> {
     }
     Ok(())
 }
-fn candidate(record: &Value) -> Result<Value> {
+pub(crate) fn candidate(record: &Value) -> Result<Value> {
     let mut v = record.clone();
     let o = v.as_object_mut().ok_or_else(|| invalid("Invalid record"))?;
     for key in ["id", "revision", "actor", "createdAt", "updatedAt"] {
@@ -209,7 +209,7 @@ fn duplicate_visible(
     }
     Ok(None)
 }
-fn dedup(p: &Value) -> String {
+pub(crate) fn dedup(p: &Value) -> String {
     contracts::hash(&json!({"actor":p["actor"],"workspaceId":p["workspaceId"],"generation":p["generation"],"source":p["source"],"basis":p["basis"],"record":p["record"],"targetId":p["targetId"],"expectedRevision":p["expectedRevision"]}).to_string())
 }
 fn read(conn: &Connection, id: &str) -> Result<Value> {
@@ -608,11 +608,28 @@ pub(crate) fn validate(
     records: &[Value],
     canonical_ops: &[Value],
 ) -> Result<()> {
+    validate_with_limits(extension, workspace, records, canonical_ops, true)
+}
+pub(crate) fn validate_with_limits(
+    extension: &Value,
+    workspace: &Value,
+    records: &[Value],
+    canonical_ops: &[Value],
+    small: bool,
+) -> Result<()> {
     use std::collections::{HashMap, HashSet};
     contracts::strict(extension, &["version", "proposals", "operations"])?;
     integer(extension, "version", 1, 1)?;
-    let proposals = list(extension, "proposals", MAX_PROPOSALS)?;
-    let operations = list(extension, "operations", MAX_OPERATIONS)?;
+    let proposals = list(
+        extension,
+        "proposals",
+        if small { MAX_PROPOSALS } else { usize::MAX },
+    )?;
+    let operations = list(
+        extension,
+        "operations",
+        if small { MAX_OPERATIONS } else { usize::MAX },
+    )?;
     let mut by_id = HashMap::new();
     let mut pending = HashSet::new();
     for p in proposals {
@@ -865,12 +882,15 @@ pub(crate) fn validate(
             .iter()
             .map(|o| o["receipt"].to_string().len() as u64)
             .sum::<u64>();
-    Usage {
-        records: (records.len() + proposals.len()) as u64,
-        operations: (canonical_ops.len() + operations.len()) as u64,
-        payload_bytes: payload,
+    if small {
+        Usage {
+            records: (records.len() + proposals.len()) as u64,
+            operations: (canonical_ops.len() + operations.len()) as u64,
+            payload_bytes: payload,
+        }
+        .check()?;
     }
-    .check()
+    Ok(())
 }
 pub(crate) fn restore(conn: &Connection, extension: &Value) -> Result<()> {
     conn.execute_batch(SCHEMA)?;

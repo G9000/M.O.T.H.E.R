@@ -1,0 +1,33 @@
+{
+  "cold_cache": "not OS-cache flushed; reopen only",
+  "disk_bytes_including_wal": 15847424,
+  "durability": "existing WAL + synchronous FULL",
+  "implementation": "unchanged Mother v1 Store API",
+  "individual_authenticated_writes": {
+    "p50_ms": 0.32220000000000004,
+    "p95_ms": 0.494,
+    "p99_ms": 0.8897,
+    "samples": 10000
+  },
+  "literal_substring_candidates": {
+    "p50_ms": 183.1963,
+    "p95_ms": 206.6198,
+    "p99_ms": 239.36769999999999,
+    "samples": 128
+  },
+  "load_ms": 3677.4372,
+  "records": 10000,
+  "reopened_first_pass_lookup": {
+    "p50_ms": 0.0213,
+    "p95_ms": 0.0327,
+    "p99_ms": 0.06470000000000001,
+    "samples": 512
+  },
+  "scope": "v1 auth, validation, receipts and capacity limits included; no graph semantics or cross-engine speed ratio",
+  "warm_lookup": {
+    "p50_ms": 0.0202,
+    "p95_ms": 0.0262,
+    "p99_ms": 0.06420000000000001,
+    "samples": 512
+  }
+}

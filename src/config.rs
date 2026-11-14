@@ -102,7 +102,7 @@ pub fn data_directory() -> Result<PathBuf> {
 /// Exclusively create an owner-private file without replacing an existing path.
 pub fn create_private_file(path: &Path) -> Result<File> {
     let mut options = OpenOptions::new();
-    options.write(true).create_new(true);
+    options.read(true).write(true).create_new(true);
     #[cfg(unix)]
     {
         use std::os::unix::fs::OpenOptionsExt;

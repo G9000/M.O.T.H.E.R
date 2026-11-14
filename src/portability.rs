@@ -52,7 +52,7 @@ fn bundle_sources(
     }
     sources(&all, operations)
 }
-fn validate(mut v: Value) -> Result<Value> {
+pub(crate) fn validate(mut v: Value) -> Result<Value> {
     contracts::strict(
         &v,
         &[

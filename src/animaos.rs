@@ -105,6 +105,8 @@ struct Binding {
     #[serde(default)]
     pending_binding: Option<WorkspaceBinding>,
     #[serde(default)]
+    pending_provider: Option<ProviderBinding>,
+    #[serde(default)]
     pending_review: Option<ReaderReview>,
 }
 #[derive(Debug, Clone, Deserialize, Serialize)]
@@ -114,6 +116,11 @@ struct ReaderReview {
     expected_version: u64,
     discovery_id: String,
     descriptor_digest: String,
+    #[serde(default = "context_reader")]
+    remote_name: String,
+}
+fn context_reader() -> String {
+    "mother_get_context".into()
 }
 impl ReaderReview {
     fn applied(&self, connection: &Connection) -> bool {
@@ -121,7 +128,7 @@ impl ReaderReview {
             && self.expected_version.checked_add(1) == Some(connection.version)
             && connection.discovery_id.as_deref() == Some(self.discovery_id.as_str())
             && has_discovery(connection)
-            && reader_reviewed(connection, &self.descriptor_digest)
+            && tool_reviewed(connection, &self.remote_name, &self.descriptor_digest)
     }
 }
 impl Binding {
@@ -152,7 +159,35 @@ struct WorkspaceBinding {
 struct WorkspaceContext {
     revision: String,
     binding: Option<WorkspaceBinding>,
+    #[serde(default)]
+    provider_binding: Option<ProviderBinding>,
+    #[serde(skip)]
+    supports_provider: bool,
     connections: Vec<BindingConnection>,
+}
+
+/// Personality is independently chosen when connecting the shared garden.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Deserialize, Serialize)]
+#[serde(rename_all = "lowercase")]
+pub enum PersonaSource {
+    /// Keep the agent's configured personality.
+    Local,
+    /// Use the explicitly permitted workspace persona.
+    Workspace,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct ProviderBinding {
+    version: u8,
+    provider: String,
+    connection_id: String,
+    workspace_id: String,
+    generation: String,
+    subject: String,
+    publication: String,
+    persona_source: PersonaSource,
+    access_mode: AccessMode,
 }
 #[derive(Deserialize)]
 struct BindingConnection {
@@ -275,6 +310,7 @@ impl Local {
                 pending: None,
                 access: access.cloned(),
                 pending_binding: None,
+                pending_provider: None,
                 pending_review: None,
             };
             // Reject unpersistable setup before provisioning any credential.
@@ -659,6 +695,143 @@ impl Session {
         exe: &Path,
         access: &ClientAccess,
     ) -> Result<String> {
+        self.connect_additive(agent_id, root, exe, access, PersonaSource::Local, false)
+    }
+
+    /// Add the garden while retaining native memory. Conversion of a matching legacy
+    /// binding requires the owner's explicit selection; no grant is widened.
+    pub fn connect_additive(
+        &self,
+        agent_id: &str,
+        root: &Path,
+        exe: &Path,
+        access: &ClientAccess,
+        persona: PersonaSource,
+        convert_legacy: bool,
+    ) -> Result<String> {
+        valid_id(agent_id)?;
+        if access.subject.as_deref() != Some(agent_id)
+            || access.mode == AccessMode::Legacy
+            || (persona == PersonaSource::Workspace && access.mode != AccessMode::Companion)
+        {
+            return Err(failure(
+                "Workspace personality requires companion access for this exact agent.",
+            ));
+        }
+        let path = format!("/api/agents/{}/workspace-context", segment(agent_id));
+        // Check protocol support before provisioning a key or connection.
+        let initial = self.workspace_context(&path)?;
+        if !initial.supports_provider {
+            return Err(failure(
+                "This AnimaOS daemon does not support additive memory providers. Update AnimaOS before pairing.",
+            ));
+        }
+        let mut local = Local::open_with_access(agent_id, root, exe, &self.endpoint, Some(access))?;
+        if let Some(pending) = local.binding.pending_provider.clone() {
+            if initial.provider_binding.as_ref() != Some(&pending) || initial.binding.is_some() {
+                return Err(unknown());
+            }
+            local.binding.pending_provider = None;
+            local.save()?;
+        }
+        if let Some(pending) = local.binding.pending_binding.clone() {
+            if initial.binding.as_ref() != Some(&pending) {
+                return Err(unknown());
+            }
+            local.binding.pending_binding = None;
+            local.save()?;
+        }
+        let mut connection = self.connect_local(agent_id, &mut local)?;
+        discovery_status(&connection)?;
+        if connection.tool_access.as_deref() == Some("automatic") {
+            for name in REQUIRED_TOOLS {
+                connection = self.review_tool(agent_id, &mut local, connection, name)?;
+            }
+        }
+        let current = self.workspace_context(&path)?;
+        if !current.supports_provider {
+            return Err(unknown());
+        }
+        let desired = ProviderBinding {
+            version: 1,
+            provider: "mother".into(),
+            connection_id: connection.id.clone(),
+            workspace_id: local.binding.workspace_id.clone(),
+            generation: local.binding.generation.clone(),
+            subject: agent_id.into(),
+            publication: "selected".into(),
+            persona_source: persona,
+            access_mode: access.mode,
+        };
+        if current.provider_binding.as_ref() == Some(&desired) && current.binding.is_none() {
+            return Ok(additive_status(persona));
+        }
+        if current.provider_binding.is_some() {
+            return Err(failure(
+                "This agent already has a different additive provider binding. Review it in AnimaOS; it was preserved.",
+            ));
+        }
+        if let Some(legacy) = &current.binding {
+            if legacy.connection_id != desired.connection_id
+                || legacy.workspace_id != desired.workspace_id
+                || legacy.generation != desired.generation
+                || legacy.subject != desired.subject
+                || legacy.mode != desired.access_mode
+                || legacy.tool != "mother_get_context"
+            {
+                return Err(failure(
+                    "This agent has a legacy primary-memory binding. Explicitly convert the matching connection after reviewing its identity; the existing binding was preserved.",
+                ));
+            }
+            if !convert_legacy {
+                return Err(Error::domain(
+                    "ANIMAOS_PRIMARY_BINDING",
+                    format!(
+                        "Legacy primary-memory binding: connection {}, access {:?}, agent {}. Conversion resumes native memory and learning, keeps the current grant, and uses the selected personality source. Review this binding before converting.",
+                        legacy.connection_id, legacy.mode, legacy.subject
+                    ),
+                ));
+            }
+        }
+        if connection.state != "ready"
+            || !current.connections.iter().any(|c| {
+                c.id == connection.id
+                    && c.state == "ready"
+                    && c.tool.as_deref() == Some("mother_get_context")
+            })
+        {
+            return Ok("MOTHER tools discovered. Complete owner tool review in AnimaOS, then return to finish additive setup. Native memory remains active.".into());
+        }
+        local.binding.pending_provider = Some(desired.clone());
+        local.save()?;
+        let result = self.request("PUT", &path, Some(&json!({"expectedRevision":current.revision,"binding":null,"providerBinding":desired})));
+        let saved = match result {
+            Ok(value) => {
+                serde_json::from_value::<WorkspaceContext>(value).map_err(|_| unknown())?
+            }
+            Err(error) if error.code() == "ANIMAOS_UNKNOWN" => self.workspace_context(&path)?,
+            Err(error) => {
+                local.binding.pending_provider = None;
+                local.save()?;
+                return Err(error);
+            }
+        };
+        if saved.provider_binding.as_ref() != Some(&desired) || saved.binding.is_some() {
+            return Err(unknown());
+        }
+        local.binding.pending_provider = None;
+        local.save()?;
+        Ok(additive_status(persona))
+    }
+
+    #[cfg(test)]
+    fn connect_primary_with_access(
+        &self,
+        agent_id: &str,
+        root: &Path,
+        exe: &Path,
+        access: &ClientAccess,
+    ) -> Result<String> {
         valid_id(agent_id)?;
         let mut local = Local::open_with_access(agent_id, root, exe, &self.endpoint, Some(access))?;
         let path = format!("/api/agents/{}/workspace-context", segment(agent_id));
@@ -732,16 +905,26 @@ impl Session {
         local.save()?;
         Ok(binding_status(access.mode))
     }
+    #[cfg(test)]
     fn review_reader(
         &self,
         agent: &str,
         local: &mut Local,
         connection: Connection,
     ) -> Result<Connection> {
+        self.review_tool(agent, local, connection, "mother_get_context")
+    }
+    fn review_tool(
+        &self,
+        agent: &str,
+        local: &mut Local,
+        connection: Connection,
+        remote_name: &str,
+    ) -> Result<Connection> {
         let candidates = connection
             .candidates
             .iter()
-            .filter(|tool| tool.remote_name == "mother_get_context")
+            .filter(|tool| tool.remote_name == remote_name)
             .collect::<Vec<_>>();
         let [reader] = candidates.as_slice() else {
             return Err(failure(
@@ -758,7 +941,7 @@ impl Session {
                 "MOTHER context reader descriptor digest is unavailable or invalid; no review was sent.",
             ));
         }
-        if reader_reviewed(&connection, digest) {
+        if tool_reviewed(&connection, remote_name, digest) {
             return Ok(connection);
         }
         let review = ReaderReview {
@@ -766,6 +949,7 @@ impl Session {
             expected_version: connection.version,
             discovery_id: connection.discovery_id.clone().ok_or_else(unknown)?,
             descriptor_digest: digest.clone(),
+            remote_name: remote_name.into(),
         };
         let path = format!(
             "/api/agents/{}/mcp-connections/{}/review",
@@ -794,10 +978,12 @@ impl Session {
         }
     }
     fn workspace_context(&self, path: &str) -> Result<WorkspaceContext> {
-        let context: WorkspaceContext = serde_json::from_value(self.request("GET", path, None)?)
-            .map_err(|_| {
-                failure("AnimaOS workspace-context settings are unavailable or incompatible.")
-            })?;
+        let value = self.request("GET", path, None)?;
+        let supports_provider = value.get("providerBinding").is_some();
+        let mut context: WorkspaceContext = serde_json::from_value(value).map_err(|_| {
+            failure("AnimaOS workspace-context settings are unavailable or incompatible.")
+        })?;
+        context.supports_provider = supports_provider;
         if context.revision.is_empty()
             || context.revision.len() > 256
             || context.connections.len() > 256
@@ -1055,34 +1241,52 @@ impl Session {
     fn clear_binding_to(&self, agent_id: &str, old: &[OldConnection]) -> Result<()> {
         let path = format!("/api/agents/{}/workspace-context", segment(agent_id));
         let current = self.workspace_context(&path)?;
-        if current
+        let clear_legacy = current
             .binding
             .as_ref()
-            .is_some_and(|b| old.iter().any(|c| c.id == b.connection_id))
-        {
-            self.request(
-                "PUT",
-                &path,
-                Some(&json!({"expectedRevision": current.revision, "binding": null})),
-            )?;
+            .is_some_and(|b| old.iter().any(|c| c.id == b.connection_id));
+        let clear_provider = current
+            .provider_binding
+            .as_ref()
+            .is_some_and(|b| old.iter().any(|c| c.id == b.connection_id));
+        if clear_legacy || clear_provider {
+            let mut input = json!({"expectedRevision":current.revision,"binding":current.binding});
+            if clear_legacy {
+                input["binding"] = Value::Null;
+            }
+            if clear_provider {
+                input["providerBinding"] = Value::Null;
+            }
+            self.request("PUT", &path, Some(&input))?;
         }
         Ok(())
     }
 }
 
-fn reader_reviewed(connection: &Connection, digest: &str) -> bool {
+fn tool_reviewed(connection: &Connection, remote_name: &str, digest: &str) -> bool {
     let matches =
-        |tool: &&Tool| tool.remote_name == "mother_get_context" && tool.descriptor_digest == digest;
+        |tool: &&Tool| tool.remote_name == remote_name && tool.descriptor_digest == digest;
     connection.candidates.iter().filter(matches).count() == 1
         && connection.reviewed_tools.iter().filter(matches).count() == 1
 }
 
+#[cfg(test)]
 fn binding_status(mode: AccessMode) -> String {
     match mode {
         AccessMode::Companion => "Companion configured for this agent. MOTHER supplies personality and primary durable memory. If unavailable, the same chat uses the agent's configured local personality; memory is unavailable and writes are not mirrored or replayed. Conversation host test pending.".into(),
         AccessMode::Shared => "Shared context configured for this agent's explicit record allowlist; its personality stays local. Empty allowlist shares no records. Conversation host test pending.".into(),
         AccessMode::Legacy => "Legacy context tools connected; no companion identity binding.".into(),
     }
+}
+
+fn additive_status(persona: PersonaSource) -> String {
+    format!(
+        "Shared garden configured for this agent. Native memory and learning remain active; only selected memories are proposed for owner review. Personality: {}. Conversation host test pending.",
+        match persona {
+            PersonaSource::Local => "local",
+            PersonaSource::Workspace => "MOTHER workspace",
+        }
+    )
 }
 
 /// The step a request belongs to, in plain words, for error messages.

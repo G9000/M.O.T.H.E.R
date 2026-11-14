@@ -125,6 +125,7 @@ For your first real handoff, use synthetic material: save a tea preference and a
 | mother_search_context | Local hybrid, semantic or literal search with explicit coverage | read |
 | mother_get_record | Full current record, including retracted records | read |
 | mother_get_record_history | Earlier revisions of one record, or one earlier revision in full | read (not shared-access clients) |
+| mother_get_capabilities | Available features and defined future contracts, without persona or record content | read |
 | mother_get_receipt | This client's committed operation outcome | read |
 | mother_write_record | Create or revise a typed record | matching kind:write |
 | mother_checkpoint | Save a continuation checkpoint | checkpoint:write |
@@ -185,3 +186,14 @@ Context includes checkpoints, decisions and other record categories as well as m
 ## Optional agent context policies
 
 New credentials can select companion identity or an explicit context-only record allowlist. Existing grants retain legacy access. See [client context policies](client-access.md) for owner grant flags, scoped counts, proposal visibility and restore behavior.
+
+## Optional graph prototype
+
+The explicit `mother garden` commands provision a separate graph file, graph-only
+credentials, stdio connection and owner review inbox. They do not migrate the v1
+workspace or change existing harness connections. See [graph proposals and owner
+approval](garden-proposals.md) for setup, permissions and validation boundaries.
+The subsequent [G6 query and change guide](garden-queries.md) covers indexed
+retrieval, snapshot cursors, change checkpoints and selected local vector preparation.
+The [G7 compatibility guide](garden-compatibility.md) covers the explicitly enabled
+native v1 view; [full backups](garden-backups.md) preserve both views and artifact bytes.

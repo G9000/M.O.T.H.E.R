@@ -1,0 +1,6 @@
+{
+  "note": "Measured binary hash recorded before optional SQLite build; rebuilding is not asserted bit-for-bit reproducible",
+  "measured_default_release_sha256": "FC68788622D97724145EA48F03B24FA617B0A8B21FCC03018EA86083D4BEF306",
+  "restored_default_release_sha256": "17D6B8D23A263A42E2157694FF0C1DA53B2BFA8144877BCCB1DF5EC75B9109D5",
+  "experiment_lock_sha256": "F40E6A3572BBF16428214C26FDC23D6AA2522AEB38AED4D3985C37EF321B9ADA"
+}

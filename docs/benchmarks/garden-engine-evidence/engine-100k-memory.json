@@ -1,0 +1,11 @@
+{
+  "samples": 244,
+  "max_observed_sum_working_set_bytes": 346017792,
+  "parent_pid": 28872,
+  "scope": "Windows benchmark parent and reopen child from exact executable; process peaks, not system RAM",
+  "elapsed_seconds": 28.3290283,
+  "sample_interval_ms": 100,
+  "peak_working_set_bytes_by_pid": {
+    "28872": 346202112
+  }
+}
