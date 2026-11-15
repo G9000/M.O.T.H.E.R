@@ -1,0 +1,12 @@
+{
+  "entities": 100000,
+  "started_at_utc": "2026-11-15T07:50:23Z",
+  "exit_code": 137,
+  "guard": "12GiB observed working-set guard",
+  "resource_samples": 3917,
+  "sample_interval_ms": 500,
+  "peak_observed_rss_bytes": 12932501504,
+  "observed_process_peak_rss_bytes": 12932501504,
+  "peak_observed_database_bytes": 10737487872,
+  "forced_termination_progress": "Last checkpoint only; acknowledged writes after it may exist"
+}

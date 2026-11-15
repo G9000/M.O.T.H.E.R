@@ -29,7 +29,7 @@ fn request(workspace: &str, generation: &str, name: &str) -> BatchRequest {
 }
 #[test]
 fn full_backup_restores_history_receipts_and_pending_proposals_without_credentials() {
-    let dir = tempfile::tempdir().unwrap();
+    let dir = tempfile::tempdir_in(std::fs::canonicalize(std::env::temp_dir()).unwrap()).unwrap();
     let (store, auth, workspace, generation) = setup(&dir.path().join("source.redb"));
     let original = store
         .apply(&auth, &request(&workspace, &generation, "original"))
@@ -84,7 +84,9 @@ fn full_backup_restores_history_receipts_and_pending_proposals_without_credentia
                     let encoded = row["value"].as_str().unwrap();
                     let bytes: Vec<u8> = encoded
                         .as_bytes()
-                        .chunks_exact(2)
+                        .as_chunks::<2>()
+                        .0
+                        .iter()
                         .map(|p| u8::from_str_radix(std::str::from_utf8(p).unwrap(), 16).unwrap())
                         .collect();
                     String::from_utf8_lossy(&bytes).into_owned()
@@ -100,7 +102,7 @@ fn full_backup_restores_history_receipts_and_pending_proposals_without_credentia
 }
 #[test]
 fn corrupt_partial_unknown_and_existing_destinations_are_rejected_without_publish() {
-    let dir = tempfile::tempdir().unwrap();
+    let dir = tempfile::tempdir_in(std::fs::canonicalize(std::env::temp_dir()).unwrap()).unwrap();
     let (store, _, _, _) = setup(&dir.path().join("source.redb"));
     let bundle = dir.path().join("backup");
     store.backup_to(&bundle).unwrap();
@@ -120,7 +122,7 @@ fn corrupt_partial_unknown_and_existing_destinations_are_rejected_without_publis
 }
 #[test]
 fn stored_blob_bytes_are_verified_and_restored_atomically() {
-    let dir = tempfile::tempdir().unwrap();
+    let dir = tempfile::tempdir_in(std::fs::canonicalize(std::env::temp_dir()).unwrap()).unwrap();
     let (store, _, _, _) = setup(&dir.path().join("source.redb"));
     let bytes = vec![23; 2_300_000];
     let blob = store.put_blob(Cursor::new(&bytes)).unwrap();
@@ -142,7 +144,7 @@ fn stored_blob_bytes_are_verified_and_restored_atomically() {
 #[test]
 fn missing_artifact_in_pending_proposal_prevents_backup_until_owner_ingests_bytes() {
     use sha2::{Digest, Sha256};
-    let dir = tempfile::tempdir().unwrap();
+    let dir = tempfile::tempdir_in(std::fs::canonicalize(std::env::temp_dir()).unwrap()).unwrap();
     let (store, auth, workspace, generation) = setup(&dir.path().join("source.redb"));
     let bytes = b"synthetic artifact source";
     let sha = format!("{:x}", Sha256::digest(bytes));
@@ -163,7 +165,7 @@ fn missing_artifact_in_pending_proposal_prevents_backup_until_owner_ingests_byte
 }
 #[test]
 fn multiple_restored_generations_retain_original_receipts_and_block_old_proposals() {
-    let dir = tempfile::tempdir().unwrap();
+    let dir = tempfile::tempdir_in(std::fs::canonicalize(std::env::temp_dir()).unwrap()).unwrap();
     let (store, auth, workspace, generation) = setup(&dir.path().join("source.redb"));
     store
         .apply(&auth, &request(&workspace, &generation, "first"))
@@ -212,7 +214,7 @@ fn multiple_restored_generations_retain_original_receipts_and_block_old_proposal
 }
 #[test]
 fn streaming_backup_exceeds_legacy_lifetime_limit_and_preserves_chunk_bounds() {
-    let dir = tempfile::tempdir().unwrap();
+    let dir = tempfile::tempdir_in(std::fs::canonicalize(std::env::temp_dir()).unwrap()).unwrap();
     let (store, _, _, _) = setup(&dir.path().join("source.redb"));
     store
         .put_blob(std::io::Read::take(std::io::repeat(37), 65 * 1024 * 1024))

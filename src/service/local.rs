@@ -153,8 +153,16 @@ fn descriptor(path: &Path) -> Result<ServiceInfo> {
         || Uuid::parse_str(&info.service_id).is_err()
         || Uuid::parse_str(&info.workspace_id).is_err()
         || Uuid::parse_str(&info.generation).is_err()
-        || info.address != address(parent, &info.service_id)?
     {
+        return Err(invalid());
+    }
+    let valid_address = info.address == address(parent, &info.service_id)?;
+    #[cfg(unix)]
+    // Version-1 upgrades may retain a descriptor using the former exact derived pathname.
+    let valid_address = valid_address
+        || unix_address(parent, &format!(".mother-{}.sock", info.service_id))
+            .is_ok_and(|legacy| info.address == legacy);
+    if !valid_address {
         return Err(invalid());
     }
     Ok(info)
@@ -168,12 +176,25 @@ fn address(parent: &Path, service_id: &str) -> Result<String> {
     }
     #[cfg(unix)]
     {
-        parent
-            .join(format!(".mother-{service_id}.sock"))
-            .to_str()
-            .map(str::to_owned)
-            .ok_or_else(invalid)
+        use sha2::{Digest, Sha256};
+        // Keep 96 digest bits in the pathname; the full UUID remains in the owner proof.
+        let digest = format!("{:x}", Sha256::digest(service_id.as_bytes()));
+        unix_address(parent, &format!(".m-{}", &digest[..24]))
     }
+}
+
+#[cfg(unix)]
+fn unix_address(parent: &Path, filename: &str) -> Result<String> {
+    let path = parent.join(filename);
+    let address = path.to_str().ok_or_else(invalid)?;
+    // Validate the target's sun_path capacity without binding or creating owner state.
+    std::os::unix::net::SocketAddr::from_pathname(address).map_err(|_| {
+        Error::domain(
+            "INVALID_INPUT",
+            "Local service socket path exceeds platform capacity; choose a shorter owner-private directory.",
+        )
+    })?;
+    Ok(address.to_owned())
 }
 
 fn socket_name(address: &str) -> io::Result<interprocess::local_socket::Name<'_>> {
@@ -345,6 +366,8 @@ impl LocalService {
     pub fn bind(database_path: &Path, endpoint_path: &Path) -> Result<Self> {
         crate::garden::migrate::check_destination(database_path)?;
         let parent = private_parent(endpoint_path)?;
+        let service_id = Uuid::new_v4().to_string();
+        let address = address(parent, &service_id)?;
         let canonical_db = fs::canonicalize(database_path)?;
         crate::private_paths::single_link(&canonical_db)?;
         let lease_path = canonical_db.with_added_extension("service-owner.lock");
@@ -368,10 +391,9 @@ impl LocalService {
         crate::garden::migrate::check_destination(&canonical_db)?;
         let workspace = store.owner_inbox_list().map_err(domain_error)?;
         let workspace = &workspace["workspace"];
-        let service_id = Uuid::new_v4().to_string();
         let info = ServiceInfo {
             version: 1,
-            address: address(parent, &service_id)?,
+            address,
             service_id,
             workspace_id: workspace["id"].as_str().ok_or_else(unavailable)?.to_owned(),
             generation: workspace["generation"]
@@ -535,10 +557,10 @@ impl LocalService {
             ));
         }
         let auth = &request.auth;
-        let identity = match self.store.identity(auth) {
-            Ok(identity) => identity,
+        let (identity, graph_available) = match self.store.identity(auth) {
+            Ok(identity) => (identity, true),
             Err(error) if error.code == GardenErrorCode::Forbidden && self.info.v1_available => {
-                self.store.v1_identity(auth)?
+                (self.store.v1_identity(auth)?, false)
             }
             Err(error) => return Err(domain_error(error)),
         };
@@ -550,14 +572,14 @@ impl LocalService {
             }
             return Ok(json!({"version":1,"workspace":identity,
                 "v1":{"available":self.info.v1_available,"contractVersion":1},
-                "garden":{"contractVersion":2,"available":true,"status":"prototype",
+                "garden":{"contractVersion":2,"available":graph_available,"status":"prototype",
                     "optionalVectorProfile":crate::search::embedding_profile(),
                     "vectorPreparation":"explicit_local_sdk_or_owner_cli",
-                    "availableTools":GRAPH_TOOLS,
-                    "capabilities":["garden.entities.v2","garden.assertions.v2","garden.proposals.v2","garden.query.v2","garden.changes.v2"],
+                    "availableTools":if graph_available {GRAPH_TOOLS.as_slice()} else {&[]},
+                    "capabilities":if graph_available {vec!["garden.entities.v2","garden.assertions.v2","garden.proposals.v2","garden.query.v2","garden.changes.v2"]} else {vec![]},
                     "definedCapabilities":["garden.entities.v2","garden.assertions.v2","garden.query.v2","garden.changes.v2","garden.proposals.v2"],
                     "definedTools":GRAPH_TOOLS,
-                    "reason":if self.info.v1_available {"native_v1_compatibility_with_independent_graph_authority"} else {"graph_only_prototype_without_v1_compatibility_or_migration"}}}));
+                    "reason":if !graph_available {"native_context_only_current_grant"} else if self.info.v1_available {"native_v1_compatibility_with_independent_graph_authority"} else {"graph_only_prototype_without_v1_compatibility_or_migration"}}}));
         }
         if !GRAPH_TOOLS.contains(&name) {
             if !self.info.v1_available {

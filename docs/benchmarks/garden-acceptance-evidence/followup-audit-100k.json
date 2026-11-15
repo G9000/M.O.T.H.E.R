@@ -1,0 +1,22 @@
+{
+  "actual": {
+    "current_records": 608321,
+    "history_records": 608448,
+    "receipts": 9700,
+    "sequence": 9700
+  },
+  "api": "GardenStore::audit with full graph read authority",
+  "audit_seconds": 97.249693561,
+  "expected": {
+    "current_records": 608321,
+    "history_records": 608448,
+    "receipts": 9700,
+    "sequence": 9700
+  },
+  "failure": null,
+  "fixture": "retained_benchmark_disposable_copy",
+  "memory_scope": "external process monitor includes store open, grant preparation and audit",
+  "passed": true,
+  "preparation": "fresh synthetic read grant on copy only; original benchmark database untouched",
+  "synthetic": true
+}

@@ -1,17 +1,9 @@
-# Test a local connection
+# Verify a local connection
 
-Press **t** in the terminal home. Select an existing private client config with the arrows and press **Enter**. M.O.T.H.E.R launches the **currently running executable** with `mcp --config <selected file>`, performs MCP initialization, lists its tools and calls `mother_get_context` with that grant. No executable command is taken from the config. The background check has a ten-second deadline; Escape cancels, stops and reaps its owned child, then returns home. Page Up and Page Down scroll the report.
+The former `mother doctor` command and terminal health screen were removed. Use the intended harness's MCP connection inspection with the native stdio bridge configured as described in [setup](setup.md) and [service operation](garden-service.md).
 
-The list includes up to 128 private configs from the private data directory's `clients` folder, plus the saved ChatGPT config when present. It labels malformed configs without exposing their contents. Configs targeting another workspace are marked and cannot be tested from this workspace's dashboard; use the explicit command below if that workspace is intended.
+Check the executable path, its identity, the selected private service config, running owner service and expected workspace/generation. Discover all tool pages by following `nextCursor`, then perform an authorized context or graph read. Native discovery is permission-aware; a listed contract does not confer its scope. Never publish credentials, private record content or raw private config files as diagnostic output.
 
-For scripts:
+Successful initialization and discovery show that a local protocol session reached the executable. An actual authorized read establishes that session's read path. A real host/model using the result, a selected proposal, explicit owner approval and cross-host recall each need their own evidence. Missing, denied, unsupported and inconclusive outcomes must remain explicit.
 
-```powershell
-mother doctor --config "C:\private\clients\codex.private.json" --json
-```
-
-The report contains the executable path and SHA-256, reported server version, client identity, workspace ID, restore generation, and canonical/recallable counts for each category. Workspace and generation must match a read-only identity lookup in the selected config's database. Version alone does not distinguish builds that share a package version; use the executable hash and inventory support together. Context persona, record content, tokens, raw subprocess errors and stderr are never displayed. Context text is received only by the local verifier and discarded after projection to the allowed report fields.
-
-`LOCAL MCP read verified` proves that this executable completed a local protocol read with the selected grant. It does **not** prove a running ChatGPT, Hermes, Codex or AnimaOS conversation has loaded this executable or exercised the connection. Test each actual host separately. The check does not change harness settings, grants, records or model files and does not download models.
-
-Older servers with no inventory report `inventory_unsupported`, with an explicit verified-read flag when the context read succeeded. Missing or malformed counts are never shown as zero. Malformed messages, denied reads, mismatched workspace identity, output/message limits, cancellation and deadlines produce fixed redacted status codes. A fully verified report exits successfully; incomplete checks exit with a failure status while preserving the JSON report on stdout. The verifier limits the complete session to 2 MiB of stdout and 32 messages and joins its pipe reader after stopping its child.
+Use the original operation UUID and exact request to reconcile uncertain writes through their receipt/proposal tools. Reconnecting never authorizes automatic replay. [Validation](validation.md) separates source, synthetic protocol, platform and actual-host coverage; no legacy diagnostic command is required by the native workflow.

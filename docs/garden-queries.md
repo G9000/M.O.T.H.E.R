@@ -1,10 +1,8 @@
 # Indexed graph queries and changes (G6)
 
-The explicit graph-only connection now serves `mother_garden_query` and
+The authorized native graph connection serves `mother_garden_query` and
 `mother_garden_changes` alongside the five G5 operations and capability discovery.
-Both require current `garden:read` authority. The default v1 connection and its
-tool catalogue remain unchanged. No installed connection or live store is
-reconfigured by this implementation.
+Both require current `garden:read` authority. V1 context and graph authority remain independent; a context-only credential does not gain graph access. The native redb Garden is the sole runtime and the local owner service supports multiple bridges. No source update reconfigures an installed connection or migrates a live store. See [native compatibility](garden-compatibility.md) and [service operation](garden-service.md).
 
 ## Query semantics
 
@@ -106,7 +104,7 @@ hash-verified local assets; it does not download or call a provider:
 mother garden index --config <graph-private.json> --objects <selected-typed-ids.json>
 ```
 
-The source file contains an array of typed `{kind,id}` references. Preparation
+Stop the owner service before this direct-database command, then restart it afterward. Use a direct native credential, not a service config. The source file contains an array of typed `{kind,id}` references. Preparation
 requires authorized canonical sources, at most 100 references and 4 MiB of
 selected source records. Authority, generation and revisions are checked again
 after computation. Missing assets return `local_model_unavailable` without
@@ -124,9 +122,9 @@ and literal paths use synchronous canonical indexes. Stale vector revisions are
 retained within this prototype and may consume a bounded candidate scan; cache
 retention and large-scale performance remain later qualification work.
 
-## Upgrade and acceptance
+## Historical G6 upgrade and acceptance
 
-Existing G5 graph files receive additive current/historical indexes and lease
+The G6 results below describe that milestone source and are not fresh acceptance of the runtime removal. Existing G5 graph files receive additive current/historical indexes and lease
 tables on their first open by this runtime, preserving identity, generation,
 grants and canonical history. Later opens skip backfill. Audit checks exact
 current/historical memberships and numeric temporal indexes. This is separate

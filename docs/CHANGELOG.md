@@ -1,5 +1,21 @@
 # Documentation changes
 
+## 15 November 2026
+
+- Reconciled current setup, harness, context, retrieval, review, recovery and contributor guides with complete removal of the SQLite runtime, converter and Cargo feature. Native redb is the default and sole runtime; v1 MCP compatibility and native owner inbox review remain supported.
+- Retired instructions for removed setup/app/tunnel/launch/model and general owner CLI surfaces. Historical cutover journals/fences retain status, exact grant reissue and eligible rollback; source preparation/activation are unavailable. No live data, installs or harness settings are changed by this documentation update.
+- Preserved source-specific benchmark, plan and validation evidence. Older dual-runtime commands and counts below describe their historical source, not current support or acceptance.
+
+- Qualified full graph-tool admission in the separate additive AnimaOS worktree: exact schemas, bounded offline reference traversal and typed integer argument conversion. Added actual native graph executor and daemon HTTP coverage. Preserved G9 evidence, the intermittent legacy restart failure and all remaining release holds.
+
+- Qualified native context-only AnimaOS admission through credential-bound discovery, preserving v1 schemas, graph contracts and host budgets. Replaced whole-store audit heap copies with exact streaming checks; a retained 100k graph copy now audits within the unchanged memory guard. Original G9 failure evidence remains available.
+
+- Reconciled context, design, Living Memory, retrieval and harness guides with the collector/keeper boundary, additive sharing, optional persona and separate proposal, approval, indexing and host-recall states.
+- Documented native graph/v1 compatibility, the SQLite-free feature build, retained default legacy runtime/converter, single owner service and stop-service requirements for direct database administration. Clarified native inbox/review and legacy-only CLI surfaces.
+- Linked explicit migration, fresh generation, source fences, exact credential reissue and rollback refusal after canonical destination writes. Preserved earlier milestone evidence and linked the current G9 qualification report without treating historical results as current acceptance.
+- Kept Release A's separate AnimaOS implementation evidence distinct from Releases B/C's native runtime and scale qualification.
+- Recorded failed scale and native AnimaOS schema-admission gates. Documented bounded native discovery pages and the native build's isolation from the optional model downloader/TLS dependencies.
+
 ## 14 November 2026
 
 - Added the "Connect your apps" guide for the new home screen, `mother apps`, `mother connect <app>` and `mother fix`, and the AnimaOS owner-key lookup and old-connection repair. Linked it first from the README.

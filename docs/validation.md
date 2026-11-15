@@ -1,3 +1,31 @@
+# Current Garden qualification
+
+Current removal qualification: [native-only runtime](benchmarks/native-only-runtime.md).
+
+The sole current runtime is the native redb Garden, including its v1 compatibility view. The SQLite runtime, feature and converter are removed. Current qualification must use this source and its native command/dependency boundary. The [G9 acceptance report](benchmarks/garden-acceptance.md) preserves source/build identity, commands, engine measurements, platform coverage, workflow results and unresolved gates for its recorded source; it is not proof of qualification after removal. The entries below preserve historical milestone evidence and do not establish current platform, scale or host acceptance. G8 source was integrated and pushed at `df6c6eb07337ab28a153f5c9decf27d63b34d8d1`; a source merge is separate from installation, migration or release publication.
+
+The native implementation includes G7 v1 compatibility alongside graph storage, plus the local owner service and historical G8 cutover fences/journal recovery. New SQLite conversion and source activation are unavailable. See [G7 evidence](garden-compatibility.md#g7-qualification-2026-11-15), [G8 evidence](garden-cutover-validation.md), the [engine prototype measurements](benchmarks/2026-11-14-garden-engine.md), and the [G9 plan](superpowers/plans/2026-11-15-garden-release-qualification.md). Prototype results are not completed-engine measurements. Read failed, unavailable and truncated outcomes in the current report before drawing release conclusions.
+
+Qualification keeps these boundaries separate:
+
+| Gate | Required evidence |
+| --- | --- |
+| Native default build | `cargo fmt --all -- --check`, `cargo test --locked`, `cargo build --release --locked` and `cargo clippy --locked --all-targets --all-features -- -D warnings`. There is no alternate SQLite feature/build. |
+| Runtime dependency boundary | `cargo tree --locked --edges normal,build --prefix none` must exclude `rusqlite` and `libsqlite3-sys`. Native owner inbox terminal rendering remains supported. |
+| Shared knowledge workflow | Selected proposal, explicit owner approval, preserved canonical ID/provenance in another authorized client, unselected noise absent, exact uncertain retries and restart. |
+| Graph/recovery | Temporal evidence and contradictions, extension preservation, current access/retraction/index checks, full backup and fresh-generation restore. |
+| Release A | Actual additive AnimaOS provider and retained native memory, including offline/revoked behavior and agent isolation. Separate-worktree focused tests do not prove AnimaOS main integration or host adoption. |
+| Releases B/C | Native graph/v1 storage, service/IPC, retained historical journal recovery and measured scale. Record storage cost separately from service cost, and process interruption separately from physical power loss. |
+| Platforms and hosts | Report each real runtime, CI and host/model check explicitly; cross-compilation and MCP subprocesses do not establish another platform or real host adoption. |
+
+The garden stores and queries selected knowledge; harnesses perform extraction, interpretation and final ranking. Proposal admission, owner approval, indexing and actual recall are independent observations. Persona adoption remains optional. Tests and benchmarks use synthetic stores and do not authorize model downloads, live migration, installed binary replacement or harness setting changes. Existing CI automation remains unchanged.
+
+## Historical milestone archive
+
+All entries below preserve the behavior, source identities and measurements of earlier releases. Legacy SQLite, conversion, setup dashboard, app/tunnel, model installer and removed general CLI examples are historical, not current runnable instructions. Native owner inbox review remains supported; its current entry points are documented in [setup](setup.md).
+
+---
+
 # Owner tending in the terminal — 12 November 2026
 
 Committed directly to main from `ef373a3`, at the owner's request. Still version 0.5.0. No MCP tool, schema, record-shape or grant change; README title, poem and artwork unchanged.

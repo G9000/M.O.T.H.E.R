@@ -13,6 +13,9 @@ use std::{
     time::Duration,
 };
 
+#[path = "support/mcp_discovery.rs"]
+mod discovery;
+
 struct Client {
     child: Child,
     input: ChildStdin,
@@ -82,6 +85,9 @@ impl Client {
     fn result(&mut self, name: &str, args: Value) -> Value {
         self.rpc("tools/call", json!({"name":name,"arguments":args}))["result"].clone()
     }
+    fn tools(&mut self) -> Vec<Value> {
+        discovery::collect(|params| self.rpc("tools/list", params))
+    }
     fn call(&mut self, name: &str, args: Value) -> Value {
         let result = self.result(name, args);
         assert_ne!(result["isError"], true, "{result}");
@@ -136,15 +142,72 @@ fn configured(
     (config, workspace, generation)
 }
 #[test]
+fn native_discovery_pages_fit_host_frames_without_losing_tools() {
+    let dir = tempfile::tempdir().unwrap();
+    let (config, _, _) = configured(dir.path(), true, true);
+    let mut client = Client::connect(&config);
+    let tools = client.tools();
+    assert_eq!(tools.len(), 19);
+    let names: std::collections::BTreeSet<_> = tools
+        .iter()
+        .map(|tool| tool["name"].as_str().unwrap())
+        .collect();
+    assert_eq!(
+        names.len(),
+        tools.len(),
+        "discovery must not duplicate tools"
+    );
+}
+
+#[test]
+fn context_only_native_discovery_preserves_v1_without_graph_descriptors() {
+    let dir = tempfile::tempdir().unwrap();
+    let (config, _, _) = configured(dir.path(), true, false);
+    let mut client = Client::connect(&config);
+    let reply = client.rpc("tools/list", json!({}));
+    let tools = reply["result"]["tools"].as_array().unwrap();
+    assert_eq!(tools.len(), 12);
+    assert!(
+        tools
+            .iter()
+            .all(|tool| !tool["name"].as_str().unwrap().starts_with("mother_garden_"))
+    );
+    assert!(reply["result"]["nextCursor"].is_null());
+    let capabilities = client.call("mother_get_capabilities", json!({}));
+    assert_eq!(capabilities["garden"]["available"], false);
+    assert_eq!(capabilities["garden"]["availableTools"], json!([]));
+    assert_eq!(capabilities["v1"]["available"], true);
+}
+
+#[test]
+fn native_graph_descriptors_have_mcp_object_roots_without_losing_constraints() {
+    let dir = tempfile::tempdir().unwrap();
+    let (config, _, _) = configured(dir.path(), true, true);
+    let mut client = Client::connect(&config);
+    let tools = client.tools();
+    let contracts: Value =
+        serde_json::from_str(include_str!("../contracts/garden-tools-v2.json")).unwrap();
+    for expected in contracts["tools"].as_array().unwrap() {
+        let actual = tools
+            .iter()
+            .find(|tool| tool["name"] == expected["name"])
+            .unwrap();
+        for field in ["inputSchema", "outputSchema"] {
+            assert_eq!(actual[field]["type"], "object");
+            let mut schema = actual[field].clone();
+            schema.as_object_mut().unwrap().remove("type");
+            assert_eq!(schema, expected[field]);
+        }
+    }
+}
+
+#[test]
 fn ordinary_mcp_selects_native_v1_and_preserves_legacy_schemas() {
     let dir = tempfile::tempdir().unwrap();
     let (config, workspace, generation) = configured(dir.path(), true, false);
     let mut client = Client::connect(&config);
-    let tools = client.rpc("tools/list", json!({}))["result"]["tools"]
-        .as_array()
-        .unwrap()
-        .clone();
-    assert_eq!(tools.len(), 19);
+    let tools = client.tools();
+    assert_eq!(tools.len(), 12);
     let legacy: Vec<Value> =
         serde_json::from_str(include_str!("../contracts/mcp-tools.json")).unwrap();
     for mut expected in legacy {
@@ -166,9 +229,11 @@ fn ordinary_mcp_selects_native_v1_and_preserves_legacy_schemas() {
     );
     let graph:BatchRequest=serde_json::from_value(json!({"version":2,"workspaceId":workspace,"generation":generation,"operationId":uuid::Uuid::new_v4().to_string(),"requiredExtensions":{},"items":[{"itemKey":"entity","mutation":"create","expectedRevision":0,"draft":{"kind":"entity","entityType":"test:item","displayName":"private graph","aliases":[],"extensions":{}}}]})).unwrap();
     assert_eq!(
-        client.result("mother_garden_apply", serde_json::to_value(graph).unwrap())["structuredContent"]
-            ["error"]["code"],
-        "FORBIDDEN"
+        client.rpc(
+            "tools/call",
+            json!({"name":"mother_garden_apply","arguments":serde_json::to_value(graph).unwrap()})
+        )["error"]["code"],
+        -32602
     );
 }
 #[test]
@@ -193,13 +258,7 @@ fn explicit_graph_store_without_v1_retains_eight_tools_on_ordinary_entrypoint() 
     let dir = tempfile::tempdir().unwrap();
     let (config, _, _) = configured(dir.path(), false, true);
     let mut client = Client::connect(&config);
-    assert_eq!(
-        client.rpc("tools/list", json!({}))["result"]["tools"]
-            .as_array()
-            .unwrap()
-            .len(),
-        8
-    );
+    assert_eq!(client.tools().len(), 8);
     assert_eq!(
         client.call("mother_get_capabilities", json!({}))["v1"]["available"],
         false

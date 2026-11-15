@@ -1,4 +1,4 @@
-> Historical v0.1 TypeScript bootstrap plan, completed before the Rust port. Current implementation and validation are in rust-port-plan.md, setup.md and validation.md.
+> Historical v0.1 TypeScript bootstrap plan, completed before the Rust port. The subsequent Rust/SQLite port is also historical. Current native redb operation and qualification requirements are in [setup](setup.md) and [validation](validation.md).
 
 # Independent workspace implementation plan
 

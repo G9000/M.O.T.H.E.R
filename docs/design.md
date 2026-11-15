@@ -2,6 +2,22 @@
 
 M.O.T.H.E.R is one person's workspace and companion, independent of AnimaOS. The existing README, poem, and artwork stay unchanged. No user account system, hosted inference, web UI, or AnimaOS runtime dependency is needed.
 
+## Current Garden architecture, 15 November 2026
+
+Harnesses are collectors: they extract, select, interpret and consolidate useful knowledge, retain their native memory and assemble prompts. M.O.T.H.E.R is the keeper: it commits attributed canonical records, evidence, temporal relationships, revision history, current access checks and review receipts. Generic query scores are retrieval candidates; consuming harnesses choose signals and final relevance. Persona adoption is optional and independent of additive sharing. No garden extraction model or automatic transcript ingestion is introduced.
+
+Release A is the additive AnimaOS integration on existing v1 tools. Its implementation and focused evidence live in a separate AnimaOS worktree; this repository's native runtime does not establish integration on AnimaOS main or real host/model adoption. Releases B/C provide native graph/v1 storage, full backups, service/IPC and retained historical cutover safeguards. The SQLite runtime and converter have now been removed; G9 measurements in the [acceptance report](benchmarks/garden-acceptance.md) are source-specific evidence and do not qualify the removal by themselves. The [original shared-garden design](superpowers/specs/2026-11-14-shared-memory-garden.md) preserves the agreed boundary and earlier implementation snapshot.
+
+Every build is native; there is no SQLite backend, fallback, converter or feature switch. Native v1 and graph mutations share one redb transaction authority with independent scopes and typed views. One local owner service holds the database; MCP bridges authenticate over local IPC and do not open another writer. Pending proposals never enter canonical recall or vector indexes. Approval, indexing and actual host recall are distinct outcomes.
+
+Updating a binary neither converts old SQLite data nor activates a prepared native destination. Old configs fail explicitly. Source preparation/activation are removed; existing journals and fences remain authoritative. Grant reissue preserves exact reviewed restrictions using new credentials; portable backups exclude grants. After canonical destination writes, rollback refuses to discard them and requires separate reconciliation. See [native compatibility](garden-compatibility.md), [service operation](garden-service.md), [migration and rollback](garden-migration.md), and [full backups](garden-backups.md).
+
+Native owner `garden inbox` / `v1-inbox` provide terminal review or piped JSON listing, and `garden review` accepts an explicit reviewed request. The former setup dashboard, app/tunnel adapters, general owner context/search/briefing/persona-update/launch commands and model installer are removed. Native v1 MCP tools remain compatible. See [setup](setup.md) for the supported surfaces.
+
+## Historical SQLite design archive
+
+Every section below records earlier releases. SQLite transaction/cache details, original capacity limits, old owner commands, terminal flows and source references are historical and unavailable in the current executable. These sections preserve prior decisions and evidence; use the native guides above for operation.
+
 ## First usable release
 
 A standalone Rust program uses SQLite as the single canonical store, outside the checkout. Local MCP clients launch a stdio adapter with an explicitly selected client identity. Multiple adapters use the same file; SQLite transactions coordinate writes. A CLI initializes the workspace, grants/revokes client capabilities, inspects context, and exports/restores private state.

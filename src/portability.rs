@@ -1,17 +1,11 @@
 //! Credential-free portable v1 recovery, separate from executable/runtime replacement.
-#[cfg(feature = "legacy-sqlite")]
-use crate::store::{self, Store};
 use crate::{
     contracts::{self, integer, parse_record, string},
     error::{Error, Result, invalid},
     limits::Usage,
 };
-#[cfg(feature = "legacy-sqlite")]
-use rusqlite::params;
 use serde_json::{Value, json};
 use std::collections::{BTreeSet, HashMap, HashSet};
-#[cfg(feature = "legacy-sqlite")]
-use std::path::Path;
 fn export_error(message: &str) -> Error {
     Error::domain("INVALID_EXPORT", message)
 }
@@ -196,87 +190,4 @@ pub(crate) fn validate(mut v: Value) -> Result<Value> {
     v["operations"] = json!(operations);
     v["omittedExternalSources"] = json!(omitted);
     Ok(v)
-}
-#[cfg(feature = "legacy-sqlite")]
-impl Store {
-    /// Capture a consistent credential-free bundle, including historic receipts and persona.
-    pub fn export(&mut self) -> Result<Value> {
-        let tx = self.conn.transaction()?;
-        let records = {
-            let mut q = tx.prepare("SELECT payload FROM records ORDER BY id")?;
-            let rows = q
-                .query_map([], |r| r.get::<_, String>(0))?
-                .collect::<std::result::Result<Vec<_>, _>>()?;
-            rows.iter()
-                .map(|s| Ok(serde_json::from_str::<Value>(s)?))
-                .collect::<Result<Vec<_>>>()?
-        };
-        let operations = {
-            let mut q=tx.prepare("SELECT actor,generation,operation_id,request_hash,receipt FROM operations ORDER BY actor,generation,operation_id")?;
-            let rows = q
-                .query_map([], |r| {
-                    Ok((
-                        r.get::<_, String>(0)?,
-                        r.get::<_, String>(1)?,
-                        r.get::<_, String>(2)?,
-                        r.get::<_, String>(3)?,
-                        r.get::<_, String>(4)?,
-                    ))
-                })?
-                .collect::<std::result::Result<Vec<_>, _>>()?;
-            rows.into_iter().map(|(a,g,o,h,r)|Ok(json!({"actor":a,"generation":g,"operationId":o,"requestHash":h,"receipt":serde_json::from_str::<Value>(&r)?}))).collect::<Result<Vec<_>>>()?
-        };
-        let inbox = crate::inbox::export(&tx)?;
-        let omitted = bundle_sources(&records, &operations, inbox.as_ref())?;
-        let mut bundle = json!({"schemaVersion":1,"exportedAt":store::now(),"workspace":store::workspace(&tx)?,"persona":store::persona(&tx)?,"records":records,"operations":operations,"omittedExternalSources":omitted});
-        if let Some(inbox) = inbox {
-            bundle["inbox"] = inbox;
-        }
-        if let Some(pins) = crate::pins::export(&tx)? {
-            bundle["pins"] = pins;
-        }
-        if let Some(assignments) = crate::handoffs::export(&tx)? {
-            bundle["assignments"] = assignments;
-        }
-        let bundle = validate(bundle)?;
-        tx.commit()?;
-        Ok(bundle)
-    }
-    /// Restore a validated bundle into a fresh destination with a new generation and no grants.
-    pub fn restore(path: &Path, raw: Value) -> Result<Self> {
-        let bundle = validate(raw)?;
-        let content = string(&bundle["persona"], "content")?;
-        Self::initialize_with(path, content, |conn| {
-            let mut w = bundle["workspace"].clone();
-            w["generation"] = json!(uuid::Uuid::new_v4().to_string());
-            store::set_metadata(conn, "workspace", &w)?;
-            for r in array(&bundle, "records", 10000)? {
-                store::insert_record(conn, r)?;
-            }
-            for op in array(&bundle, "operations", 100000)? {
-                conn.execute(
-                    "INSERT INTO operations VALUES (?,?,?,?,?)",
-                    params![
-                        string(op, "actor")?,
-                        string(op, "generation")?,
-                        string(op, "operationId")?,
-                        string(op, "requestHash")?,
-                        op["receipt"].to_string()
-                    ],
-                )?;
-            }
-            store::rebuild_usage(conn)?;
-            if let Some(inbox) = bundle.get("inbox") {
-                crate::inbox::restore(conn, inbox)?;
-            }
-            if let Some(pins) = bundle.get("pins") {
-                crate::pins::restore(conn, pins)?;
-            }
-            if let Some(assignments) = bundle.get("assignments") {
-                crate::handoffs::restore(conn, assignments)?;
-            }
-            crate::inbox::check_capacity(conn)?;
-            Ok(())
-        })
-    }
 }

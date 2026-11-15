@@ -1,5 +1,3 @@
-#[cfg(feature = "legacy-sqlite")]
-use mother::store::Store;
 use mother::{
     access::ClientAccess,
     contracts::Auth,
@@ -32,7 +30,7 @@ fn grant(s: &GardenStore) -> Auth {
 
 #[test]
 fn native_import_replays_typescript_receipts_and_preserves_portable_state() {
-    let dir = tempfile::tempdir().unwrap();
+    let dir = tempfile::tempdir_in(std::fs::canonicalize(std::env::temp_dir()).unwrap()).unwrap();
     let f = fixture();
     let b = &f["bundle"];
     let s = GardenStore::initialize(
@@ -72,64 +70,8 @@ fn native_import_replays_typescript_receipts_and_preserves_portable_state() {
 }
 
 #[test]
-#[cfg(feature = "legacy-sqlite")]
-fn synthetic_sql_and_native_context_history_and_literal_search_match() {
-    let dir = tempfile::tempdir().unwrap();
-    let path = dir.path().join("old.sqlite");
-    let db = rusqlite::Connection::open(&path).unwrap();
-    db.execute_batch(include_str!("fixtures/v1.sql")).unwrap();
-    drop(db);
-    let mut old = Store::open(&path).unwrap();
-    let f = fixture();
-    let b = &f["bundle"];
-    let s = GardenStore::initialize(
-        dir.path().join("native.redb"),
-        b["workspace"]["id"].as_str().unwrap(),
-        b["workspace"]["generation"].as_str().unwrap(),
-    )
-    .unwrap();
-    s.import_v1_bundle(old.export().unwrap()).unwrap();
-    let auth = grant(&s);
-    let old_auth: Auth = serde_json::from_value(
-        json!({"clientId":f["auth"]["clientId"],"token":f["auth"]["token"]}),
-    )
-    .unwrap();
-    for query in [
-        json!({}),
-        json!({"query":"tea"}),
-        json!({"kind":"action","limit":1}),
-    ] {
-        let mut a = old.context(&old_auth, query.clone()).unwrap();
-        let mut n = s.v1_call(&auth, "mother_get_context", query).unwrap();
-        a.as_object_mut().unwrap().remove("capturedAt");
-        n.as_object_mut().unwrap().remove("capturedAt");
-        assert_eq!(n, a);
-    }
-    for r in b["records"].as_array().unwrap() {
-        let q = json!({"id":r["id"]});
-        assert_eq!(
-            s.v1_call(&auth, "mother_get_record_history", q.clone())
-                .unwrap(),
-            old.history(&old_auth, q).unwrap()
-        );
-    }
-    let native = s
-        .v1_call(
-            &auth,
-            "mother_search_context",
-            json!({"query":"tea","mode":"literal"}),
-        )
-        .unwrap();
-    let old_search = mother::search::Search::new(dir.path().join("missing-model"))
-        .search(&mut old, &old_auth, json!({"query":"tea","mode":"literal"}))
-        .unwrap();
-    assert_eq!(native["records"], old_search["records"]);
-    assert_eq!(native["search"], old_search["search"]);
-}
-
-#[test]
 fn native_writes_conflict_retry_shared_visibility_and_proposal_review() {
-    let dir = tempfile::tempdir().unwrap();
+    let dir = tempfile::tempdir_in(std::fs::canonicalize(std::env::temp_dir()).unwrap()).unwrap();
     let workspace = Uuid::new_v4().to_string();
     let generation = Uuid::new_v4().to_string();
     let s =
@@ -201,95 +143,45 @@ fn native_writes_conflict_retry_shared_visibility_and_proposal_review() {
     assert_eq!(s.v1_review_proposal(review).unwrap(), saved);
 }
 
-#[cfg(feature = "legacy-sqlite")]
-enum Backend {
-    Legacy(Store),
-    Native(GardenStore),
-}
-#[cfg(feature = "legacy-sqlite")]
+struct Backend(GardenStore);
 impl Backend {
     fn call(&mut self, auth: &Auth, tool: &str, args: Value) -> mother::error::Result<Value> {
-        match self {
-            Self::Native(s) => {
-                if tool == "mother_search_context" {
-                    mother::garden::v1_search::NativeSearch::new(std::path::PathBuf::from(
-                        "synthetic-missing-model",
-                    ))
-                    .search(s, auth, args)
-                } else {
-                    s.v1_call(auth, tool, args)
-                }
-            }
-            Self::Legacy(s) => match tool {
-                "mother_get_context" => s.context(auth, args),
-                "mother_search_context" => {
-                    mother::search::Search::new(std::path::PathBuf::from("synthetic-missing-model"))
-                        .search(s, auth, args)
-                }
-                "mother_get_record" => s.get(auth, args["id"].as_str().unwrap()),
-                "mother_get_record_history" => s.history(auth, args),
-                "mother_write_record" | "mother_checkpoint" => s.write(auth, args),
-                "mother_get_receipt" => s.receipt(auth, args["operationId"].as_str().unwrap()),
-                "mother_propose_memory" => s.propose(auth, args),
-                "mother_get_proposal" => s.get_proposal(auth, args["id"].as_str().unwrap()),
-                "mother_pin_record" => s.pin(auth, args),
-                "mother_assign_task" => s.assign(auth, args),
-                _ => panic!("Unsupported parity tool {tool}"),
-            },
+        if tool == "mother_search_context" {
+            mother::garden::v1_search::NativeSearch::new(std::path::PathBuf::from(
+                "synthetic-missing-model",
+            ))
+            .search(&self.0, auth, args)
+        } else {
+            self.0.v1_call(auth, tool, args)
         }
     }
     fn grant(&mut self, name: &str, scopes: &[String], access: &ClientAccess) -> Auth {
-        match self {
-            Self::Native(s) => s.v1_grant(name, scopes, access, None).unwrap(),
-            Self::Legacy(s) => {
-                let value = s.grant_with_access(name, scopes, access).unwrap();
-                serde_json::from_value(json!({"clientId":value["clientId"],"token":value["token"]}))
-                    .unwrap()
-            }
-        }
+        self.0.v1_grant(name, scopes, access, None).unwrap()
     }
     fn review(&mut self, args: Value) -> mother::error::Result<Value> {
-        match self {
-            Self::Native(s) => s.v1_review_proposal(args),
-            Self::Legacy(s) => s.review_proposal(args),
-        }
+        self.0.v1_review_proposal(args)
     }
     fn inbox(&self) -> Value {
-        match self {
-            Self::Native(s) => s.v1_inbox_list().unwrap(),
-            Self::Legacy(s) => s.inbox_list().unwrap(),
-        }
+        self.0.v1_inbox_list().unwrap()
     }
     fn export(&mut self) -> Value {
-        match self {
-            Self::Native(s) => s.v1_export().unwrap(),
-            Self::Legacy(s) => s.export().unwrap(),
-        }
+        self.0.v1_export().unwrap()
     }
     fn revoke(&mut self, name: &str) {
-        match self {
-            Self::Native(s) => s.revoke(name).unwrap(),
-            Self::Legacy(s) => s.revoke(name).unwrap(),
-        }
+        self.0.revoke(name).unwrap();
     }
 }
-#[cfg(feature = "legacy-sqlite")]
-fn backends(dir: &std::path::Path) -> [Backend; 2] {
+fn backends(dir: &std::path::Path) -> [Backend; 1] {
     let f = fixture();
     let b = &f["bundle"];
-    let path = dir.join("parity.sqlite");
-    let db = rusqlite::Connection::open(&path).unwrap();
-    db.execute_batch(include_str!("fixtures/v1.sql")).unwrap();
-    drop(db);
-    let legacy = Store::open(&path).unwrap();
     let native = GardenStore::initialize(
-        dir.join("parity.redb"),
+        dir.join("compat.redb"),
         b["workspace"]["id"].as_str().unwrap(),
         b["workspace"]["generation"].as_str().unwrap(),
     )
     .unwrap();
     native.import_v1_bundle(b.clone()).unwrap();
-    [Backend::Legacy(legacy), Backend::Native(native)]
+    [Backend(native)]
 }
 fn request(record: Value) -> Value {
     let b = fixture()["bundle"].clone();
@@ -300,9 +192,8 @@ fn memory(content: &str) -> Value {
 }
 
 #[test]
-#[cfg(feature = "legacy-sqlite")]
 fn common_semantic_runner_covers_all_eleven_tools_and_current_grants() {
-    let dir = tempfile::tempdir().unwrap();
+    let dir = tempfile::tempdir_in(std::fs::canonicalize(std::env::temp_dir()).unwrap()).unwrap();
     for mut backend in backends(dir.path()) {
         let auth = backend.grant(
             "parity-writer",
@@ -607,7 +498,8 @@ fn common_semantic_runner_covers_all_eleven_tools_and_current_grants() {
 fn graph_proposal_dismissal_or_blob_requires_full_backup_even_without_graph_records() {
     use mother::garden::contracts::BatchRequest;
     for state in ["pending", "dismissed", "blob"] {
-        let dir = tempfile::tempdir().unwrap();
+        let dir =
+            tempfile::tempdir_in(std::fs::canonicalize(std::env::temp_dir()).unwrap()).unwrap();
         let workspace = Uuid::new_v4().to_string();
         let generation = Uuid::new_v4().to_string();
         let s = GardenStore::initialize(dir.path().join("guard.redb"), &workspace, &generation)
@@ -641,7 +533,7 @@ fn graph_proposal_dismissal_or_blob_requires_full_backup_even_without_graph_reco
 
 #[test]
 fn enabling_native_view_does_not_upgrade_graph_only_credentials() {
-    let dir = tempfile::tempdir().unwrap();
+    let dir = tempfile::tempdir_in(std::fs::canonicalize(std::env::temp_dir()).unwrap()).unwrap();
     let s = GardenStore::initialize(
         dir.path().join("authority.redb"),
         &Uuid::new_v4().to_string(),
@@ -677,7 +569,7 @@ fn enabling_native_view_does_not_upgrade_graph_only_credentials() {
 
 #[test]
 fn full_native_backup_keeps_pins_assignments_persona_and_blocks_old_pending_approval() {
-    let dir = tempfile::tempdir().unwrap();
+    let dir = tempfile::tempdir_in(std::fs::canonicalize(std::env::temp_dir()).unwrap()).unwrap();
     let f = fixture();
     let b = &f["bundle"];
     let s = GardenStore::initialize(
@@ -758,7 +650,7 @@ fn memory_draft_for_backup() -> Value {
 
 #[test]
 fn native_runtime_exceeds_legacy_record_capacity_and_requires_full_backup() {
-    let dir = tempfile::tempdir().unwrap();
+    let dir = tempfile::tempdir_in(std::fs::canonicalize(std::env::temp_dir()).unwrap()).unwrap();
     let f = fixture();
     let b = &f["bundle"];
     let path = dir.path().join("larger.redb");
@@ -819,7 +711,7 @@ fn native_runtime_exceeds_legacy_record_capacity_and_requires_full_backup() {
 
 #[test]
 fn sparse_native_history_rejects_unbounded_missing_revision_list() {
-    let dir = tempfile::tempdir().unwrap();
+    let dir = tempfile::tempdir_in(std::fs::canonicalize(std::env::temp_dir()).unwrap()).unwrap();
     let mut bundle = fixture()["bundle"].clone();
     let mut r = bundle["records"]
         .as_array()

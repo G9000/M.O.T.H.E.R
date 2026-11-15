@@ -1,3 +1,5 @@
+> Historical completed Rust/SQLite port plan. SQLite runtime and converter support are now removed. Current native redb operation is documented in [setup](setup.md) and current qualification requirements in [validation](validation.md). The source paths, commands and measurements below describe the earlier release.
+
 # Rust port plan
 
 Preserve the personal workspace and its v1 storage/wire contract while replacing the Bun runtime with a standalone Rust program. No AnimaOS dependencies. README, artwork, SOUL seed, live records, grants, identities and generation remain intact.

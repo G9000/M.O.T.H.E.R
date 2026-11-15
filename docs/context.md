@@ -2,6 +2,14 @@
 
 `mother_get_context` covers all canonical record categories by default: memory, decision, task, checkpoint, artifact and action. A memory is one category of shared context. A workspace can have no recallable memory-category records and still contain useful checkpoints or decisions.
 
+## Collector and keeper
+
+Each harness selects useful knowledge, interprets it and decides what to put in its own working context. M.O.T.H.E.R preserves attributed records, evidence, relationships, revisions and review outcomes. It runs no extraction model and does not ingest whole conversations automatically. Sharing memory is additive; adopting the workspace persona is a separate harness choice.
+
+A selected candidate is not yet canonical knowledge. A pending proposal stays outside ordinary context and semantic indexing; owner approval commits its canonical result atomically. Existing direct-write grants remain compatible and can commit without inbox review. Canonical, indexed and actually recalled are separate states: an approved record may lack vectors, and a successful query does not prove a host used it. Resolve full records and check current visibility before acting.
+
+This guide describes the v1 context view on the explicitly initialized native redb Garden. Graph entities, assertions and evidence have their own APIs and independent scopes; they do not appear as invented v1 records. See [native compatibility](garden-compatibility.md), [graph queries](garden-queries.md) and the [current qualification report](benchmarks/garden-acceptance.md).
+
 ## Workspace inventory and selected previews
 
 The response separates full-workspace counts from the bounded list returned by this request:
@@ -24,11 +32,11 @@ For example, if a workspace has three checkpoints and no memories, a request fil
 
 Each harness is known to M.O.T.H.E.R by the name of its grant, such as `claude-code`, `codex` or `hermes`. `mother_get_context` lists the current ones under `harnesses` (shared-access clients do not receive this list).
 
-`mother_assign_task` with `{"id": ..., "assignee": "codex"}` hands an open task (todo, doing or blocked) to that harness; another name moves it, and `"assignee": null` clears it. The receiving harness sees it under `assignedToYou` in every context read, and at the top of its `mother brief`, with who handed it over and when. `assignedToYouSummary` gives the total; up to ten are listed, oldest handoff first.
+`mother_assign_task` with `{"id": ..., "assignee": "codex"}` hands an open task (todo, doing or blocked) to that harness; another name moves it, and `"assignee": null` clears it. The receiving harness sees it under `assignedToYou` in every context read, with who handed it over and when. `assignedToYouSummary` gives the total; up to ten are listed, oldest handoff first.
 
-The receiving harness does the work under its own model and permissions and records progress with the ordinary task statuses through `mother_write_record`; a done or cancelled task leaves `assignedToYou`. Nothing runs automatically, and a harness only finds its work when it next reads context. A task can only go to a harness with a current grant that can read it. Handing off needs `task:write`. You can also hand a task over yourself with `mother tend` or `mother assign <task-id> --to <harness>`.
+The receiving harness does the work under its own model and permissions and records progress with the ordinary task statuses through `mother_write_record`; a done or cancelled task leaves `assignedToYou`. Nothing runs automatically, and a harness only finds its work when it next reads context. A task can only go to a harness with a current grant that can read it. Handing off needs `task:write`. The retired terminal tending and general owner assignment commands are unavailable; the authorized MCP operation remains supported.
 
-Assignments are stored in their own table, so an executable older than 0.5.0 still reads the workspace; it simply does not show them, and its exports leave them out. Exports from 0.5.0 carry them. Grants are never exported, so after a restore, granting the same harness name again picks its waiting work back up.
+Assignments are stored separately from records and preserved by native full backups and compatible v1 exports. Grants are never exported, so after a restore, granting the same harness name again picks its waiting work back up.
 
 ## Pinned core
 
@@ -39,9 +47,9 @@ Some things should never fall out of a first read: your name, what matters most 
 | `pinned` | Each pinned, still-active record with its current title, revision and content (up to 2,000 characters, with `truncated`), plus who pinned it and when. |
 | `pinnedSummary` | `total` pins, how many are `shown`, how many are `inactive` because the record was retracted or superseded, and the `limit` of 12. |
 
-A pin follows its record, so a corrected memory shows its newest text. A retracted pinned record drops out of `pinned` but still counts toward the limit until it is unpinned. You can pin from your own terminal with `mother tend` or `mother pin <record-id>`, without a harness; see [the terminal guide](terminal.md#tend-the-pinned-core-and-handoffs). For a harness, pinning needs the same write scope as editing that kind of record. Shared-access clients see only pins on records they were granted and cannot pin. Pins are carried in exports and restored with them.
+A pin follows its record, so a corrected memory shows its newest text. A retracted pinned record drops out of `pinned` but still counts toward the limit until it is unpinned. The former owner tending and pin commands are removed; use the authorized native MCP tool. For a harness, pinning needs the same write scope as editing that kind of record. Shared-access clients see only pins on records they were granted and cannot pin. Pins are carried in exports and restored with them.
 
-Pins are kept in their own table rather than on the record, so an executable older than 0.5.0 ignores them and can still read the workspace. An export made by such an executable leaves pins out.
+Native pins are separate from record content and share the same transaction authority. Full backups preserve them; small v1 export is available only when it represents the complete workspace.
 
 ## Balanced previews
 
@@ -79,6 +87,6 @@ Checkpoint next steps and open questions do not become task records automaticall
 
 ## Compatibility and upgrade
 
-The inventory, summary, `selection.order`, `selection.returnedByKind` and `selection.omittedByKind` fields are additive. Balanced order changes which previews an unfiltered request returns only when the workspace has more recallable records than the limit. Existing context query inputs, preview limits, authorization, record categories, SQLite schema, workspace identity and receipts remain unchanged. CLI context inspection and MCP share the same response.
+The inventory, summary, `selection.order`, `selection.returnedByKind` and `selection.omittedByKind` fields are additive. Balanced order changes which previews an unfiltered request returns only when the workspace has more recallable records than the limit. The v1 context query inputs, preview limits, authorization and record categories retain their contract. Native context is served through MCP; the former general owner context CLI is removed. Existing native stores preserve workspace identity and receipts when opened. Old SQLite configurations are unsupported and never converted implicitly.
 
 Running MCP processes need the updated executable and a reconnect to serve the new fields and tool description. Discovery or successful installation does not prove a particular model has used those fields correctly. Test it with an unfiltered context read and ask the agent to distinguish category counts from total context.

@@ -10,13 +10,11 @@ In a connected chat, ask:
 
 The active agent calls `mother_propose_memory` once per candidate. It can propose a memory, decision or task. It should resolve full existing records before proposing corrections, and keep tentative plans distinct from confirmed decisions. This is an explicit capture workflow; MCP does not automatically receive every conversation or monitor your chats.
 
-Open the native inbox:
+The harness chooses and interprets the candidate; M.O.T.H.E.R keeps its provenance and review outcome. Selection, proposal admission, canonical approval, semantic indexing and actual recall in another host are separate steps. Approval makes a record eligible for authorized retrieval; it does not guarantee vectors or prompt inclusion. Each harness retains its own native memory, and sharing does not require adopting the workspace persona.
 
-```powershell
-mother inbox
-```
+Stop the native owner service before opening its database with an owner command. Run `mother garden v1-inbox --db <garden.redb>` for v1 proposals or `mother garden inbox --db <garden.redb>` for graph batches. When input and output are terminals these commands open native owner review; piped invocations list proposals as JSON. A separately reviewed request can use `mother garden review --db ... --request ...` (add `--graph` for graph proposals). Restart the service after review. IPC exposes no approval operation. The former setup dashboard and generic `mother inbox` command are removed. See [native review](garden-compatibility.md) and [service operation](garden-service.md).
 
-Or run `mother` and press **i**. The inbox works without a configured ChatGPT tunnel. It uses the default workspace under `MOTHER_HOME` (or the usual private data directory).
+For interactive v1 review:
 
 1. Select a proposal with the arrows and press **Enter**.
 2. Read its source, proposing harness, attribution, before snapshot and proposed changes. Use arrows or Page Up / Page Down to scroll the full record, including source links and references.
@@ -36,26 +34,28 @@ An uncertain storage result keeps the exact operation ID and request in the conf
 
 ## Connect and upgrade
 
-Build the new executable with `cargo release`, then update your chosen stable install and restart/reload each harness's MCP process so it discovers `mother_propose_memory` and `mother_get_proposal`. Running processes retain the executable they started with. Existing client configs and the canonical workspace remain usable; do not initialize or restore over your current database for an upgrade. Building this feature alone does not upgrade installed clients or restart a tunnel.
+Build with `cargo build --release --locked`. All builds use native redb storage; the SQLite runtime and converter are removed. A build does not install the executable, restart the owner or change host settings. Existing native databases retain their identity, generation and credentials; old SQLite configs fail explicitly. Reconnect each intended harness to discover its authorized native tools. Follow [service setup](garden-service.md) and [historical cutover recovery](garden-migration.md); neither a build nor a reconnect activates a prepared destination.
 
 A client with the matching existing `memory:write`, `decision:write` or `task:write` scope can propose that kind. A read-only client cannot propose. For a new client that may submit all three kinds for review but may not write canonical records directly, create a separate grant:
 
 ```powershell
-mother grant reviewed-agent --scopes read,context:propose
+mother garden grant-v1 reviewed-agent --db "C:\private-data\mother\garden.redb" --out "C:\private-data\mother\reviewed-agent.native.json" --access companion --subject reviewed-agent --scopes read,context:propose
 ```
 
-Use that new private config in the intended harness. This command does not modify an existing grant. Existing write-capable grants still permit their direct-write tools for compatibility; the review-first workflow must use `mother_propose_memory`. No MCP tool can approve the inbox. Save rechecks the proposer's current grant and rejects revoked or insufficient access; Dismiss remains available to the local owner.
+Stop the owner service before provisioning. Restart it afterward, bind the new direct credential with `garden service-config`, then use that private service config in the intended harness. This command does not modify an existing grant. Existing write-capable grants still permit their direct-write tools for compatibility; the review-first workflow must use `mother_propose_memory`. No MCP tool can approve the inbox. Save rechecks the proposer's current grant and rejects revoked or insufficient access; Dismiss remains available to the local owner.
 
-For private ChatGPT connections, a tunnel is still needed to reach the local MCP service. The inbox itself needs no OpenAI API key. Local harnesses use stdio MCP as before.
+Native owner review needs no OpenAI API key. Local harnesses use the authenticated stdio bridge. Mother no longer manages ChatGPT tunnels; any remote transport requires separate supported setup and acceptance.
 
 ## Persistence and recovery
 
-Proposals and their operation receipts are stored in additive inbox tables in the same SQLite database. Original v1 tables, workspace ID, restore generation, grants and canonical records remain unchanged by opening an existing workspace. Ordinary recall and semantic indexing only read approved canonical records.
+Native v1 and graph proposals use separate inbox tables inside the canonical redb store. Merely opening an existing native workspace preserves its identity, generation, grants and records. Pending proposals stay outside ordinary recall and semantic indexing; those read committed canonical records, including records saved through compatible direct-write grants.
 
 Portable exports include the inbox extension once present. Restore validates it before creating a fresh destination, preserves proposal/audit IDs and excludes grants. Pending proposals retain their capture generation: after restore they are visibly stale and cannot be saved. They can be dismissed, or an agent can create a fresh proposal against the restored workspace and current target revision. Restore never approves or runs anything.
 
-Legacy exports without an inbox remain supported. Use an inbox-aware M.O.T.H.E.R binary to export or restore workspaces containing these proposals; older binaries do not know how to preserve the extension.
+The native v1 compatibility importer accepts validated historical portable bundles, including those without an inbox extension, subject to its matching-identity empty-view requirement. It does not open a SQLite database or supply a generic legacy restore command. Use a full native backup when small v1 export cannot represent all state.
+
+For native workspaces, use a [full backup](garden-backups.md) to preserve graph and v1 proposals, outcomes and canonical state. Small v1 export refuses with `FULL_BACKUP_REQUIRED` when it cannot represent the whole workspace. Restored pending proposals retain their old generation and cannot be approved as new requests. Historical cutover journals and source fences remain enforced; exact grant reissue is explicit and new SQLite conversion/activation is unavailable. Rollback after new canonical writes requires reconciliation rather than discarding approved knowledge.
 
 ## Verification boundary
 
-Automated tests use synthetic workspaces and real MCP subprocesses, plus the same TUI review controller and terminal rendering used by the app. They cover approval, edits, dismissal, cross-client correction, retries, duplicates, stale revisions, revocation and restore. Actual ChatGPT/Hermes/Claude conversations must be checked after their installed executables are upgraded and tools reloaded; protocol tests alone do not establish that those apps have loaded the new tools.
+Automated tests use synthetic workspaces and real MCP subprocesses, plus the same TUI review controller and terminal rendering used by the native owner inbox. They cover approval, edits, dismissal, cross-client correction, retries, duplicates, stale revisions, revocation and restore. Actual ChatGPT/Hermes/Claude conversations must be checked after their installed executables are upgraded and tools reloaded; protocol tests alone do not establish that those apps have loaded the new tools.

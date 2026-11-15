@@ -116,29 +116,40 @@ fn pasted_shortcuts_never_approve_and_editor_bounds_are_enforced() {
     assert_eq!(editor.fields[0].len(), 240);
 }
 
-fn workspace_fixture() -> (tempfile::TempDir, Store, mother::contracts::Auth, Value) {
+fn workspace_fixture() -> (tempfile::TempDir, mother::contracts::Auth, Value) {
     let dir = tempfile::tempdir().unwrap();
-    let mut store = Store::initialize(
-        &dir.path().join("context.sqlite"),
-        "Synthetic inbox persona",
-    )
-    .unwrap();
-    let grant = store
-        .grant("synthetic-chatgpt", &["read".into(), "memory:write".into()])
+    let workspace = uuid::Uuid::new_v4().to_string();
+    let generation = uuid::Uuid::new_v4().to_string();
+    let store =
+        GardenStore::initialize(dir.path().join("native.redb"), &workspace, &generation).unwrap();
+    store.v1_initialize("Synthetic inbox persona").unwrap();
+    let auth = store
+        .v1_grant(
+            "synthetic-chatgpt",
+            &["read".into(), "context:propose".into()],
+            &mother::access::ClientAccess::default(),
+            None,
+        )
         .unwrap();
-    let auth = mother::contracts::Auth {
-        client_id: "synthetic-chatgpt".into(),
-        token: grant["token"].as_str().unwrap().into(),
-    };
-    let w = store.workspace().unwrap();
-    let request = json!({"workspaceId":w["id"],"generation":w["generation"],"operationId":uuid::Uuid::new_v4().to_string(),"expectedRevision":0,"source":"Synthetic owner statement in test chat","basis":"owner_statement","record":proposal()["record"]});
-    (dir, store, auth, request)
+    let request = json!({"workspaceId":workspace,"generation":generation,"operationId":uuid::Uuid::new_v4().to_string(),"expectedRevision":0,"source":"Synthetic owner statement in test chat","basis":"owner_statement","record":proposal()["record"]});
+    (dir, auth, request)
+}
+fn call(
+    dir: &tempfile::TempDir,
+    auth: &mother::contracts::Auth,
+    method: &str,
+    request: Value,
+) -> Value {
+    GardenStore::open_active(dir.path().join("native.redb"))
+        .unwrap()
+        .v1_call(auth, method, request)
+        .unwrap()
 }
 #[test]
 fn owner_controller_edits_then_saves_to_shared_store_only_after_confirmation() {
-    let (dir, mut store, auth, request) = workspace_fixture();
-    store.propose(&auth, request).unwrap();
-    let mut inbox = Inbox::open(dir.path().join("context.sqlite")).unwrap();
+    let (dir, auth, request) = workspace_fixture();
+    call(&dir, &auth, "mother_propose_memory", request);
+    let mut inbox = Inbox::open_native(dir.path().join("native.redb")).unwrap();
     assert_eq!(inbox.items.len(), 1);
     inbox.input(press(KeyCode::Enter)).unwrap();
     inbox.input(press(KeyCode::Char('e'))).unwrap();
@@ -151,14 +162,14 @@ fn owner_controller_edits_then_saves_to_shared_store_only_after_confirmation() {
         .input(KeyEvent::new(KeyCode::Char('s'), KeyModifiers::CONTROL))
         .unwrap();
     assert!(
-        store.context(&auth, json!({})).unwrap()["records"]
+        call(&dir, &auth, "mother_get_context", json!({}))["records"]
             .as_array()
             .unwrap()
             .is_empty()
     );
     inbox.input(press(KeyCode::Char('s'))).unwrap();
     assert!(
-        store.context(&auth, json!({})).unwrap()["records"]
+        call(&dir, &auth, "mother_get_context", json!({}))["records"]
             .as_array()
             .unwrap()
             .is_empty()
@@ -167,18 +178,21 @@ fn owner_controller_edits_then_saves_to_shared_store_only_after_confirmation() {
     assert_eq!(inbox.page, InboxPage::List);
     assert!(inbox.message.starts_with("Saved"));
     assert!(inbox.items.is_empty());
-    let context = store.context(&auth, json!({})).unwrap();
-    let record = store
-        .get(&auth, context["records"][0]["id"].as_str().unwrap())
-        .unwrap();
+    let context = call(&dir, &auth, "mother_get_context", json!({}));
+    let record = call(
+        &dir,
+        &auth,
+        "mother_get_record",
+        json!({"id":context["records"][0]["id"]}),
+    );
     assert_eq!(record["content"], "Black tea — owner edited");
     assert_eq!(record["actor"], "@owner-review");
 }
 #[test]
 fn owner_controller_dismiss_keeps_proposal_out_of_recall() {
-    let (dir, mut store, auth, request) = workspace_fixture();
-    store.propose(&auth, request).unwrap();
-    let mut inbox = Inbox::open(dir.path().join("context.sqlite")).unwrap();
+    let (dir, auth, request) = workspace_fixture();
+    call(&dir, &auth, "mother_propose_memory", request);
+    let mut inbox = Inbox::open_native(dir.path().join("native.redb")).unwrap();
     inbox.input(press(KeyCode::Enter)).unwrap();
     inbox.input(press(KeyCode::Char('d'))).unwrap();
     inbox.input(press(KeyCode::Esc)).unwrap();
@@ -188,7 +202,7 @@ fn owner_controller_dismiss_keeps_proposal_out_of_recall() {
     assert!(inbox.message.starts_with("Dismissed"));
     assert!(inbox.items.is_empty());
     assert!(
-        store.context(&auth, json!({})).unwrap()["records"]
+        call(&dir, &auth, "mother_get_context", json!({}))["records"]
             .as_array()
             .unwrap()
             .is_empty()
@@ -196,12 +210,15 @@ fn owner_controller_dismiss_keeps_proposal_out_of_recall() {
 }
 #[test]
 fn retry_uses_frozen_operation_and_does_not_duplicate_a_committed_save() {
-    let (dir, mut store, auth, request) = workspace_fixture();
-    store.propose(&auth, request).unwrap();
-    let mut inbox = Inbox::open(dir.path().join("context.sqlite")).unwrap();
+    let (dir, auth, request) = workspace_fixture();
+    call(&dir, &auth, "mother_propose_memory", request);
+    let mut inbox = Inbox::open_native(dir.path().join("native.redb")).unwrap();
     inbox.input(press(KeyCode::Enter)).unwrap();
     let review = json!({"workspaceId":inbox.workspace["id"],"generation":inbox.workspace["generation"],"operationId":uuid::Uuid::new_v4().to_string(),"proposalId":inbox.proposal["id"],"expectedRevision":1,"action":"save","record":inbox.candidate});
-    store.review_proposal(review.clone()).unwrap(); // commit succeeded but imagine its response was lost
+    GardenStore::open_active(dir.path().join("native.redb"))
+        .unwrap()
+        .v1_review_proposal(review.clone())
+        .unwrap(); // commit succeeded but imagine its response was lost
     inbox.pending = Some(review);
     inbox.page = InboxPage::ConfirmSave;
     inbox.input(press(KeyCode::Esc)).unwrap();
@@ -209,7 +226,7 @@ fn retry_uses_frozen_operation_and_does_not_duplicate_a_committed_save() {
     inbox.input(press(KeyCode::Enter)).unwrap();
     assert_eq!(inbox.page, InboxPage::List);
     assert_eq!(
-        store.context(&auth, json!({})).unwrap()["records"]
+        call(&dir, &auth, "mother_get_context", json!({}))["records"]
             .as_array()
             .unwrap()
             .len(),

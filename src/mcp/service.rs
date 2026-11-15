@@ -26,10 +26,10 @@ impl ServerHandler for Bridge {
     }
     async fn list_tools(
         &self,
-        _: Option<PaginatedRequestParams>,
+        request: Option<PaginatedRequestParams>,
         _: RequestContext<RoleServer>,
     ) -> std::result::Result<ListToolsResult, ErrorData> {
-        Ok(ListToolsResult::with_all_items(self.tools.clone()))
+        super::discovery::list_tools(&self.tools, request)
     }
     async fn call_tool(
         &self,
@@ -75,9 +75,18 @@ pub(super) async fn serve(path: &Path) -> Result<()> {
         let enabled = available["v1"]["available"]
             .as_bool()
             .ok_or_else(input_error)?;
+        let graph_available = available["garden"]["available"]
+            .as_bool()
+            .ok_or_else(input_error)?;
         Ok(Bridge {
             client,
-            tools: garden::advertised_tools(enabled)?,
+            tools: if graph_available {
+                garden::advertised_tools(enabled)?
+            } else if enabled {
+                garden::advertised_context_tools()?
+            } else {
+                return Err(input_error());
+            },
         })
     })
     .await

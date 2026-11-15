@@ -159,7 +159,7 @@ G2 and G3 may be researched independently; G4 depends on both. AnimaOS A6 follow
 - [x] Block old-generation proposals, preserve historical receipts and disable use of the archived source as an active endpoint. Detect stale configs rather than silently choosing an old file.
 - [x] Document rollback before and after first destination write. After-write rollback must reconcile new acknowledged state; reject a rollback that would discard it.
 - [x] Audit the new runtime dependency graph for native database/index code. Put SQLite import support in a separate migration build; document OS library calls separately from the pure-Rust engine claim.
-- [ ] Run `cargo test --locked --test garden_service` and `cargo test --locked --test garden_migration` on Windows, Linux and macOS. Windows passed; Linux/macOS runtime qualification remains in G9.
+- [ ] Run `cargo test --locked --test garden_service` and `cargo test --locked --test garden_migration` on Windows, Linux and macOS. Windows and Linux passed; current macOS runtime qualification remains open in G9.
 
 **Acceptance:** No dual authoritative stores, no lost acknowledged mutations across supported cutover/recovery cases, and unchanged behavior for an ordinary v1 runtime upgrade.
 
@@ -169,10 +169,10 @@ G2 and G3 may be researched independently; G4 depends on both. AnimaOS A6 follow
 
 **Create:** `docs/benchmarks/garden-acceptance.md`.
 
-- [ ] Document the collector/keeper boundary and optional persona. Distinguish connection, proposal, approval, indexed availability and actual host recall.
+- [x] Document the collector/keeper boundary and optional persona. Distinguish connection, proposal, approval, indexed availability and actual host recall.
 - [ ] Run the complete acceptance matrix in the design, including two synthetic harnesses and an additive AnimaOS agent.
-- [ ] Re-run G2 workloads on the completed implementation, including 1m-record stress and high-degree nodes. Record unmet budgets without claiming readiness.
-- [ ] Run all four required checks from the repository root:
+- [x] Re-run G2 logical workloads through the completed public contracts, including high-degree/history cases and a separate 1m stress invocation. Retain failed 10k gates, the memory-interrupted 100k audit and the one-hour 1m load deadline; no readiness claim. See the G9 acceptance report for method differences and exact results.
+- [x] Run all four required checks from the repository root on the isolated Windows source. Native tests/build/Clippy, warning-free Rustdoc and macOS compile-only checks also pass. Linux tests/builds/Clippy/docs pass on identical source; its formatter is unavailable.
 
 ```powershell
 cargo fmt --all -- --check
@@ -182,6 +182,6 @@ cargo clippy --locked --all-targets --all-features -- -D warnings
 ```
 
 - [ ] Validate separate new-runtime and legacy-migration feature builds, including the pure-Rust dependency audit. Run platform CI equivalents without unilaterally changing repository automation.
-- [ ] Review rollback instructions, compatibility results and failure recovery before proposing release. Building binaries does not authorize installing them or migrating live records.
+- [x] Review rollback instructions, compatibility results and failure recovery. The G9 report records HOLD with failed scale/native-host gates and unavailable macOS runtime acceptance. Building binaries does not authorize installing them or migrating live records.
 
 **Done:** A and B/C have separate release notes; tested capability and measured limits are stated accurately. Owner accepts a live cutover separately, after reviewing the concrete migration report.

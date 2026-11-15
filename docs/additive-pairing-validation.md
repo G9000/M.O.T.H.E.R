@@ -1,4 +1,6 @@
-# Additive AnimaOS pairing validation
+# Historical additive AnimaOS pairing validation
+
+This report preserves evidence for the former Mother terminal pairing adapter. That adapter and its setup dashboard were removed with the SQLite runtime; these results do not establish a current onboarding flow. Native AnimaOS connections require explicit [service setup](garden-service.md) and host configuration as described in [the AnimaOS guide](animaos.md).
 
 The G1 pairing slice builds on the existing connection replacement, slot-limit,
 old-program-path and error-reporting edits. Those four changed files were copied

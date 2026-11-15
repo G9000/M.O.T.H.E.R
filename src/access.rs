@@ -3,8 +3,6 @@ use crate::{
     contracts,
     error::{Error, Result, invalid},
 };
-#[cfg(feature = "legacy-sqlite")]
-use rusqlite::{Connection, OptionalExtension, params};
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 /// Owner-selected context visibility; scopes remain independently required.
@@ -66,24 +64,6 @@ impl ClientAccess {
             Ok(())
         } else {
             Err(Error::domain("NOT_FOUND", "Record does not exist."))
-        }
-    }
-    #[cfg(feature = "legacy-sqlite")]
-    pub(crate) fn filter(&self) -> String {
-        if self.mode != AccessMode::Shared {
-            "1".into()
-        } else if self.records.is_empty() {
-            "0".into()
-        } else {
-            // Both provisioning and policy loading validate canonical UUID syntax.
-            format!(
-                "id IN ({})",
-                self.records
-                    .iter()
-                    .map(|x| format!("'{x}'"))
-                    .collect::<Vec<_>>()
-                    .join(",")
-            )
         }
     }
     pub(crate) fn references(&self, record: &Value) -> Result<()> {
@@ -168,87 +148,4 @@ impl ClientAccess {
         self.scrub(v);
         Ok(())
     }
-}
-#[cfg(feature = "legacy-sqlite")]
-pub(crate) fn load(conn: &Connection, client: &str) -> Result<ClientAccess> {
-    // This grant anchor is separate from withdrawable policy content. Reads occur
-    // inside the caller's canonical transaction, so policy loss cannot become legacy.
-    let requirements_exist: bool = conn.query_row(
-        "SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE type='table' AND name='client_policy_requirements')",
-        [], |r| r.get(0),
-    )?;
-    let required = requirements_exist
-        && conn.query_row(
-            "SELECT EXISTS(SELECT 1 FROM client_policy_requirements WHERE client_id=?)",
-            [client],
-            |r| r.get::<_, bool>(0),
-        )?;
-    let missing_policy = || {
-        Error::domain(
-            "FORBIDDEN",
-            "This scoped grant requires a current companion or shared policy.",
-        )
-    };
-    let exists: bool = conn.query_row(
-        "SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE type='table' AND name='client_access')",
-        [],
-        |r| r.get(0),
-    )?;
-    if !exists {
-        return if required {
-            Err(missing_policy())
-        } else {
-            Ok(ClientAccess::default())
-        };
-    }
-    let raw: Option<String> = conn
-        .query_row(
-            "SELECT policy FROM client_access WHERE client_id=?",
-            [client],
-            |r| r.get(0),
-        )
-        .optional()?;
-    let p = raw
-        .map(|s| serde_json::from_str::<ClientAccess>(&s))
-        .transpose()?
-        .unwrap_or_default();
-    p.validate()?;
-    if required && p.mode == AccessMode::Legacy {
-        return Err(missing_policy());
-    }
-    Ok(p)
-}
-#[cfg(feature = "legacy-sqlite")]
-pub(crate) fn save(
-    conn: &Connection,
-    client: &str,
-    scopes: &[String],
-    p: &ClientAccess,
-) -> Result<()> {
-    p.validate()?;
-    if p.mode == AccessMode::Shared
-        && scopes.iter().any(|s| {
-            !matches!(
-                s.as_str(),
-                "read" | "context:propose" | "garden:read" | "garden:propose"
-            )
-        })
-    {
-        return Err(invalid("Shared grants allow only read and proposal scopes"));
-    }
-    for id in &p.records {
-        crate::store::read_record(conn, id)?;
-    }
-    if p.mode != AccessMode::Legacy {
-        conn.execute_batch("CREATE TABLE IF NOT EXISTS client_access(client_id TEXT PRIMARY KEY,policy TEXT NOT NULL); CREATE TABLE IF NOT EXISTS client_policy_requirements(client_id TEXT PRIMARY KEY)")?;
-        conn.execute(
-            "INSERT INTO client_policy_requirements VALUES (?)",
-            [client],
-        )?;
-        conn.execute(
-            "INSERT INTO client_access VALUES (?,?)",
-            params![client, serde_json::to_string(p)?],
-        )?;
-    }
-    Ok(())
 }

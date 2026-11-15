@@ -1,0 +1,29 @@
+{
+  "synthetic": true,
+  "captured_at_utc": "2026-11-15T08:54:30Z",
+  "command": "cargo test --locked --test mcp additive_anima::additive_anima_native_service_selected_sharing_and_reconciliation -- --ignored --exact",
+  "exit_code": 101,
+  "tests_passed": 0,
+  "tests_failed": 1,
+  "http_status": 503,
+  "phase": "descriptor_validation",
+  "category": "SchemaRejected",
+  "tool_index": 0,
+  "tool_name": "mother_garden_get",
+  "description_bytes": 99,
+  "input_schema_bytes": 1219,
+  "output_schema_bytes": 8656,
+  "discovery_frame_regression": {
+    "failed_before_pagination": true,
+    "unit_tests_passed_after_pagination": 3,
+    "graph_only_pages": 2,
+    "graph_only_tools": 8,
+    "v1_enabled_pages": 3,
+    "v1_enabled_tools": 19,
+    "serialized_result_page_limit_bytes": 49152,
+    "host_frame_limit_bytes": 65536
+  },
+  "source_diagnosis": "AnimaOS requires an explicit object type at each schema root. Native graph inputs use root $ref/$defs and outputs use oneOf/$defs without that type. This rejects the first descriptor. Later combined-size/depth/reference bounds still require qualification; paging alone does not establish interoperability.",
+  "host_limits_relaxed": false,
+  "live_settings_changed": false
+}

@@ -37,7 +37,7 @@ M.O.T.H.E.R paths below are repository-relative. AnimaOS paths refer to `C:/User
 | `src/history.rs` | History reconstructed from receipts | Indexed revision queries, including graph assertion history |
 | `src/search.rs`, `src/embedding.rs` | Fixed embedding profile, snapshot scan, built-in hybrid ordering | Capability-based retrieval with bounded index work and explicit freshness |
 | `src/limits.rs`, `src/portability.rs` | 10,000 records, 100,000 operations and 64 MiB portable capacity | Decouple lifetime capacity from one JSON export; streaming backups |
-| AnimaOS `packages/core-rust/crates/anima-memory/src/external_provider.rs` | Additive recall, turn and write hooks | Implement a M.O.T.H.E.R adapter; retain local memory |
+| AnimaOS [external_provider.rs](C:/Users/leoca/OneDrive/Desktop/anima/animaos-kit/packages/core-rust/crates/anima-memory/src/external_provider.rs) | Additive recall, turn and write hooks | Implement a M.O.T.H.E.R adapter; retain local memory |
 | AnimaOS `hosts/rust-daemon/src/memory_provider.rs` | Only `none` registered; process-wide, lossy event queue | Agent-bound provider instances and reliable selected publication |
 | AnimaOS `hosts/rust-daemon/src/workspace_context.rs` | Companion mode couples persona with primary memory | Explicit additive binding independent of persona |
 | AnimaOS `hosts/rust-daemon/src/agent_runs.rs` | Companion skips local capture, turn mirroring and learning paths | Additive mode retains native paths without enabling indiscriminate external capture |

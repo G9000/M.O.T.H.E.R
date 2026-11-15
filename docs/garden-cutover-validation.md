@@ -1,10 +1,15 @@
-# G8 cutover qualification
+# Historical G8 cutover qualification
+
+This page preserves qualification of the earlier dual-runtime G8 source. The SQLite backend, feature, converter and source preparation/activation commands are now removed. Build variants and commands below are archival reproduction evidence, not current instructions. All current builds are native; use [setup](setup.md), [current validation requirements](validation.md) and [retained historical journal recovery](garden-migration.md). Native owner inbox review remains supported.
 
 The G1–G7 foundation and preserved additive pairing safeguards were merged and
 pushed to `origin/main` at `30f991b8d91fb56accaf44125a269b25436a4e30` before G8
-implementation. G8 is being qualified separately on `g9000/mother-garden-cutover`.
+implementation. The historical G8 results below were produced on
+`g9000/mother-garden-cutover`; that source was subsequently merged and pushed as
+`df6c6eb07337ab28a153f5c9decf27d63b34d8d1`. Current release gates and later platform
+fixes are recorded in the [G9 assessment](benchmarks/garden-acceptance.md).
 
-## Reproduce the builds
+## Historical build reproduction
 
 The default feature retains the existing SQLite runtime and explicit converter.
 The native executable uses the same package with `--no-default-features`:

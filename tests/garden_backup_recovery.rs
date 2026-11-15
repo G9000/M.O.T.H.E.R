@@ -32,7 +32,8 @@ fn killed_restore_never_publishes_partial_or_credentialed_state() {
         "before_publish",
         "published",
     ] {
-        let dir = tempfile::tempdir().unwrap();
+        let dir =
+            tempfile::tempdir_in(std::fs::canonicalize(std::env::temp_dir()).unwrap()).unwrap();
         let root = dir.path().canonicalize().unwrap();
         let nonce = uuid::Uuid::new_v4().to_string();
         fs::write(root.join("owned"), &nonce).unwrap();

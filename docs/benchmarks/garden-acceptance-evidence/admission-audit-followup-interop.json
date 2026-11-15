@@ -1,0 +1,16 @@
+{
+  "synthetic": true,
+  "command": "cargo test --locked --test mcp additive_anima:: -- --ignored",
+  "results": {
+    "summary_lines": 1,
+    "passed": 2,
+    "failed": 0,
+    "ignored": 0
+  },
+  "scope": "real AnimaOS executable, legacy backend and native owner-service context-only grants",
+  "native_selected_sharing_owner_edit_correction_restart": "passed",
+  "anima_source_changed_this_slice": false,
+  "host_schema_limits_relaxed": false,
+  "full_graph_schema_admission": "not qualified; explicit graph grants still expose full graph contracts",
+  "installed_host_or_model_acceptance": false
+}
