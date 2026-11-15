@@ -1,4 +1,4 @@
-//! Owner entry point for the build that excludes legacy SQLite support.
+//! Owner entry point for the standalone native shared garden.
 use clap::{CommandFactory, Parser, Subcommand};
 use mother::error::Result;
 use std::path::PathBuf;

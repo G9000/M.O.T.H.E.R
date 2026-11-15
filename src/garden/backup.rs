@@ -106,7 +106,9 @@ fn unhex(text: &str) -> Result<Vec<u8>> {
         return Err(bad("Invalid portable byte encoding"));
     }
     text.as_bytes()
-        .chunks_exact(2)
+        .as_chunks::<2>()
+        .0
+        .iter()
         .map(|p| {
             let digit = |b: u8| if b <= b'9' { b - b'0' } else { b - b'a' + 10 };
             Ok((digit(p[0]) << 4) | digit(p[1]))

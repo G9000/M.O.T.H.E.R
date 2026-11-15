@@ -1,18 +1,15 @@
 # Graph proposals and owner approval (G5)
 
-This records the G5 milestone. The subsequent [G6 slice](garden-queries.md) enables
-indexed queries, change tracking and explicit selected vector preparation on the
-same graph-only connection. G5 validation below remains its historical evidence.
+The native redb Garden supports selected graph proposal batches and explicit owner approval alongside its optional v1 context view. The SQLite runtime and converter are removed. This guide retains historical G5 qualification below; current query tools, v1 compatibility, full backups and local service are implemented. See [graph queries](garden-queries.md), [native compatibility](garden-compatibility.md) and [service operation](garden-service.md).
 
-The graph prototype accepts selected entity/assertion/evidence batches for owner
+The graph inbox accepts selected entity/assertion/evidence batches for owner
 review. Admission stores the original attributed proposal separately from
 canonical records, history and indexes. Pending content is never established
 memory. Extraction, selection and interpretation remain in each harness.
 
 ## Explicit graph setup
 
-The graph path is separate from the existing v1 workspace. Use the new owner
-commands with explicit private paths:
+Graph and v1 views can share one native database with independent grants. For a new graph-only workspace use explicit private paths; stop the owner service before direct administration and restart it afterward:
 
 ```text
 mother garden init --db <absolute-private-garden.redb>
@@ -34,21 +31,13 @@ Graph credentials use a strict version 2 configuration with the explicit
 the token. Keep both database and configuration under an owner-private directory
 outside the checkout. Existing v1 keys are not upgraded, imported or reconfigured.
 
-The G5 graph-only stdio server advertises capability discovery plus the five
-implemented graph operations: get, apply, propose, get-proposal and get-receipt.
-At that milestone it advertised no approval, query, changes, grants or v1 context tools. Capability
-discovery labels this connection as a prototype without v1 compatibility or
-migration. It installs no persona and does not load an embedding model.
+Current graph discovery includes capability discovery and seven graph operations: get, apply, propose, get-proposal, get-receipt, query and changes. Available operations depend on the credential; definitions are not authority. The initialized v1 view is advertised separately according to current scopes. No MCP tool approves proposals, issues grants, restores backups or activates an endpoint. Graph setup alone installs no persona or model.
 
-Database handles live only for individual requests/review actions, allowing an
-idle MCP connection and owner inbox to share the file. This host serializes its
-own requests. Other processes may temporarily encounter `STORE_UNAVAILABLE`
-while the exclusive redb handle is held. Reconcile uncertain writes with the
-original UUID; the prototype does not enable experimental multiprocess modes.
+For multiple harnesses, one [local owner service](garden-service.md) holds the sole database handle and authenticated stdio bridges never open it. A direct `garden_redb` connection is a single-process option, incompatible with a running owner service on that file. Stop the service before owner review, then restart it afterward. Reconcile uncertain writes with the original UUID; never bypass the exclusive owner or cutover fences.
 
 ## Review and attribution
 
-The owner inbox shows each original and reviewed item, evidence, proposer and
+In a terminal, `garden inbox` opens native owner review; when piped, it lists JSON. An explicit reviewed JSON request can also use `garden review --db <garden.redb> --request <review.json> --graph`. The owner inbox shows each original and reviewed item, evidence, proposer and
 expected revision. Owners may edit the bounded item array or add distinct item
 keys, then inspect the complete batch before confirming approval. Original keys,
 targets and expected revisions remain anchored to the submitted proposal;
@@ -93,7 +82,7 @@ the proposal by guessing its UUID, and revoked clients cannot reconcile through
 the connection. Owner review uses its own immutable operation UUID and exact
 request for response-loss recovery.
 
-## Acceptance
+## Historical G5 acceptance
 
 Executed on Windows on 15 November 2026 with synthetic records and owner-private
 temporary stores:

@@ -1,17 +1,15 @@
 # Transactional temporal graph storage (G4)
 
-Mother has an independent Rust `garden::store::GardenStore` implementing the v2
-graph contracts on pinned redb 4.6.0. This records the G4 library foundation. The
-subsequent [G5 slice](garden-proposals.md) adds an explicit graph-only connection;
-default v1 MCP discovery still reports graph tools as inactive. No installed client, live database, v1
-SQLite schema, generation or grant is migrated by this slice.
+Mother uses the independent Rust `garden::store::GardenStore` and pinned redb storage as its sole runtime. Graph state and the explicitly enabled v1 compatibility view share canonical transaction authority. The SQLite runtime and converter are removed; old configs fail explicitly. See [native compatibility](garden-compatibility.md), [graph setup](garden-proposals.md), [full backups](garden-backups.md) and [the local owner service](garden-service.md).
+
+This guide retains the G4 storage foundation and its historical qualification below. Statements in that qualification about future slices and inactive graph transport describe that milestone only; current graph operations and native v1 tools are implemented with independent scopes.
 
 ## Authority and durability
 
 An owner explicitly initializes a new private graph file with a workspace ID and
 generation, then provisions graph credentials. Initialization refuses an existing
 destination; opening does not create a missing file. These credentials are
-independent of v1 SQLite grants. Credentials and permissions are not imported
+independent of v1 context authority; no SQLite grants are loaded by this runtime. Credentials and permissions are not imported
 automatically from another harness.
 
 The caller chooses an explicit private data path outside the checkout. File
@@ -64,23 +62,15 @@ immutable canonical mappings remain available.
 
 ## Boundaries
 
-This slice supports atomic batch application, exact operation reconciliation and
-authorized current, historical and validity-filtered object reads. It maintains
-temporal and graph indexes for later query work. It does not enable graph MCP
-dispatch, inbox/approval integration, traversal/query pagination, text or vector
-retrieval, v1 migration, or automatic memory extraction.
+The G4 foundation supplies atomic graph batches, lifecycle transitions and authorized temporal reads. Later native slices add proposal review, indexed queries, traversal/pagination, change feeds, optional local vectors, v1 compatibility and complete backups on the same redb authority. The runtime performs no automatic memory extraction or transcript ingestion.
 
-Routine operations use point lookups and indexed retirement dependencies rather
-than scanning the whole graph. Their referenced-object closure has a 10,000-object
-work ceiling and fails with `LimitExceeded` when exceeded. The owner-authorized
-consistency audit deliberately examines the whole store.
+Routine operations use point lookups and indexed retirement dependencies. Their referenced-object closure has a 10,000-object work ceiling and fails with `LimitExceeded` when exceeded. The owner-authorized consistency audit deliberately examines the whole store. Derived indexes never replace current canonical authority.
 
-The graph engine is pure Rust. Mother as a whole still includes its existing
-SQLite runtime. The previous engine qualification remains a conditional prototype
-decision; this slice does not establish production workload latency or
-cross-platform power-loss guarantees.
+One local owner service holds the database handle for multiple authenticated stdio bridges. Direct owner administration requires stopping that service. Existing cutover fences and journals remain enforced; new SQLite conversion and source activation are unavailable.
 
-## Validation
+The graph engine is pure Rust. Native inbox rendering uses Rust terminal libraries and retained operating-system support. Historical prototype storage measurements do not establish current production latency or cross-platform physical power-loss guarantees; see [validation](validation.md).
+
+## Historical G4 validation
 
 Synthetic tests cover atomic rollback, immutable retries, current revocation,
 endpoint visibility, lifecycle rules, extension retention, clock rollback,

@@ -1,55 +1,37 @@
 # Local semantic search
 
-M.O.T.H.E.R retrieves context; it does not run an agent, execute tools on behalf of a harness, or invent memories. Canonical records, corrections, grants, receipts and exports remain in the existing SQLite v1 store. Retrieval uses a disposable vector cache beside that database. No AnimaOS runtime or third-party memory service is required.
+M.O.T.H.E.R retrieves selected context; harnesses choose what to remember, interpret results and perform final ranking. Canonical graph/v1 records and immutable receipts live in redb. Optional local vector caches are disposable redb data. Pending proposals never enter canonical recall or indexes. No AnimaOS runtime, remote model provider or automatic transcript ingestion is required.
 
-## Setup
+## Supported surfaces and model availability
 
-The Rust executable includes CPU inference using Candle 0.9.2. Explicitly install the pinned English sentence-transformers/all-MiniLM-L6-v2 model:
+V1 MCP `mother_search_context` accepts `hybrid` (default), `semantic` and `literal` modes. `mother_get_context` remains the context/navigation operation. Graph queries expose separate lexical/vector component scores and coverage for the consuming harness to combine; they do not use v1 hybrid ranking.
 
-```powershell
-mother model install
-mother model status
-```
+The current executable has no `model install/status`, general owner `search` or v1 `index` commands. It can load already installed, verified pinned local Candle assets. Startup, search and graph preparation never download a model. There is no built-in installation workflow in this release; absent or invalid assets produce an explicit literal fallback instead of a hidden download or provider call.
 
-Installation downloads approximately 91 MB of public weights, tokenizer and configuration from Hugging Face at a fixed revision, checks exact sizes and SHA-256 hashes, and publishes the verified directory. No record/query text or credentials are sent. There is no paid model API call. Search and MCP startup never download anything; after installation inference is local. The model uses the Apache-2.0 license; see its [model card](https://huggingface.co/sentence-transformers/all-MiniLM-L6-v2).
+`MOTHER_MODEL_DIR` selects an absolute model directory. Existing verified all-MiniLM-L6-v2 assets can remain usable; the loader checks the pinned files/profile rather than trusting arbitrary model content. Model absence, corruption or an invalid path setting leaves ordinary context reads/writes and literal search available. The English model's relevance and multilingual quality require their own evaluation.
 
-By default assets live under the private MOTHER data directory in its `models` subfolder, under `all-MiniLM-L6-v2`. `MOTHER_MODEL_DIR` can select another absolute model directory. A missing/corrupt model or invalid model-directory setting leaves ordinary memory reads/writes and literal search usable. Explicit model commands report failures. Invalid existing installations are not overwritten; select another directory or move the invalid directory aside before installing again.
-
-## Search and indexing
+Selected graph preparation remains an explicit owner command:
 
 ```powershell
-mother search --config "C:\private\codex.private.json" --query "What was the next step for deployment?"
-mother search --config "C:\private\codex.private.json" --query "ZX-731" --mode literal
-mother search --config "C:\private\codex.private.json" --query "How do we recover lost documents?" --mode semantic
-mother index --config "C:\private\codex.private.json" --max-records 32
+mother garden index --config "C:\private-data\mother\graph.native.json" --objects "C:\private-data\mother\selected-objects.json"
 ```
 
-`mother_search_context` uses the same implementation. Its optional `mode` is `hybrid` (default), `semantic`, or `literal`. Search adds no separate tool. `updatedSince` and `updatedBefore` restrict candidates to records last updated in that window, as described in [shared context](context.md#time-windows). `mother_get_context` remains the original literal/navigation operation.
+The objects file is a bounded JSON array of typed `{kind,id}` references. Stop the owner service first: this command opens the database directly and requires a direct `garden_redb` credential, not a service config. It checks the selected objects' current graph authority and never downloads assets. Restart the service afterward. See [graph query semantics](garden-queries.md), [native compatibility](garden-compatibility.md#optional-local-search) and [service operation](garden-service.md).
 
-Hybrid puts exact substring matches first, then semantic matches ordered by cosine similarity. Semantic mode uses meaning-based matches. Literal mode preserves the existing SQLite matching behavior, including literal percent/underscore and SQLite's Unicode case behavior. A 0.35 cosine floor filters weak semantic candidates; it is a relevance heuristic, not a truth/confidence probability or a calibrated quality guarantee. The initial model targets English; other languages and specialized terms may retrieve less reliably. Exact identifiers remain searchable through hybrid/literal mode.
+## Results and freshness
 
-Results retain workspace, persona, preview and unsettled-work fields. Additional `search` metadata states the requested and effective modes, whether semantics participated, fallback/partial reason, model/profile, and coverage counts. `omitted` counts matching candidates beyond the result limit; `unindexedRecords` and `partialRecords` separately report semantic coverage gaps. `unembeddableRecords` counts records whose text yields no model tokens; they are marked for that revision so they cannot block later records. Re-running indexing cannot fix such text or records beyond the supported window cap.
+Hybrid search puts exact literal matches first, followed by semantic candidates ordered by cosine similarity. A 0.35 cosine floor is a relevance heuristic, not a truth probability or quality guarantee. Literal mode never loads or invokes an encoder. Exact identifiers remain available through hybrid/literal search.
 
-A semantic match includes a passage preview and byte offsets into the exact string `title + "\n" + content`, plus a truncation flag. Short matches include adjacent sentence context when it fits within 400 UTF-16 units. `startByte`/`endByte` delimit this contextual span; `embeddingStartByte`/`embeddingEndByte` retain the exact scored span. Longer previews are truncated explicitly. This is navigation to a current record, not a citation proving the record's contents. Fetch the full record before editing or acting.
+Responses report requested/effective mode, whether semantics participated, fallback/partial reason, model/profile and coverage. `semanticUsed: false` must not be described as semantic retrieval. Omitted candidates, unindexed records, partial coverage and zero-token records are distinct outcomes. A prepared vector is not evidence of actual host recall.
 
-## Bounds and freshness
+Semantic passage previews include byte offsets into the exact `title + "\n" + content` string and explicit truncation. Contextual preview offsets and exact scored embedding offsets remain separate. Fetch the current full record before editing or acting; a vector score or excerpt is navigation, not proof of the claim.
 
-Each request scans at most 10,000 active canonical records, the existing store limit. Overlapping 192-token windows (32-token overlap), short sentences (up to 96 tokens), and adjacent sentence pairs (up to 192 tokens) share a cap of 32 distinct token sequences per record. Duplicate raw windows do not consume that cap; uncovered raw text is reported as partial. Supplemental sentence passages use only remaining slots. Hybrid/semantic search prepares at most 8 missing records and 32 new passages; indexing CLI batches accept 1–100 records, with a ceiling of 1,024 new passages. Repeat bounded indexing until `complete` is true, or inspect explicit partial/non-indexable/capacity counts when no further progress is possible. Caches retain completed and explicitly partial outcomes, so subsequent batches advance instead of repeatedly embedding the same record.
+Native v1 search prepares at most eight missing records and 32 new passages per request. Its derived cache is bounded to 32,000 passages and 128 MiB. Canonical native storage has no legacy 10,000-record lifetime cap; that does not promise bounded v1 snapshot-search latency at every scale. Cache keys bind workspace/generation, client visibility, pinned model/profile, record revision and content digest.
 
-Cache admission is capped at 32,000 passages and SQLite pages at 128 MiB. A full cache stops additional indexing with an explicit reason; it does not evict and re-index records indefinitely. Stale/inactive entries are pruned during indexing. The cache contains derived vectors and offsets, is private, and is excluded from exports. It can be rebuilt after closing clients and moving the derived `<database>.search.sqlite` file aside; never move or delete the canonical database for this purpose.
+Before publishing derived data or returning candidates, search rechecks the current canonical snapshot and grant. A changed workspace yields fresh literal fallback; revocation fails closed. Missing/busy models, corrupt caches and unavailable infrastructure report their fallback honestly. Cache capacity does not evict/re-index indefinitely. Writes and full restore do not depend on embeddings; backups exclude rebuildable vectors.
 
-Every cache entry is bound to workspace identity, restore generation, pinned model revision, window profile, record ID, revision and text digest. Search checks access before processing and again against a fresh canonical snapshot before returning. A concurrent correction/retraction causes fresh literal fallback; revocation remains an error. Cached text never overrides the canonical store. Missing, busy or invalid retrieval infrastructure produces a stated fallback, including for requested semantic mode; `semanticUsed: false` must not be described as semantic retrieval.
+## Verification
 
-The service reuses one model per MCP process. A concurrent search falls back instead of waiting for that model. Memory writes do not depend on the cache/model and retain their existing atomic revision and receipt behavior. Restore needs no embedding cache; it rebuilds from canonical records.
+Ordinary tests use synthetic records and offline synthetic or missing-model fixtures. Real-model acceptance requires separately supplied verified local assets and an explicit opt-in test; no model was installed merely by building or running ordinary checks. Follow the current test inventory and [qualification report](validation.md) for runnable checks. Historical SQLite model installer, CLI and sidecar instructions are retired.
 
-## Acceptance
-
-Normal tests run offline with isolated synthetic stores and missing-model fixtures. The opt-in real-model suite requires the explicitly installed model:
-
-```powershell
-$env:MOTHER_TEST_MODEL_DIR = "$env:LOCALAPPDATA\MOTHER\models\all-MiniLM-L6-v2"
-cargo test --release --locked --test semantic_real -- --ignored --nocapture
-cargo test --release --locked --test mcp real_model_semantic -- --ignored --nocapture
-```
-
-These checks exercise no-overlap paraphrases, distractors, an irrelevant query, a clause after a long unrelated prefix, passage offsets, exact identifiers, corrections/retractions, zero-token text, cache reuse and MCP/CLI reads. They are functional acceptance fixtures, not a broad retrieval benchmark. Selective history import and automatic memory extraction/consolidation are not part of this change.
+Storage/protocol tests, synthetic encoder tests, real-model retrieval quality and actual host use are separate evidence. Process interruption does not establish physical power-loss behavior, and a successful selected indexing batch does not establish complete semantic coverage.

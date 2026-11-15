@@ -1,18 +1,8 @@
 # Temporal garden v2 contracts
 
-This describes the G3 contract boundary. The subsequent
-[G4 storage library](garden-temporal-storage.md) implements the canonical graph
-without enabling graph MCP dispatch or migration. The subsequent
-[G5 graph-only prototype](garden-proposals.md) adds an explicit opt-in transport
-and owner review. The default v1 connection still exposes v1 context and additive
-`mother_get_capabilities` discovery. That v1 discovery explicitly
-returns `garden.available: false`, empty available capabilities/tools, and
-`status: "contracts_only"`. Defined future tools are documentation, not authority.
+The native redb Garden is the sole runtime. Graph operations are implemented and have independent current scopes/object policies. Permission-aware discovery reports defined contracts separately from operations authorized for the credential; a v1 context-only credential gains no graph authority. Graph-only and initialized v1 views can share one canonical database. See [native compatibility](garden-compatibility.md), [graph setup](garden-proposals.md) and [local service operation](garden-service.md).
 
-The v1 catalogue in `contracts/mcp-tools.json` stays unchanged. The separate
-`contracts/capabilities-tool.json` is appended to live discovery. The future
-catalogue is `contracts/garden-tools-v2.json`; each input/output schema resolves
-its definitions locally, without fetching schemas over the network.
+The v1 catalogue in `contracts/mcp-tools.json` remains unchanged. `contracts/capabilities-tool.json` supplies additive capability discovery and `contracts/garden-tools-v2.json` defines the graph catalogue. Schemas resolve their definitions locally without fetching network content. The G3 validation section below preserves historical contracts-only milestone evidence; its inactive graph-discovery result does not describe the current native runtime.
 
 ## Model and evolution
 
@@ -46,7 +36,7 @@ precision; source timezone and precision are metadata. Valid time, observed
 time and store-issued transaction time remain separate. Revision metadata
 preserves contributor, later actor and optional owner approver.
 
-## Future operations
+## Graph operations
 
 | Tool | Contract purpose | Explicit scope |
 | --- | --- | --- |
@@ -60,8 +50,7 @@ preserves contributor, later actor and optional owner approver.
 
 Responses carry coverage, canonical/index watermarks and visibility state where
 applicable. Query/change pages carry opaque cursors and bounded snapshot-lease
-metadata. These are wire shapes: signed/opaque token issuance, expiry, epoch
-invalidation and consistent paging still require runtime implementation.
+metadata. The native runtime implements signed/opaque cursors, expiry, epoch invalidation and consistent paging; see [query semantics](garden-queries.md).
 Client-provided cursor contents never grant authority. The structured
 restart-required error tells a client when it must restart a traversal/page.
 
@@ -81,44 +70,20 @@ authority boundary must decide which payloads may be included.
 
 ## Graph authority boundary
 
-Existing v1 `read`, `context:propose` and record-write scopes retain their meaning.
-They grant no graph access. The v1 `SCOPES` constant is unchanged; new graph
-scopes are explicit. Graph policies use separate private tables and anchors,
-created only by the owner provisioning API. Opening an existing workspace does
-not create graph grants, change generation or change SQLite's schema version.
+Existing v1 `read`, `context:propose` and record-write scopes retain their meaning and grant no graph access. Graph policies and principals live in private redb tables under the same transaction authority as canonical graph/v1 data. Merely opening a native workspace neither creates grants nor changes its generation.
 
-`Store::grant_with_garden_access` is the explicit owner library API. It declares
-either full graph access (companion/legacy only) or a typed graph-object allowlist.
-The default allowlist is empty. Shared clients cannot receive full graph access
-or direct-write authority. Their graph IDs do not inherit the v1 record allowlist.
-Every returned object, referenced endpoint and evidence object needs its own
-current visibility. Missing or malformed graph policies fail closed.
+Owner provisioning uses `GardenStore::grant` for graph-only credentials or the explicit native v1 grant APIs with a separately selected graph policy. The CLI exposes `garden grant` and `garden grant-v1`; grant and approval operations are never MCP tools. Full graph access requires explicit companion selection; an omitted allowlist shares no objects. Shared clients cannot receive full graph or direct-write authority, and graph IDs do not inherit the v1 record allowlist.
 
-Graph IDs can be syntax-checked at provisioning time, but without graph storage
-this is only an owner declaration, not an existence check. G3 added no graph CLI
-or MCP grant/approval tool. G5 supplies a separate owner CLI and graph-only
-connection; owner grants and approvals remain unavailable through MCP.
-The current v1 MCP bridge still requires its normal
-v1 read grant for startup; graph scopes are independent permissions, not a
-replacement for that existing startup requirement.
+Every returned object and referenced endpoint/evidence needs current visibility. Missing or malformed policies fail closed. Current native dispatch supports context-only, graph-only and combined grants according to the initialized view and explicit scopes; graph-only startup does not require a v1 read grant. [Permission-aware discovery](garden-compatibility.md) does not itself authorize a call.
 
-The independent G4 graph store uses its own explicit `GardenStore::grant` API.
-Its principals and canonical graph share one redb transaction authority. The
-SQLite grant helpers described here remain contract scaffolding; they cannot
-authorize a redb write or import a live credential into the new graph store.
-
-The access helpers check current scopes, client/subject, workspace and generation
-transactionally against synthetic stored grants. They return authorization
-snapshots, not reusable capabilities. Future graph handlers must recheck inside
-their canonical read/write transaction using references from trusted stored
-objects. Requests cannot supply a different contributor or operation owner.
+Canonical reads, mutations and review recheck client, scope, subject, workspace, generation and stored references inside the transaction. Earlier authorization observations are not reusable capabilities. Requests cannot choose a different contributor or operation owner. Old SQLite grants/configurations are unsupported; there is no converter or implicit import.
 
 Own proposal outcomes can disclose status and canonical result IDs while hiding
 currently unreadable payloads. Approval never adds those IDs to an allowlist.
 Direct-operation receipts require full current visibility. Revoked or restored
 identities cannot use these helpers to replay uncertain effects.
 
-## Validation
+## Historical G3 validation
 
 The contract tests use an offline JSON Schema validator only as a development
 dependency, plus typed semantic validation. JSON schemas describe structural

@@ -1,30 +1,19 @@
-#[cfg(feature = "legacy-sqlite")]
-use mother::{access::AccessMode, store::Store};
-use mother::{access::ClientAccess, contracts::Auth, garden::store::GardenStore};
+use mother::{
+    access::{AccessMode, ClientAccess},
+    contracts::Auth,
+    garden::store::GardenStore,
+};
 use serde_json::{Value, json};
-#[cfg(feature = "legacy-sqlite")]
-use std::path::Path;
 use uuid::Uuid;
 
 enum Backend {
-    #[cfg(feature = "legacy-sqlite")]
-    Sqlite(Store),
     Native(GardenStore),
 }
 impl Backend {
     fn grant(&mut self, name: &str, scopes: &[&str], access: ClientAccess) -> Auth {
         let scopes = scopes.iter().map(|s| s.to_string()).collect::<Vec<_>>();
-        match self {
-            Self::Native(s) => s.v1_grant(name, &scopes, &access, None).unwrap(),
-            #[cfg(feature = "legacy-sqlite")]
-            Self::Sqlite(s) => {
-                let grant = s.grant_with_access(name, &scopes, &access).unwrap();
-                Auth {
-                    client_id: name.into(),
-                    token: grant["token"].as_str().unwrap().into(),
-                }
-            }
-        }
+        let Self::Native(s) = self;
+        s.v1_grant(name, &scopes, &access, None).unwrap()
     }
     fn writer(&mut self) -> Auth {
         self.grant(
@@ -41,75 +30,30 @@ impl Backend {
         )
     }
     fn call(&mut self, auth: &Auth, tool: &str, args: Value) -> mother::error::Result<Value> {
-        match self {
-            Self::Native(s) => s.v1_call(auth, tool, args),
-            #[cfg(feature = "legacy-sqlite")]
-            Self::Sqlite(s) => match tool {
-                "mother_get_context" => s.context(auth, args),
-                "mother_write_record" | "mother_checkpoint" => s.write(auth, args),
-                "mother_get_record" => s.get(auth, args["id"].as_str().unwrap()),
-                "mother_get_receipt" => s.receipt(auth, args["operationId"].as_str().unwrap()),
-                "mother_get_record_history" => s.history(auth, args),
-                "mother_propose_memory" => s.propose(auth, args),
-                "mother_get_proposal" => s.get_proposal(auth, args["id"].as_str().unwrap()),
-                "mother_pin_record" => s.pin(auth, args),
-                "mother_assign_task" => s.assign(auth, args),
-                _ => panic!("Unsupported boundary tool {tool}"),
-            },
-        }
+        let Self::Native(s) = self;
+        s.v1_call(auth, tool, args)
     }
     fn review(&mut self, args: Value) -> mother::error::Result<Value> {
-        match self {
-            Self::Native(s) => s.v1_review_proposal(args),
-            #[cfg(feature = "legacy-sqlite")]
-            Self::Sqlite(s) => s.review_proposal(args),
-        }
+        let Self::Native(s) = self;
+        s.v1_review_proposal(args)
     }
     fn inbox_get(&self, id: &str) -> Value {
-        match self {
-            Self::Native(s) => s.v1_inbox_get(id).unwrap(),
-            #[cfg(feature = "legacy-sqlite")]
-            Self::Sqlite(s) => s.inbox_get(id).unwrap(),
-        }
+        let Self::Native(s) = self;
+        s.v1_inbox_get(id).unwrap()
     }
-    #[cfg(feature = "legacy-sqlite")]
     fn revoke(&mut self, id: &str) {
-        match self {
-            Self::Native(s) => s.revoke(id).unwrap(),
-            #[cfg(feature = "legacy-sqlite")]
-            Self::Sqlite(s) => s.revoke(id).unwrap(),
-        }
+        let Self::Native(s) = self;
+        s.revoke(id).unwrap();
     }
-    #[cfg(feature = "legacy-sqlite")]
-    fn set_scopes(&mut self, owned_root: &Path, id: &str, scopes: &[&str]) {
+    fn set_scopes(&mut self, id: &str, scopes: &[&str]) {
         let scopes = scopes.iter().map(|s| s.to_string()).collect::<Vec<_>>();
-        match self {
-            Self::Native(s) => {
-                s.v1_grant(id, &scopes, &ClientAccess::default(), None)
-                    .unwrap();
-            }
-            #[cfg(feature = "legacy-sqlite")]
-            Self::Sqlite(_) => {
-                // The legacy owner API provisions new identities. This fixture
-                // withdraws scopes only in its own synthetic temporary store.
-                let db = rusqlite::Connection::open(owned_root.join("legacy.sqlite")).unwrap();
-                assert_eq!(
-                    db.execute(
-                        "UPDATE clients SET scopes=?1 WHERE id=?2",
-                        rusqlite::params![serde_json::to_string(&scopes).unwrap(), id]
-                    )
-                    .unwrap(),
-                    1
-                );
-            }
-        }
+        let Self::Native(s) = self;
+        s.v1_grant(id, &scopes, &ClientAccess::default(), None)
+            .unwrap();
     }
     fn export(&mut self) -> Value {
-        match self {
-            Self::Native(s) => s.v1_export().unwrap(),
-            #[cfg(feature = "legacy-sqlite")]
-            Self::Sqlite(s) => s.export().unwrap(),
-        }
+        let Self::Native(s) = self;
+        s.v1_export().unwrap()
     }
     fn request(&mut self, auth: &Auth, record: Value) -> Value {
         let w = self.call(auth, "mother_get_context", json!({})).unwrap()["workspace"].clone();
@@ -122,10 +66,7 @@ impl Backend {
         request
     }
 }
-#[cfg(feature = "legacy-sqlite")]
-fn backends(dir: &Path) -> [Backend; 2] {
-    let sqlite =
-        Store::initialize(&dir.join("legacy.sqlite"), "Synthetic explicit persona").unwrap();
+fn backends(dir: &std::path::Path) -> [Backend; 1] {
     let native = GardenStore::initialize(
         dir.join("native.redb"),
         &Uuid::new_v4().to_string(),
@@ -133,7 +74,7 @@ fn backends(dir: &Path) -> [Backend; 2] {
     )
     .unwrap();
     native.v1_initialize("Synthetic explicit persona").unwrap();
-    [Backend::Sqlite(sqlite), Backend::Native(native)]
+    [Backend::Native(native)]
 }
 fn memory(text: &str) -> Value {
     json!({"kind":"memory","title":"Synthetic preference","content":text,"status":"active","basis":"owner_statement"})
@@ -141,7 +82,6 @@ fn memory(text: &str) -> Value {
 fn task() -> Value {
     json!({"kind":"task","title":"Synthetic task","content":"Do explicit work","status":"todo"})
 }
-#[cfg(feature = "legacy-sqlite")]
 fn checkpoint(title: &str) -> Value {
     json!({"kind":"checkpoint","title":title,"content":"Synthetic handoff","status":"active","nextStep":"Inspect evidence"})
 }
@@ -150,9 +90,8 @@ fn review(proposal: &Value, action: &str) -> Value {
 }
 
 #[test]
-#[cfg(feature = "legacy-sqlite")]
-fn both_backends_recheck_current_proposer_grant_and_target_revision_before_approval() {
-    let dir = tempfile::tempdir().unwrap();
+fn native_recheck_current_proposer_grant_and_target_revision_before_approval() {
+    let dir = tempfile::tempdir_in(std::fs::canonicalize(std::env::temp_dir()).unwrap()).unwrap();
     for mut backend in backends(dir.path()) {
         let writer = backend.writer();
         let proposer = backend.grant(
@@ -223,7 +162,7 @@ fn both_backends_recheck_current_proposer_grant_and_target_revision_before_appro
             .call(&renewed, "mother_propose_memory", request)
             .unwrap()["proposal"]
             .clone();
-        backend.set_scopes(dir.path(), "scope-proposer", &["read"]);
+        backend.set_scopes("scope-proposer", &["read"]);
         assert_eq!(
             backend
                 .review(review(&downgraded, "save"))
@@ -244,9 +183,8 @@ fn both_backends_recheck_current_proposer_grant_and_target_revision_before_appro
 }
 
 #[test]
-#[cfg(feature = "legacy-sqlite")]
-fn both_backends_owner_edits_validate_references_and_keep_failed_approvals_atomic() {
-    let dir = tempfile::tempdir().unwrap();
+fn native_owner_edits_validate_references_and_keep_failed_approvals_atomic() {
+    let dir = tempfile::tempdir_in(std::fs::canonicalize(std::env::temp_dir()).unwrap()).unwrap();
     for mut backend in backends(dir.path()) {
         let writer = backend.writer();
         let request = backend.proposal(&writer, memory("Submitted text"));
@@ -290,9 +228,8 @@ fn both_backends_owner_edits_validate_references_and_keep_failed_approvals_atomi
 }
 
 #[test]
-#[cfg(feature = "legacy-sqlite")]
-fn both_backends_checkpoint_supersession_retires_once_and_conflicts_roll_back_every_receipt() {
-    let dir = tempfile::tempdir().unwrap();
+fn native_checkpoint_supersession_retires_once_and_conflicts_roll_back_every_receipt() {
+    let dir = tempfile::tempdir_in(std::fs::canonicalize(std::env::temp_dir()).unwrap()).unwrap();
     for mut backend in backends(dir.path()) {
         let auth = backend.writer();
         let first_request = backend.request(&auth, checkpoint("First"));
@@ -349,9 +286,8 @@ fn both_backends_checkpoint_supersession_retires_once_and_conflicts_roll_back_ev
 }
 
 #[test]
-#[cfg(feature = "legacy-sqlite")]
-fn both_backends_scrub_shared_references_and_never_implicitly_share_saved_new_proposals() {
-    let dir = tempfile::tempdir().unwrap();
+fn native_scrub_shared_references_and_never_implicitly_share_saved_new_proposals() {
+    let dir = tempfile::tempdir_in(std::fs::canonicalize(std::env::temp_dir()).unwrap()).unwrap();
     for mut backend in backends(dir.path()) {
         let writer = backend.writer();
         let request = backend.request(&writer, memory("Hidden fact"));
@@ -452,7 +388,7 @@ fn both_backends_scrub_shared_references_and_never_implicitly_share_saved_new_pr
 
 #[test]
 fn native_full_backup_preserves_all_v1_auxiliary_state_and_blocks_old_generation_replays() {
-    let dir = tempfile::tempdir().unwrap();
+    let dir = tempfile::tempdir_in(std::fs::canonicalize(std::env::temp_dir()).unwrap()).unwrap();
     let native = GardenStore::initialize(
         dir.path().join("source.redb"),
         &Uuid::new_v4().to_string(),
@@ -517,14 +453,8 @@ fn native_full_backup_preserves_all_v1_auxiliary_state_and_blocks_old_generation
         ])
     );
     let bundle = dir.path().join("backup");
-    #[cfg(not(feature = "legacy-sqlite"))]
     let Backend::Native(source) = backend;
-    #[cfg(feature = "legacy-sqlite")]
-    let source = match backend {
-        Backend::Native(store) => store,
-        #[cfg(feature = "legacy-sqlite")]
-        Backend::Sqlite(_) => unreachable!("This fixture explicitly creates a native backend"),
-    };
+
     source.backup_to(&bundle).unwrap();
     let restored = GardenStore::restore_backup(&bundle, &dir.path().join("restored.redb")).unwrap();
     assert_eq!(
@@ -613,14 +543,8 @@ fn native_full_backup_preserves_all_v1_auxiliary_state_and_blocks_old_generation
     restored
         .call(&fresh, "mother_write_record", request)
         .unwrap();
-    #[cfg(not(feature = "legacy-sqlite"))]
     let Backend::Native(restored) = restored;
-    #[cfg(feature = "legacy-sqlite")]
-    let restored = match restored {
-        Backend::Native(store) => store,
-        #[cfg(feature = "legacy-sqlite")]
-        Backend::Sqlite(_) => unreachable!("This fixture explicitly creates a native backend"),
-    };
+
     restored
         .backup_to(&dir.path().join("second-backup"))
         .unwrap();

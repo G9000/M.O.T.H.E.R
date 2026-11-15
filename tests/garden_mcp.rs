@@ -13,6 +13,8 @@ use std::{
     time::Duration,
 };
 
+#[path = "support/mcp_discovery.rs"]
+mod discovery;
 #[path = "mcp/garden_queries.rs"]
 mod queries;
 
@@ -80,6 +82,9 @@ impl Client {
     fn result(&mut self, name: &str, args: Value) -> Value {
         self.rpc("tools/call", json!({"name":name,"arguments":args}))["result"].clone()
     }
+    fn tools(&mut self) -> Vec<Value> {
+        discovery::collect(|params| self.rpc("tools/list", params))
+    }
     fn call(&mut self, name: &str, args: Value) -> Value {
         let result = self.result(name, args);
         assert_ne!(result["isError"], true, "{result}");
@@ -119,13 +124,8 @@ fn graph_stdio_proposals_owner_approval_receipts_and_live_revocation() {
     std::fs::write(&config,serde_json::to_vec(&json!({"version":2,"backend":"garden_redb","databasePath":database,"clientId":auth.client_id,"token":auth.token})).unwrap()).unwrap();
     drop(store);
     let mut client = Client::connect(&config);
-    let tools = client.rpc("tools/list", json!({}));
-    let names: Vec<_> = tools["result"]["tools"]
-        .as_array()
-        .unwrap()
-        .iter()
-        .map(|t| t["name"].as_str().unwrap())
-        .collect();
+    let tools = client.tools();
+    let names: Vec<_> = tools.iter().map(|t| t["name"].as_str().unwrap()).collect();
     assert_eq!(names.len(), 8);
     assert!(names.contains(&"mother_garden_propose"));
     assert!(names.contains(&"mother_garden_query"));

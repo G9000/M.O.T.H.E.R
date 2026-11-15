@@ -14,28 +14,10 @@ use std::{
 
 #[derive(Debug, Subcommand)]
 pub enum MigrationCommand {
-    /// Build and verify a fresh destination without activating it or changing harness settings.
-    Prepare {
-        #[arg(long)]
-        source: PathBuf,
-        #[arg(long)]
-        db: PathBuf,
-        #[arg(long)]
-        journal: PathBuf,
-        #[arg(long)]
-        operation_id: String,
-    },
     /// Read a durable cutover journal; this does not retry an uncertain action.
     Status {
         #[arg(long)]
         journal: PathBuf,
-    },
-    /// Fence the stopped source and activate its verified destination.
-    Activate {
-        #[arg(long)]
-        journal: PathBuf,
-        #[arg(long)]
-        operation_id: String,
     },
     /// Reissue only one original client's captured restrictions, with fresh credentials.
     Reissue {
@@ -107,47 +89,6 @@ pub fn migration(command: MigrationCommand) -> Result<()> {
             &client,
             &absolute(&out)?,
         )?)?,
-        MigrationCommand::Prepare {
-            source,
-            db,
-            journal,
-            operation_id,
-        } => {
-            #[cfg(feature = "legacy-sqlite")]
-            {
-                serde_json::to_value(migrate::prepare(migrate::MigrationRequest {
-                    source: absolute(&source)?,
-                    destination: absolute(&db)?,
-                    journal: absolute(&journal)?,
-                    operation_id,
-                })?)?
-            }
-            #[cfg(not(feature = "legacy-sqlite"))]
-            {
-                let _ = (source, db, journal, operation_id);
-                return Err(mother::error::Error::domain(
-                    "LEGACY_UNAVAILABLE",
-                    "SQLite conversion requires the migration-enabled build.",
-                ));
-            }
-        }
-        MigrationCommand::Activate {
-            journal,
-            operation_id,
-        } => {
-            #[cfg(feature = "legacy-sqlite")]
-            {
-                serde_json::to_value(migrate::activate(&absolute(&journal)?, &operation_id)?)?
-            }
-            #[cfg(not(feature = "legacy-sqlite"))]
-            {
-                let _ = (journal, operation_id);
-                return Err(mother::error::Error::domain(
-                    "LEGACY_UNAVAILABLE",
-                    "Source activation requires the migration-enabled build.",
-                ));
-            }
-        }
     };
     println!("{}", serde_json::to_string_pretty(&value)?);
     Ok(())

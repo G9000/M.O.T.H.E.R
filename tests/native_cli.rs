@@ -1,4 +1,3 @@
-#![cfg(not(feature = "legacy-sqlite"))]
 //! The shipped native executable must reject conversion and legacy credentials
 //! before opening any legacy path, while keeping its owner command tree usable.
 use serde_json::json;
@@ -15,12 +14,7 @@ fn native_help_and_legacy_refusals_never_initialize_a_store() {
             .output()
             .unwrap()
     };
-    for args in [
-        vec![],
-        vec!["--help"],
-        vec!["garden", "--help"],
-        vec!["garden", "migrate", "--help"],
-    ] {
+    for args in [vec![], vec!["--help"], vec!["garden", "--help"]] {
         let output = run(&args);
         assert!(
             output.status.success(),
@@ -56,7 +50,7 @@ fn native_help_and_legacy_refusals_never_initialize_a_store() {
         &uuid::Uuid::new_v4().to_string(),
     ]);
     assert!(!rejected.status.success());
-    assert!(String::from_utf8_lossy(&rejected.stderr).contains("LEGACY_UNAVAILABLE"));
+    assert!(String::from_utf8_lossy(&rejected.stderr).contains("unrecognized subcommand"));
     assert_eq!(std::fs::read_dir(dir.path()).unwrap().count(), 1);
     assert!(!db.exists());
 }

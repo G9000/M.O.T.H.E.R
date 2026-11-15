@@ -1,4 +1,4 @@
-//! Pinned local sentence embeddings; only explicit installation accesses the network.
+//! Pinned local sentence embeddings over verified, owner-provisioned assets.
 use crate::{
     config,
     error::{Error, Result},
@@ -10,12 +10,10 @@ use serde_json::{Value, json};
 use sha2::{Digest, Sha256};
 use std::{
     fs::{self, File},
-    io::{Read, Write},
+    io::Read,
     path::{Path, PathBuf},
-    time::Duration,
 };
 use tokenizers::Tokenizer;
-use uuid::Uuid;
 
 /// The fixed sentence encoder used by the disposable vector cache.
 pub const MODEL_ID: &str = "sentence-transformers/all-MiniLM-L6-v2";
@@ -94,9 +92,6 @@ const ASSETS: [Asset; 3] = [
 fn unavailable() -> Error {
     Error::domain("MODEL_UNAVAILABLE", "Local embedding model is unavailable")
 }
-fn install_error(message: &'static str) -> Error {
-    Error::domain("MODEL_UNAVAILABLE", message)
-}
 
 /// Resolve the local model directory without opening files or making network requests.
 ///
@@ -165,17 +160,6 @@ fn verify_asset(dir: &Path, asset: &Asset) -> Result<()> {
     Ok(())
 }
 
-fn verify_directory(dir: &Path) -> Result<()> {
-    let metadata = fs::symlink_metadata(dir).map_err(|_| unavailable())?;
-    if !metadata.is_dir() {
-        return Err(unavailable());
-    }
-    for asset in &ASSETS {
-        verify_asset(dir, asset)?;
-    }
-    Ok(())
-}
-
 /// Check every installed asset's size and SHA-256 without downloading anything.
 ///
 /// # Errors
@@ -197,106 +181,6 @@ pub fn status(dir: &Path) -> Result<Value> {
 }
 
 // Created exclusively by this invocation, with a fixed UUID-named sibling path.
-struct StagingDirectory(PathBuf);
-impl Drop for StagingDirectory {
-    fn drop(&mut self) {
-        // Never follow a replaced top-level link when cleaning up an interrupted installation.
-        if fs::symlink_metadata(&self.0).is_ok_and(|m| m.is_dir()) {
-            let _ = fs::remove_dir_all(&self.0);
-        }
-    }
-}
-
-/// Explicitly download and verify the pinned public model into a new local directory.
-///
-/// Existing valid installations are reused. Invalid existing paths are never repaired or
-/// removed automatically. No record or query text is included in any network request.
-///
-/// # Errors
-/// Reports a sanitized failure for inaccessible destinations, failed downloads, mismatched
-/// assets, or an existing invalid installation. Each download has a five-minute deadline
-/// and fails sooner if the connection stalls for a minute.
-pub fn install(dir: &Path) -> Result<Value> {
-    if !dir.is_absolute() {
-        return Err(install_error("Model directory must be absolute"));
-    }
-    match fs::symlink_metadata(dir) {
-        Ok(_) => {
-            verify_directory(dir).map_err(|_| install_error("Existing model directory is invalid; choose a new directory or move it aside before installing"))?;
-            return status(dir);
-        }
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
-        Err(_) => return Err(install_error("Cannot inspect model destination")),
-    }
-    let parent = dir.parent().ok_or_else(unavailable)?;
-    fs::create_dir_all(parent)
-        .map_err(|_| install_error("Cannot create model parent directory"))?;
-    let staging_path = parent.join(format!(".mother-model-install-{}", Uuid::new_v4()));
-    fs::create_dir(&staging_path)
-        .map_err(|_| install_error("Cannot create model staging directory"))?;
-    let staging = StagingDirectory(staging_path);
-    let agent = ureq::Agent::config_builder()
-        .https_only(true)
-        .max_redirects(5)
-        .timeout_global(Some(Duration::from_secs(300)))
-        .timeout_connect(Some(Duration::from_secs(30)))
-        // A stall limit, restarted on every read. A total body budget here would
-        // cap the 91 MB asset at one minute and fail on ordinary connections.
-        .timeout_per_read(Some(Duration::from_secs(60)))
-        .build()
-        .new_agent();
-    for asset in &ASSETS {
-        let url = format!(
-            "https://huggingface.co/{MODEL_ID}/resolve/{MODEL_REVISION}/{}",
-            asset.name
-        );
-        let mut response = agent.get(&url).call().map_err(|_| {
-            install_error("Pinned model download failed; retry explicit installation")
-        })?;
-        let mut reader = response.body_mut().as_reader().take(asset.size + 1);
-        let mut file = config::create_private_file(&staging.0.join(asset.name))
-            .map_err(|_| install_error("Cannot create staged model asset"))?;
-        let mut digest = Sha256::new();
-        let mut size = 0u64;
-        let mut buffer = [0u8; 64 * 1024];
-        loop {
-            let count = reader
-                .read(&mut buffer)
-                .map_err(|_| install_error("Pinned model download was interrupted"))?;
-            if count == 0 {
-                break;
-            }
-            size += count as u64;
-            if size > asset.size {
-                return Err(install_error(
-                    "Downloaded model asset exceeds its pinned size",
-                ));
-            }
-            digest.update(&buffer[..count]);
-            file.write_all(&buffer[..count])
-                .map_err(|_| install_error("Cannot write staged model asset"))?;
-        }
-        if size != asset.size || format!("{:x}", digest.finalize()) != asset.sha256 {
-            return Err(install_error(
-                "Downloaded model asset does not match its pinned size and digest",
-            ));
-        }
-        file.sync_all()
-            .map_err(|_| install_error("Cannot flush staged model asset"))?;
-    }
-    // A competing successful installer may have published the same verified assets.
-    if fs::symlink_metadata(dir).is_ok() {
-        verify_directory(dir).map_err(|_| {
-            install_error("Model destination appeared during installation and is invalid")
-        })?;
-        return status(dir);
-    }
-    if fs::rename(&staging.0, dir).is_err() {
-        verify_directory(dir)
-            .map_err(|_| install_error("Cannot publish verified model installation"))?;
-    }
-    status(dir)
-}
 
 /// A bounded set of overlapping token windows with explicit omitted coverage.
 #[derive(Debug)]
@@ -538,10 +422,6 @@ mod tests {
         fs::write(missing.join("config.json"), b"{}").expect("write synthetic corrupt asset");
         assert!(LocalEmbedder::load(&missing).is_err());
         assert_eq!(status(&missing).expect("corrupt status")["ready"], false);
-        assert!(
-            install(&missing).is_err(),
-            "existing invalid directory must fail before network access"
-        );
         assert_eq!(
             fs::read(missing.join("config.json")).expect("preserved asset"),
             b"{}"

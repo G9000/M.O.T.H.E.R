@@ -41,7 +41,7 @@
 </p>
 
 <p align="center">
-  One Rust executable and one SQLite file, on your own machine.<br>
+  One Rust executable and one native memory garden, on your own machine.<br>
   Each harness connects over local MCP with its own grant.
 </p>
 

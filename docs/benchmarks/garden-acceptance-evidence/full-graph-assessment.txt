@@ -1,0 +1,535 @@
+# Completed Garden acceptance and release qualification
+
+**Assessment: HOLD.** Durable-write latency, bounded lexical recall and contention
+availability fail accepted workload gates, and 1m stress exceeded its load deadline.
+The follow-up fixes qualify native context and full graph-tool AnimaOS admission,
+and the 100k audit's memory use. The original 100k run remains resource-interrupted; its
+unchanged corpus was audited separately after the fix. This report covers the
+completed native engine and additive sharing boundaries, separately from the
+earlier [G2 experiment](2026-11-14-garden-engine.md). No binary installation,
+published release, tag, live migration or live harness setting change is part of
+this assessment.
+
+G8 was revalidated, committed and pushed to `origin/main` at
+`df6c6eb07337ab28a153f5c9decf27d63b34d8d1` before G9 work began. The G9 source is
+in the isolated `g9000/mother-garden-release` branch. AnimaOS acceptance uses the
+separate `g9000/mother-additive` worktree; that implementation is not present in
+AnimaOS main. Unrelated web UI changes in its primary checkout are preserved.
+
+## Release boundaries
+
+Release A adds selected sharing and additive recall without replacing native
+harness memory. Release B/C supplies extensible temporal graph storage, native
+v1 compatibility, full backups and the explicitly selected SQLite-free runtime.
+These are separate acceptance claims. The default build retains SQLite runtime
+and conversion support; `--no-default-features` builds the native executable.
+
+Harnesses extract, select, summarize, interpret and rank. Mother stores attributed
+canonical records, temporal evidence and revisions, enforces current grants,
+provides bounded candidate queries and commits owner-reviewed proposals. Pending
+proposals are not canonical recall; owner approval does not itself prove vector
+index preparation or actual host/model recall. Persona adoption is optional and
+independent of sharing.
+
+## Test evidence
+
+| Boundary | Evidence | Current result |
+| --- | --- | --- |
+| Native owner plus two real MCP bridges | `tests/garden_acceptance.rs` | Selected proposal excluded before approval; explicit owner CLI approval; same canonical ID and original/owner attribution in another harness; unselected noise absent; exact receipt retry, owner restart and revocation pass on Windows and Linux. |
+| Additive native continuity | AnimaOS `mcp/workspace_context_tests.rs` | New online-to-revoked scripted coordinator test passes: native search/capture and local persona remain, foreign-agent recall and publication lookup are denied, revoked reviewed tools block selected publication preflight. |
+| Temporal evidence and opaque extensions | `garden_temporal`, `garden_query`, `garden_backup` suites | Valid/known time, backdated correction, conflicting assertions, independent evidence, half-open intervals, extension preservation and full restore are exercised in both package feature suites. |
+| Current authority and derived indexes | `garden_access`, `garden_changes`, `garden_search`, `garden_compat_search` | Current grant, revision, lifecycle and model/profile checks reject stale or unauthorized projections. Vector tests use synthetic encoders. |
+| Process interruption | `garden_recovery`, `garden_backup_recovery`, `garden_migration`, AnimaOS publication crash regression | Real child termination covers graph batches/review and restore; process exits cover migration authority barriers. The AnimaOS parent hard-kills children before admission and after its durable acknowledgement, then verifies native source, operation identity and exactly one queued item on retry. |
+| Restricted cutover | `garden_migration` | Full v1 history and auxiliary state, source fencing, fresh generation, exact graph-only/write-only reissue, old-proposal blocking and refusal of lossy rollback pass. |
+| Real AnimaOS executable plus another harness | Opt-in `mcp::additive_anima` fixtures | Legacy and native context-only workflows cover selected queue, owner-edited approval, cross-harness corrections and restart reconciliation. A third fixture covers full native graph catalog discovery, review, grants, restart and revocation. Installed models and UI acceptance remain separate. |
+| All seven graph operations through AnimaOS | Opt-in `native_mother_full_graph_reviewed_transport_invokes_all_seven_tools` | Actual `ToolExecutionContext`, portable arguments, reviewed/granted stdio bridge and native owner IPC exercise all seven tools. Synthetic local interoperability only; no model, browser or complete agent-run budget/journal acceptance claim. |
+
+The admission/audit follow-up's complete AnimaOS managed `rust:test` run reported 5,950 passes and 66 ignored
+across 115 Rust test summaries; this is an aggregate, not a unique-test count.
+The focused provider run passed 75 with two ignored; the hard-kill publication
+regression passed. The explicitly enabled real Mother stdio receipt/revocation
+test passed once. These exercise the separate additive worktree and retain
+AnimaOS native memory; they do not establish integration into AnimaOS main.
+The first Windows full-suite attempt hit a Git fixture path-length error under
+a longer temporary root. A short private `TEMP`/`TMP` root resolved the focused
+fixture and the full rerun passed. No production code or Git policy was changed
+for that environment failure.
+
+The native fixture first exposed an oversized discovery frame. Bounded graph
+discovery returns the full catalog in two graph-only pages (eight tools)
+or three graph/v1 pages (19 tools), with 48 KiB serialized result pages and
+catalog-bound cursors. The regression failed before this fix; all three helper
+tests pass afterward. Legacy discovery remains unchanged.
+
+The [original native failure](garden-acceptance-evidence/native-anima-discovery-failure.json)
+identified `SchemaRejected` on the first graph descriptor. Context-only grants
+were receiving graph schemas they could not use. Native discovery now selects
+the authenticated grant's surface: context-only clients receive twelve existing
+v1/context tools, while explicit graph grants retain the full graph catalog.
+Capability availability reflects this surface; every call still checks current
+authority. Reconnect/review after grant or catalog changes.
+
+Graph metadata includes explicit MCP object roots, preserving every existing
+reference, alternative and constraint. Canonical contracts remain unchanged.
+The preceding context-only qualification is recorded in the
+[follow-up interoperability result](garden-acceptance-evidence/admission-audit-followup-interop.json).
+
+The [full graph follow-up](garden-acceptance-evidence/full-graph-admission-manifest.json)
+qualifies all seven exact schemas without a provider-name exception. AnimaOS
+keeps each schema at 16 KiB, raw JSON at depth 16/1,024 nodes and complete
+descriptors at 32 KiB. Input/output metadata now shares that complete descriptor
+cap rather than a separate combined 16 KiB cap. Local reference traversal has
+its own depth-64/8,192-visit limit, counting repeated paths to reject acyclic
+expansion bombs. Compilation is offline; external references, cycles, unknown
+dialects, unsafe numbers and percent-encoded reference targets are rejected.
+JSON-pointer escapes still work. Runtime argument/result/wire limits and exact
+descriptor digests are unchanged; discovery and review do not grant execution.
+Provider maximum batch/page sizes can exceed host payload bounds: use bounded
+requests, not the provider maximum as a host guarantee.
+
+AnimaOS's portable numeric argument conversion also emits exact safe whole
+numbers as JSON integers, preserving fractional numbers and rejecting non-finite
+or unsafe integers. Byte preflight and transport conversion use the same helper.
+The real graph fixture uses this actual tool-executor path for get, query, apply,
+propose, get-proposal, get-receipt and changes. It retains nested batch references,
+opaque extensions, pagination, exact operation retry, pending/approved receipt
+distinction, owner restart, host schema rejection, retained remote
+`WORKSPACE_MISMATCH` evidence and revoked dispatch.
+
+Focused schema admission passes 12 tests; the argument conversion boundary
+passes five. The explicitly enabled all-seven native graph executor test passes
+with zero failures. Each uses the retained managed or isolated build target;
+unrelated ignored network/model diagnostics were not enabled.
+
+All three HTTP fixtures pass serially against the final freshly built daemon
+(three passed, zero failed, 74.42 seconds), including legacy and native selected
+sharing/reconciliation and full graph catalog admission. The initial concurrent
+HTTP run passed native context and full graph discovery,
+but the legacy restart workflow became blocked with
+`publication_authority_changed`. Its isolated rerun passed. The cause is
+unconfirmed; this slice claims no publication lifecycle fix. Original G9 evidence
+and the previous admission/audit assessment are preserved in
+[the archived assessment](garden-acceptance-evidence/admission-audit-assessment.txt).
+
+The first full managed Rust run under default test parallelism failed four
+unchanged command-runtime/drain tests. The one-second command Run encountered
+`Command storage observation was interrupted`; three drain assertions counted
+one extra execution job. The command test and all four drain tests pass in
+isolated serial reruns. Source inspection shows that drain counts include a
+process-global skill-runtime counter, and command launch performs deadline-bound
+storage observation. These are plausible interference mechanisms, not a proven
+cause. The full serial rerun is recorded separately; this slice changes neither
+module and claims no test-concurrency fix.
+
+The complete serial managed `rust:test` rerun passes 5,955 with zero failures
+and 67 ignored across 115 summaries. This is an aggregate, not a unique-test
+count. The graph executor fixture is separately enabled and passes; its default
+ignore does not substitute for that explicit native interoperability run.
+Core all-target strict Clippy, daemon all-target correctness lint, owned-source
+format checks and the fresh debug daemon build pass. The daemon's existing
+warnings remain; its lint command is not a warning-free qualification.
+
+## Platform qualification
+
+| Source/platform | Tests | Other checks |
+| --- | --- | --- |
+| Full graph follow-up Windows x86-64, Rust/Cargo 1.93.0 | 495 default passed, zero failed, 9 ignored; 164 native passed, zero failed, 3 ignored. | Format, both strict Clippy configurations, both release builds, warning-free Rustdoc and native macOS all-target compile checks pass in the isolated cache. The added default-suite ignore is the explicit full graph HTTP fixture. |
+| Admission/audit follow-up Windows x86-64, Rust/Cargo 1.93.0 | 495 default passed, zero failed, 8 ignored; 164 native passed, zero failed, 3 ignored. | Both strict Clippy configurations, release builds, warning-free Rustdoc, format and native macOS compile checks passed. |
+| Admission/audit follow-up Ubuntu WSL x86-64, Rust/Cargo 1.99.1 | 504 default passed, zero failed, 8 ignored; 170 native passed, zero failed, 3 ignored. | Both release builds, both strict all-target Clippy configurations and warning-free Rustdoc pass. The owner explicitly approved installing the initially missing Clippy component. |
+| Current G9 native macOS x86-64 target, checked from Windows | Native all-target compilation passed after installer dependency isolation. | `cargo check --locked --no-default-features --all-targets --target x86_64-apple-darwin`; macOS execution remains pending. No wasm qualification was run. |
+| Pushed G8, unchanged GitHub CI | Windows/Linux tests passed; macOS tests failed | All three jobs failed overall: Rust 1.100 Clippy flags a byte-decoding pattern on Windows/Linux; macOS backup fixtures use a symlinked system temp path. G9 fixes these issues; this old run does not qualify the changed source. |
+
+The existing CI run is
+[43688011366](https://github.com/G9000/M.O.T.H.E.R/actions/runs/43688011366).
+The CI workflow is unchanged. Current macOS runtime validation remains pending;
+local Unix tests or a cross-compile do not establish a macOS pass.
+The Ubuntu toolchain has no Rust formatter component; its formatting command
+reports unavailable. Windows formatting checks the same source. The approved
+Clippy installation was completed and its Linux checks passed; no additional
+toolchain components were installed.
+The initial native macOS cross-check failed on `ureq` → `rustls` → `ring` and
+its missing target C compiler. That failure prompted isolation of the optional
+model installer: `ureq` now belongs only to default `legacy-sqlite`. The native
+installer returns sanitized `MODEL_UNAVAILABLE` before filesystem or network
+I/O, covered by `tests/native_model_boundary.rs`; already verified local model
+assets remain usable for native inference. The subsequent macOS cross-check
+passed. This resolves the compile blocker without establishing macOS runtime
+acceptance or authorizing a model download.
+
+The final 564-line native normal/build
+[dependency audit](garden-acceptance-evidence/windows-native-dependencies.txt)
+excludes `rusqlite`, `libsqlite3-sys`, `ureq`, `rustls`, `ring`, `cc` and the
+legacy terminal/keyring dependencies. The
+[earlier audit](garden-acceptance-evidence/windows-native-dependencies-before-installer-isolation.txt)
+preserves the downloader/cryptography dependency finding. The database engine
+is pure Rust and the selected native build is SQLite-free; default-feature
+builds deliberately retain the converter, installer and their dependencies.
+The [Linux audit](garden-acceptance-evidence/linux-native-dependencies.txt)
+independently excludes those dependencies. Native OS API bindings remain.
+
+The [original G9 manifest](garden-acceptance-evidence/qualification-manifest.json)
+retains SHA-256 hashes for 145 original source/contract/fixture files and its
+platform binaries. Those Windows and Linux source copies matched. It separately
+identifies the measured Linux runner; a historical Windows measurement-binary
+hash was not captured and is not inferred from current shared-cache files.
+The [follow-up manifest](garden-acceptance-evidence/admission-audit-followup-manifest.json)
+records 148 identical revised source files across platforms, the revised build
+identity and targeted qualification results.
+The full graph manifest records the subsequent Windows qualification separately;
+Mother production source and contracts are unchanged from that 148-file snapshot.
+Only its synthetic AnimaOS HTTP fixture changed, alongside AnimaOS's own source,
+tests and documentation. No subsequent Linux or macOS execution is inferred.
+The [original assessment text](garden-acceptance-evidence/g9-original-assessment.txt)
+and all original failed-run JSON remain unchanged.
+
+G9 regressions also repair overlong Unix socket names, preserving an exact
+derived legacy address for compatible descriptors and rejecting arbitrary paths.
+Overcapacity now fails before owner state is created. Backup paths still reject
+explicit symlink ancestors; synthetic fixtures canonicalize OS temp aliases.
+Clock observations occur after writer admission so concurrent request scheduling
+cannot manufacture a clock rollback. Genuine rollback and current-authority
+revalidation remain enforced.
+
+## Completed-engine measurement method
+
+`examples/garden_acceptance.rs` accepts only explicit synthetic generation and
+owns its temporary database. It seeds through actual authenticated public
+`GardenStore` v2 operations in at most 64-item batches, with canonical receipts,
+history and all production indexes. Durability and access checks remain enabled.
+This differs materially from G2's compact integer-key experimental schema and
+256-entity bulk chunks; G2 results are not copied as completed-engine results.
+
+The measured runner source SHA-256 is
+`B75BDF704B4C44C92B2A0816FFC52FE532900A825D0FCFB8E5540183C0AE857E`.
+Its original engine/runner were built before installer isolation and MCP paging.
+The runner source remains unchanged; this follow-up revises auditing and native
+discovery. The original timings are not new performance measurements of the
+follow-up build. Separate manifests retain that distinction.
+
+The logical graph uses G2 seed-14 endpoint mixing and sampling, five assertions
+per entity and a distinct canonical evidence source. Requested datasets are
+10,000/50,000, 100,000/500,000 and a separate 1,000,000/5,000,000 stress case.
+UTC temporal intervals, engine-generated UUIDs and full evidence/history adapt
+that topology to the public v2 contract.
+
+Measurements include warm and application-cache-reopened exact reads, bounded
+temporal/neighborhood and lexical queries, 32-assertion Immediate batches,
+four-reader/two-writer contention, explicit high-degree and history-heavy
+queries, final canonical/index audit, database bytes and externally observed
+process memory/disk growth. There is no OS/drive cache flush; reopened reads are
+not cold-disk measurements. Public query responses do not expose examined-work,
+visited-node or writer-acquisition counters, so those remain unavailable rather
+than inferred from requested budgets.
+
+Percentiles use nearest-rank samples. The original provisional warm p95 budgets
+remain exact lookup 10 ms, bounded query 50 ms, durable 32-assertion batch 100 ms
+and lexical candidates 100 ms. Failed requests retain separate raw latencies and
+error counts; they never satisfy a successful latency budget. The optimistic
+current-authority fence can return `RestartRequired` if a canonical write races
+a query. No benchmark request is automatically retried.
+
+Process exit zero means execution completed. Acceptance uses the JSON
+`workload_gates_pass`, `latency_budgets_pass`, `semantic_gates_pass` and
+`availability_pass` fields.
+Progress files are last checkpoints; after forced termination they may lag
+committed state and are not proof of no later writes. Final reports aggregate
+all workers' acknowledged writes and audit those counts. Deadlines are checked
+between public calls; an external process guard retains interrupted synthetic
+state instead of cancelling inside a transaction or retrying an uncertain write.
+
+## Completed 10k results
+
+These are separate measurements on the owner's working Ryzen 9 9900X host.
+The CPU has 12 cores/24 threads; Windows reports 68,304,498,688 bytes of visible
+RAM and the drive is a WD_BLACK SN850X 2TB. That host RAM figure is not a WSL
+memory allocation or a guarantee of exclusively available benchmark resources.
+Windows uses NTFS and Rust 1.93.0; Linux uses Ubuntu WSL's virtual ext4 volume
+and Rust 1.99.1. Background build/test activity was not isolated. Platform and
+filesystem differences prevent treating the Linux result as a Windows pass.
+The completed-engine workload and its 64-item seed transactions also differ
+from G2, so these numbers are not a controlled causal comparison with G2.
+
+Times are **p50 / p95 / p99 milliseconds**, for successful requests only:
+
+| Operation | Windows | Linux WSL |
+| --- | --- | --- |
+| Warm exact | 0.0216 / 0.0262 / 0.0471 | 0.0109 / 0.0138 / 0.0236 |
+| Warm temporal/neighborhood | 6.8449 / 7.7573 / 9.8329 | 3.8040 / 4.4224 / 4.7197 |
+| Warm lexical | 41.0630 / 41.9358 / 42.3028 | 22.2652 / 25.0275 / 25.6449 |
+| Reopened exact | 0.0381 / 0.0779 / 0.1177 | 0.0140 / 0.0220 / 0.0466 |
+| Reopened temporal/neighborhood | 7.4796 / 8.5472 / 8.9631 | 4.0524 / 4.6536 / 5.2396 |
+| Reopened lexical | 40.7439 / 42.4378 / 43.0201 | 21.3603 / 22.8504 / 23.7886 |
+| Durable batch (32 assertions) | 239.9582 / 272.9563 / 942.0221 | 55.6049 / 62.0426 / 65.7104 |
+| Contended durable batch | 507.6632 / 646.4414 / 674.9157 | 146.8289 / 305.4692 / 901.4113 |
+| Bounded high-degree query | 4.6057 / 8.1167 / 8.3953 | 4.2474 / 4.9369 / 5.4436 |
+| Historical query | 2.1810 / 5.6117 / 5.8378 | 1.5649 / 1.8213 / 2.2499 |
+
+Both runs loaded 10,000 entities, 50,000 initial assertions and one evidence
+record. Final exact audits passed with 68,321 current records, 68,448 history
+rows and 1,263 receipts/sequences after measured writes, high-degree additions
+and 127 historical updates. The high-degree workload added 4,096 outgoing edges
+and preserved explicit truncation/work budgets.
+
+Windows warm lexical queries found 58 of 128 requested exact targets; Linux
+found 49 of 128. Missing samples all disclosed incomplete/truncated coverage;
+none was falsely marked complete. The three-character candidate prefix and
+4,096-work bound can omit a known exact-name target at this size. Successful
+response latency alone therefore does not qualify useful lexical recall.
+
+Contention produced 126 `RestartRequired` responses in 512 Windows reader
+attempts and 127 in 512 Linux attempts. These are current-authority safety
+responses, not silently successful reads; the runner records them without
+automatic retry. Storage API contention is measured here; local-service IPC
+latency remains a separate unmeasured cost.
+
+Windows initial load took 275.05 s and the full run 363.31 s. Linux initial load
+took 78.77 s and the full run 119.68 s. The final database was 1,140,854,784 bytes
+in both runs. Externally observed peak working set/RSS was 3,941,769,216 bytes
+on Windows and 4,474,576,896 bytes on Linux, sampled every 500 ms. These are
+process observations, not total host RAM or complete transient disk peaks.
+
+Raw successful/failed samples, coverage and audits are retained in
+[Windows 10k](garden-acceptance-evidence/windows-10k.json),
+[Windows resources](garden-acceptance-evidence/windows-10k-resources.json),
+[Linux 10k](garden-acceptance-evidence/linux-10k.json) and
+[Linux resources](garden-acceptance-evidence/linux-10k-resources.json).
+The [initial aborted run](garden-acceptance-evidence/windows-10k-initial-failure.json)
+is preserved: it exposed an overly strong benchmark assumption that every
+bounded lexical query must return its target. The final runner reports that as
+a failed semantic gate and completes the remaining workloads; it changes no
+engine work budget or query policy to improve a score.
+
+## Interrupted Linux 100k: pre-audit checkpoint only
+
+**No qualified 100k pass.** The run loaded 100,000 entities, 500,000 initial
+assertions and one evidence record. All timed workloads, high-degree additions
+and history cases completed, but the external 12 GiB RSS guard terminated the
+process with exit 137 during `canonical_index_audit`. There is no final audit or
+completed aggregate gate result. Timings below come only from the retained
+[last checkpoint](garden-acceptance-evidence/linux-100k-last-checkpoint.json),
+not an audited final report.
+
+Pre-audit successful-request **p50 / p95 / p99 milliseconds**:
+
+| Operation | Linux WSL, pre-audit |
+| --- | --- |
+| Warm exact | 0.0186 / 0.0357 / 0.0991 |
+| Warm temporal/neighborhood | 4.9521 / 5.8335 / 11.8084 |
+| Warm lexical | 24.6044 / 41.2431 / 54.7369 |
+| Reopened exact | 0.0191 / 0.0536 / 0.1224 |
+| Reopened temporal/neighborhood | 5.9396 / 20.5430 / 33.7662 |
+| Reopened lexical | 24.2571 / 30.6179 / 33.9284 |
+| Durable batch (32 assertions) | 91.9062 / 170.6953 / 194.2323 |
+| Contended durable batch | 215.3096 / 357.4416 / 1218.3808 |
+| Contended reader, successful requests | 5.3000 / 8.6257 / 16.4723 |
+| Bounded high-degree query | 5.7153 / 6.8388 / 9.0568 |
+| Historical query | 1.8768 / 2.6911 / 4.7955 |
+
+Both warm and reopened lexical queries found only 3 of 128 requested targets;
+all 128 samples disclosed `work_limit` truncation. Contention returned 128
+`RestartRequired` failures among 512 reader attempts, with no automatic retry.
+The durable and contended write p95 values exceed the unchanged 100 ms budget.
+These observed failures remain failures even before the missing final audit is
+considered. High-degree queries reported `edge_limit`; temporal/history queries
+reported `hop_limit`, so their successful latency does not imply exhaustive
+coverage.
+
+The checkpoint elapsed time is 1,762.817 s, including 1,720.926 s initial load.
+It records 100,000 entities, 508,320 assertions, 127 history updates and 9,700
+receipts. These are checkpoint acknowledgements, not verified final counts;
+additional canonical writes after that checkpoint may exist. External
+[resource observations](garden-acceptance-evidence/linux-100k-resources.json)
+record 12,932,501,504 bytes peak RSS and a 10,737,487,872-byte database. The audit
+was active when the guard fired; resource failure does not establish corruption
+or a successful audit.
+
+## Follow-up: exact 100k audit with bounded memory
+
+The revised public `GardenStore::audit` completed on a disposable copy of that
+retained 100k corpus. It verified **608,321 current records, 608,448 historical
+revisions and 9,700 receipts/sequences** in **97.2497 s**. External monitoring
+observed **1,997,213,696 bytes peak process RSS** and 106.9501 s whole-process
+wall time. The unchanged 12 GiB RSS and 20 GiB host-free-disk guards did not fire.
+See the [audit result](garden-acceptance-evidence/followup-audit-100k.json) and
+[resources](garden-acceptance-evidence/followup-audit-100k.resources.json).
+
+The copy received a fresh synthetic read credential before the timed audit;
+canonical records/history/receipts were not rewritten. The retained original
+database was never opened by the test executable and its before/after SHA-256
+matches. This independently qualifies the audit and its exact counts; it does
+not retroactively complete the earlier interrupted benchmark or qualify its
+failed write, lexical or availability gates.
+
+The audit now streams canonical/history rows in one consistent read transaction.
+Expected postings are checked by exact lookup and equal table cardinality:
+per-record unique memberships contain record IDs and historical sequences, so
+this rejects extra, missing and substituted rows without full-store scratch
+sets. Ordered history checks and per-sequence receipt ranges preserve revision,
+time, provenance and receipt bijections. A fixed 8 KiB bitmap checks receipt
+uniqueness in 65,536-sequence windows. Tests include cardinality-neutral receipt
+duplication and window boundaries; independent review found no lost invariants.
+
+Heap use still includes the engine cache, a canonical row/receipt batch and the
+existing admitted-generation metadata. Very long replacement chains retain
+quadratic traversal time; receipts beyond one bitmap window require additional
+projection scans. These are documented time costs, not reasons to weaken exact
+corruption detection. Full backup auditing remains its existing separate path.
+
+## Separate 1m stress
+
+The 1,000,000-entity/5,000,000-assertion invocation exited with code 1 and
+`soft_deadline_exceeded` after 3,600.411 s, still in `seed_entities`. Its
+[final execution report](garden-acceptance-evidence/linux-1m.json) records
+802,752 acknowledged entities, zero assertions/history updates and 12,544
+receipts. It has `completed: false`, `workload_gates_pass: false` and no timed
+query/write metrics. Relationship loading, later workloads and the final audit
+were never reached. These are caller-reported acknowledgements, not audited
+canonical counts or a completed million-entity graph.
+
+The [resource observations](garden-acceptance-evidence/linux-1m-resources.json)
+record 1,255,124,992 bytes peak process RSS and a 15,167,623,168-byte database
+across 7,008 samples. Neither RAM/disk guard nor external forced termination
+fired; the runner stopped cooperatively between calls at its unchanged one-hour
+deadline. This is a failed completion-budget gate, not an out-of-memory result
+or proof that the store cannot eventually hold the requested corpus. No 1m
+capacity, query latency, full graph durability or audit pass is claimed.
+
+Failed-run synthetic databases and original logs remain in task-owned private
+directories outside Git for profiling. Git contains only source and synthetic
+measurement summaries; disposable AnimaOS test temporary files were removed.
+
+## Reproduction commands and evidence scope
+
+Run Mother checks from its isolated release source, with `CARGO_TARGET_DIR` and
+temporary directories set to separately owned qualification paths. Windows and
+Linux use the same Cargo command forms; their compiler/platform results remain
+separate. Documentation checks set `RUSTDOCFLAGS=-D warnings`:
+
+```text
+cargo fmt --all -- --check
+cargo test --locked
+cargo build --release --locked
+cargo clippy --locked --all-targets --all-features -- -D warnings
+cargo doc --locked --no-deps
+cargo test --locked --no-default-features
+cargo build --release --locked --no-default-features
+cargo clippy --locked --no-default-features --all-targets -- -D warnings
+cargo doc --locked --no-default-features --no-deps
+cargo tree --locked --no-default-features --edges normal,build
+cargo check --locked --no-default-features --all-targets --target x86_64-apple-darwin
+```
+
+The dependency tree audit inspects normal/build edges rather than inferring
+runtime inclusion from the entire lockfile. Native installer refusal is covered
+by the ordinary native suite and can be selected with
+`cargo test --locked --no-default-features --test native_model_boundary`.
+The macOS command is a compile check only. Windows tests/builds/lints/docs ran
+in a dedicated qualification target directory. Source/build hashes are retained
+separately from measurements; no zero-test filter is counted as acceptance.
+
+The benchmark was built and invoked with these exact command forms; all other
+runner parameters use their checked-in defaults:
+
+```text
+cargo build --release --locked --no-default-features --example garden_acceptance
+<built-example-path>/garden_acceptance --synthetic --entities 10000 --deadline-seconds 3600 --keep-database
+<built-example-path>/garden_acceptance --synthetic --entities 100000 --deadline-seconds 3600 --keep-database
+<built-example-path>/garden_acceptance --synthetic --entities 1000000 --deadline-seconds 3600 --keep-database
+```
+
+On Windows the executable has the `.exe` suffix. The task-owned monitoring
+wrapper is not a committed runner: it samples every 500 ms and guards RSS above
+12,582,912 KiB (12 GiB), host `/mnt/c` free space below 20,971,520 KiB (20 GiB)
+or external elapsed time above 3,720 s. The runner's cooperative 3,600 s deadline
+is checked between API calls and cannot interrupt an active transaction/audit.
+No committed wrapper or cancellation guarantee is implied.
+
+Run AnimaOS checks from the separate additive worktree through its managed Rust
+wrapper, preserving the workspace's target/cache policy. On Windows set
+`TEMP`/`TMP` to a short, owner-private synthetic directory for the full run.
+The final full graph follow-up uses `RUST_TEST_THREADS=1`; its initial default
+parallel run remains a failed result. Tests' own internal concurrency is retained:
+
+```text
+bun run rust:test
+bun tools/workspace-dev/scripts/run-rust-daemon-tests.ts --lib memory_provider
+bun tools/workspace-dev/scripts/run-rust-daemon-tests.ts --lib publication_admission_survives_abrupt_kill_after_ack_and_is_absent_before_admission
+bun tools/workspace-dev/scripts/run-rust-daemon-tests.ts --lib selected_publication_real_mother_stdio_receipt_mapping_and_revocation -- --ignored
+bun tools/workspace-dev/scripts/run-rust-daemon-tests.ts --lib native_mother_full_graph_reviewed_transport_invokes_all_seven_tools -- --ignored
+bun tools/workspace-dev/scripts/run-rust-daemon-tests.ts --lib tools::mcp::tests::
+bun tools/workspace-dev/scripts/run-task.ts --cwd . --rust-cache validation -- cargo test --locked -p anima-core external_tools::tests::
+bun tools/workspace-dev/scripts/run-task.ts --cwd . --rust-cache validation -- cargo clippy --locked -p anima-core --all-targets -- -D warnings
+bun tools/workspace-dev/scripts/run-task.ts --cwd . --rust-cache validation -- cargo clippy --locked -p anima-daemon --all-targets -- -D clippy::correctness
+bun tools/workspace-dev/scripts/run-task.ts --cwd . --rust-cache validation -- cargo build --locked -p anima-daemon --bin anima-daemon
+```
+
+For the explicit receipt test, `ANIMA_WORKSPACE_CONTEXT_TEST_MOTHER` names the
+owned legacy Mother executable. For the all-seven graph fixture, that same
+variable must instead name the explicitly built native Mother executable
+(`--no-default-features`). `TEMP`/`TMP` name short private synthetic roots.
+Do not enable unrelated ignored diagnostics. From the Mother release worktree,
+set `ANIMA_MOTHER_TEST_DAEMON` to the
+explicitly built additive AnimaOS executable and run:
+
+```text
+cargo test --locked --test mcp additive_anima:: -- --ignored --test-threads=1
+```
+
+This selects legacy context, native context and full graph catalog fixtures.
+The final fresh-daemon serial run passes all three.
+The initial concurrent run and isolated legacy rerun are recorded separately
+above; serial qualification does not resolve the intermittent restart failure.
+Fresh synthetic profiles and real local
+executables are used; no installed host configuration, private conversations,
+model calls or live memory migration is part of these commands.
+
+For the targeted retained-corpus audit, create an owner-private disposable copy
+named `audit-copy.redb`, with sibling marker `.mother-synthetic-audit-copy`
+containing `Disposable synthetic G9 audit qualification copy`. The example refuses
+unmarked paths and provisions a synthetic read credential only on that copy:
+
+```text
+cargo run --release --locked --no-default-features --example garden_audit_qualification -- --synthetic-copy --database <absolute-synthetic-copy>/audit-copy.redb --expected-current 608321 --expected-history 608448 --expected-receipts 9700
+```
+
+Monitor the process separately under the same RAM/disk guards. Source hashing,
+copying and credential preparation are separate from the reported audit time;
+observed process memory includes preparation and store open.
+
+## Operational recovery and remaining release gates
+
+Resolve the recorded default-parallel test failures and intermittent legacy
+publication restart result before broad release qualification. The successful
+serial checks and bounded graph interoperability establish their stated scope.
+
+Source review suggests the next performance work in this order. These are
+implementation hypotheses, not controlled explanations of the measurements:
+
+1. The [bounded canonical/index audit](../../src/garden/indexes/audit.rs) is now
+   qualified on the retained 100k corpus. Keep exact corruption checks when
+   profiling larger receipt histories or replacement chains.
+2. Improve lexical candidate selectivity. The first-trigram index chooses the
+   same prefix for these fixture names, then exhausts its work budget before
+   full matching. Investigate selective-gram intersection or an exact-name
+   path, preserving short-substring behavior, canonical validation and coverage.
+3. Profile durable writes by writer wait, preparation, index work and commit
+   time before changing the transaction path. Keep Immediate durability and
+   atomic receipts; cross-platform timings do not establish filesystem causality.
+4. Investigate snapshot timing around clock-write admission under contention.
+   Retain fresh authorization, genuine clock-rollback detection and the final
+   current-authority fence. Do not hide rejection rates with automatic retries.
+
+Follow the [local service](../garden-service.md),
+[full backup](../garden-backups.md) and
+[migration/rollback](../garden-migration.md) guides. Stop the native owner before
+direct database administration. Runtime upgrades preserve identity/generation;
+restore and explicit migration change generation. Reissue exact restrictions to
+new private files, and never remove fences or reset operation UUIDs to recover
+an uncertain outcome. A rollback after canonical destination changes requires
+verified reconciliation and cannot discard acknowledged writes.
+
+Physical power loss, actual hosted model selection/recall, visual browser/TUI
+acceptance and installed harness adoption are not established by these synthetic
+checks. An owner must review the concrete report before live migration or
+installation. Pending, failed and unavailable gates keep the release assessment
+at HOLD.

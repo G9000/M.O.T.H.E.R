@@ -17,7 +17,7 @@ fn run(home: &Path, args: &[&str]) -> Value {
 }
 #[test]
 fn owner_can_enable_native_v1_back_up_verify_and_restore_without_installation() {
-    let dir = tempfile::tempdir().unwrap();
+    let dir = tempfile::tempdir_in(std::fs::canonicalize(std::env::temp_dir()).unwrap()).unwrap();
     let db = dir.path().join("garden.redb");
     let soul = dir.path().join("SOUL.md");
     fs::write(&soul, "Synthetic owner persona for qualification.").unwrap();

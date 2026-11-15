@@ -2,7 +2,7 @@
 
 Garden full backups are credential-free recovery bundles for the explicit redb backend. They preserve graph current records, immutable revisions, receipts, supersession mappings, reviewed-capture proposals and reviews, opaque extension payloads, and the enabled native v1 compatibility state. Native v1 state includes persona, records, retained receipts, inbox, pins and task assignments.
 
-The existing SQLite runtime and its small v1 JSON export remain separate. A small native v1 export refuses graph state that it cannot represent with `FULL_BACKUP_REQUIRED`. Full backup does not activate a new endpoint, migrate a live workspace or change any harness configuration.
+The SQLite runtime is removed. The bounded native v1 JSON export remains a compatibility format and refuses graph state that it cannot represent with `FULL_BACKUP_REQUIRED`. Full backup does not activate a new endpoint, migrate a live workspace or change any harness configuration.
 
 ## Owner commands
 
@@ -13,7 +13,7 @@ mother garden verify --backup "C:\private-backups\garden-bundle"
 mother garden restore --backup "C:\private-backups\garden-bundle" --db "C:\private-data\restored.redb"
 ```
 
-Blob ingestion is needed only for content-addressed artifact references; URI references do not fetch external bytes. Backup output must be a new directory, restore output must be a nonexistent file, and their parent directories must exist. Keep bundles outside Git: they contain private context and are not encrypted. Restored credentials must be issued explicitly before a harness can read the restored workspace.
+Stop the owner service before direct database commands, then restart it afterward. Blob ingestion is needed only for content-addressed artifact references; URI references do not fetch external bytes. Backup output must be a new directory, restore output must be a nonexistent file, and their parent directories must exist. Keep bundles outside Git: they contain private context and are not encrypted. Restored credentials must be issued explicitly before a harness can read the restored workspace.
 
 ## Bundle format
 
@@ -39,4 +39,4 @@ The restored workspace keeps its workspace ID and receives a new generation. Ori
 
 After validation and durable staging, restore publishes the database using a create-new hard link. The destination filesystem and process permissions must support creating hard links. An existing destination is never overwritten. The source database and bundle remain unchanged, and restore runs no external actions. Invalid bundles and failures before publication leave no destination; interrupted staging may leave an owned temporary directory for owner inspection. An error after publication can leave the complete destination in place. Inspect that destination before retrying; do not overwrite or delete it as an automatic recovery step.
 
-Full backup recovery is distinct from live cutover. Keep the original endpoint and harness settings unchanged until a separately authorized migration and activation workflow is complete. Tests of synthetic backups establish local recovery behavior, not acceptance in a real harness.
+Full backup recovery is distinct from endpoint cutover. It does not edit the original endpoint or harness settings. Any switch to a restored native generation requires separately reviewed credentials and host configuration; the removed SQLite converter/activation workflow is unavailable. Tests of synthetic backups establish local recovery behavior, not acceptance in a real harness.

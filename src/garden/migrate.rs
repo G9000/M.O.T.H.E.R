@@ -1,4 +1,7 @@
-//! Owner-only, journaled conversion. No harness settings or live services are changed.
+//! Existing owner cutover journals, fencing, recovery and explicit grant reissuance.
+#[cfg(test)]
+#[path = "../../tests/support/native_cutover.rs"]
+mod tests;
 use crate::{
     access::ClientAccess,
     error::{Error, Result},
@@ -34,15 +37,6 @@ pub enum MigrationPhase {
     RollingBack,
     RolledBack,
     NeedsReconciliation,
-}
-/// Trusted failure-injection barriers used by synthetic recovery qualification.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum MigrationStage {
-    Preparing,
-    DestinationValidated,
-    SourceFenced,
-    SourceArchived,
-    Activated,
 }
 /// Exact restrictions for explicit owner reissuance; credentials are never captured.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -329,30 +323,6 @@ fn clear_source_fence(state: &MigrationStatus) -> Result<()> {
     fs::remove_file(marker)?;
     sync_directory(state.request.source.parent().ok_or_else(fenced)?)
 }
-#[cfg(feature = "legacy-sqlite")]
-fn write_fence(path: &Path, state: &MigrationStatus, role: &str) -> Result<()> {
-    let marker = sidecar(path);
-    if marker.exists() {
-        let existing: Fence = serde_json::from_value(crate::config::read_json(&marker, 16_384)?)?;
-        if existing.version != 1
-            || existing.journal != state.request.journal
-            || existing.operation_id != state.request.operation_id
-            || existing.role != role
-        {
-            return Err(fenced());
-        }
-        return Ok(());
-    }
-    publish_json(
-        &marker,
-        &Fence {
-            version: 1,
-            journal: state.request.journal.clone(),
-            operation_id: state.request.operation_id.clone(),
-            role: role.into(),
-        },
-    )
-}
 /// Reject a former SQLite endpoint or its archive before opening or mutating it.
 /// # Errors
 /// Any cutover marker fails closed, including unreadable or incomplete markers.
@@ -607,9 +577,3 @@ pub fn reissue(journal: &Path, client: &str, config: &Path) -> Result<MigrationS
     }
     Ok(state)
 }
-
-#[cfg(feature = "legacy-sqlite")]
-#[path = "migrate_legacy.rs"]
-mod legacy;
-#[cfg(feature = "legacy-sqlite")]
-pub use legacy::{activate, activate_with_hook, prepare, prepare_with_hook};

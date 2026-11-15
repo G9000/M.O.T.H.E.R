@@ -19,7 +19,7 @@ fn scopes() -> Vec<String> {
 
 #[test]
 fn repeated_restore_retains_historical_generations_but_never_revives_old_proposals() {
-    let dir = tempfile::tempdir().unwrap();
+    let dir = tempfile::tempdir_in(std::fs::canonicalize(std::env::temp_dir()).unwrap()).unwrap();
     let workspace = uuid::Uuid::new_v4().to_string();
     let generation = uuid::Uuid::new_v4().to_string();
     let source =

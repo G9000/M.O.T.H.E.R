@@ -22,7 +22,8 @@ struct Fixture {
 }
 impl Fixture {
     fn new() -> Self {
-        let directory = tempfile::tempdir().unwrap();
+        let directory =
+            tempfile::tempdir_in(std::fs::canonicalize(std::env::temp_dir()).unwrap()).unwrap();
         let workspace = Uuid::new_v4().to_string();
         let generation = Uuid::new_v4().to_string();
         let store = GardenStore::initialize(
@@ -95,7 +96,9 @@ fn hex(bytes: &[u8]) -> String {
 fn unhex(value: &str) -> Vec<u8> {
     value
         .as_bytes()
-        .chunks_exact(2)
+        .as_chunks::<2>()
+        .0
+        .iter()
         .map(|p| u8::from_str_radix(std::str::from_utf8(p).unwrap(), 16).unwrap())
         .collect()
 }
@@ -280,6 +283,31 @@ fn manifest_chunk_paths_cannot_escape_the_bundle() {
         save_manifest(&f.bundle, &value);
         f.rejected();
     }
+}
+
+#[cfg(unix)]
+#[test]
+fn backup_paths_reject_parent_aliases_while_canonical_paths_remain_usable() {
+    let f = Fixture::new();
+    let alias = f._directory.path().join("alias");
+    std::os::unix::fs::symlink(f._directory.path(), &alias).unwrap();
+    let aliased_bundle = alias.join("bundle");
+    assert!(f.store.backup_to(&aliased_bundle).is_err());
+    assert!(
+        !f.bundle.exists(),
+        "rejected alias must not publish a bundle"
+    );
+
+    f.snapshot();
+    GardenStore::verify_backup(&f.bundle).unwrap();
+    assert!(GardenStore::verify_backup(&aliased_bundle).is_err());
+    assert!(GardenStore::restore_backup(&f.bundle, &alias.join("restored.redb")).is_err());
+    assert!(
+        !f.destination.exists(),
+        "rejected alias must not publish a database"
+    );
+    let restored = GardenStore::restore_backup(&f.bundle, &f.destination).unwrap();
+    drop(restored);
 }
 
 #[cfg(unix)]

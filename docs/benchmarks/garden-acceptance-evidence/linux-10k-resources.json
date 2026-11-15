@@ -1,0 +1,12 @@
+{
+  "entities": 10000,
+  "started_at_utc": "2026-11-15T07:47:29Z",
+  "exit_code": 0,
+  "guard": null,
+  "resource_samples": 236,
+  "sample_interval_ms": 500,
+  "peak_observed_rss_bytes": 4474576896,
+  "observed_process_peak_rss_bytes": 4474576896,
+  "peak_observed_database_bytes": 1140854784,
+  "forced_termination_progress": "Last checkpoint only; acknowledged writes after it may exist"
+}

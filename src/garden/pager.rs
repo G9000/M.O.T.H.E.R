@@ -75,8 +75,10 @@ fn principal_hash(principal: &Principal) -> Result<String> {
 
 /// Persist the observed wall-clock high water, including rejected expired requests.
 pub(super) fn observe_clock(store: &GardenStore) -> Result<()> {
-    let now = store.clock.now();
     let tx = store.db.begin_write().map_err(storage_error)?;
+    // Sample inside the serialized writer gate. An earlier observation waiting
+    // behind another query is not evidence that the owner's clock moved back.
+    let now = store.clock.now();
     {
         let mut meta = tx.open_table(META).map_err(storage_error)?;
         if let Some(previous) = meta.get("pager_clock").map_err(storage_error)? {

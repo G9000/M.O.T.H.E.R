@@ -2,9 +2,9 @@
 
 G7 adds an explicitly enabled v1 view to the redb Garden. The eleven existing MCP tool schemas stay unchanged: context, search, full records, history, writes, checkpoints, receipts, proposed memories, proposal status, pins and task assignment. Native v1 records and graph records use the same database transaction authority, with separate typed tables and independent grants. Graph-only objects do not appear as invented v1 records.
 
-The SQLite runtime remains available. A private configuration without a backend tag continues to use it. An explicit `"backend":"garden_redb"` configuration selects native storage through either `mother mcp --config` or `mother garden mcp --config`; unknown tags fail before opening a database. There is no file-content autodetection, automatic grant conversion, SQLite shadow or dual write.
+The native redb Garden is the sole runtime. A strict `"backend":"garden_redb"` configuration selects a direct single-process connection; `"backend":"garden_service"` selects the authenticated local owner service. Both are supported through `mother mcp --config`. Old SQLite configs and unknown backend tags fail explicitly before opening a store. There is no autodetection, implicit conversion, shadow database or dual write.
 
-The native storage path uses redb. This package still includes the legacy SQLite runtime and dependency; a build that excludes that backend and a live migration/cutover workflow remain separate work. Existing general owner commands such as `mother context`, `search` and `index` continue to accept SQLite configurations; the native v1 surface is MCP plus the explicit `garden` owner commands below.
+The default Cargo build is native, with no SQLite feature or converter build. The executable exposes `garden` owner commands and MCP. The former general `context`, `search`, `index`, `brief`, `connection`, persona-update and app setup commands are removed; their v1 MCP tools remain available where authorized. Native inbox review remains interactive in terminals and emits JSON when piped. See [service operation](garden-service.md), [historical cutover recovery](garden-migration.md) and [validation boundaries](validation.md).
 
 ## Explicit owner setup
 
@@ -14,14 +14,23 @@ These examples create a separate workspace; they do not install a harness connec
 mother garden init --db "C:\private-data\garden.redb"
 mother garden compat-init --db "C:\private-data\garden.redb" --soul "C:\private-data\SOUL.md"
 mother garden grant-v1 codex --db "C:\private-data\garden.redb" --out "C:\private-data\codex.private.json" --access companion --subject codex --scopes read,context:propose
-mother mcp --config "C:\private-data\codex.private.json"
+mother garden service --db "C:\private-data\garden.redb" --endpoint "C:\private-data\service.json"
 ```
+
+The service remains in the foreground and holds the sole database handle. In another terminal, authenticate that owner and create the harness bridge config:
+
+```powershell
+mother garden service-config --config "C:\private-data\codex.private.json" --endpoint "C:\private-data\service.json" --out "C:\private-data\codex.service.json"
+mother mcp --config "C:\private-data\codex.service.json"
+```
+
+Repeat with a distinct credential for each harness. Direct `garden_redb` MCP configurations remain an explicit single-process interface; they cannot share the database with a running owner service. Use the service topology above for multiple harnesses.
 
 `grant-v1` defaults to `read`. Kind write scopes and `context:propose` remain distinct. Shared clients require their own identity and explicit v1 record allowlist; they receive no owner persona, hidden counts, historical payloads or implicit access to a newly approved record. Independent graph scopes require an explicit graph policy through `--objects` or `--all`; full graph visibility requires an explicitly selected companion grant.
 
-Without v1 initialization, the graph connection retains its eight tools, including capability discovery. Enabling v1 adds the eleven legacy schemas. Advertising a tool does not confer its scope. Revocation and current grants are checked on each call.
+Without v1 initialization, a graph-authorized connection retains its eight tools, including capability discovery. Enabling v1 adds the eleven legacy schemas. A context-only native credential receives twelve v1/context tools without unrelated graph descriptors. Graph capability availability reflects the current grant; defined graph contracts remain discoverable as definitions. Advertising a tool does not confer its scope. Revocation and current grants are checked on each call; restart/review discovery after grant changes.
 
-Review proposed memories locally with `mother garden v1-inbox --db ...`; review graph proposals with `mother garden inbox --db ...`. Both owner interfaces keep the original operation UUID when reconciling an uncertain review. MCP cannot approve proposals, issue grants, ingest files or restore backups. Pending proposals remain outside canonical context and search.
+Stop the service before separate owner commands that open its database, including grant/revoke, review, indexing, export and backup; restart it afterward. Review proposed memories interactively using `mother garden v1-inbox --db ...` and graph batches using `mother garden inbox --db ...`. When piped, these commands list proposals as JSON. A separately reviewed JSON request can use `mother garden review --db ... --request ...` (add `--graph` for a graph batch). Preserve the original operation UUID when reconciling uncertain review. MCP/IPC cannot approve proposals, issue grants, ingest files or restore backups. Pending proposals remain outside canonical context and search.
 
 ## Optional local search
 
@@ -41,7 +50,11 @@ When an imported record has more than 1,000 missing revision snapshots, native h
 
 Each harness continues to decide what to remember and how to interpret retrieved context. This compatibility layer preserves storage and access behavior; it performs no automatic extraction or transcript ingestion.
 
+The SQLite converter and source activation commands are removed. Existing journal fences still block unactivated destinations. Historical status, exact grant reissue and eligible rollback remain available; after canonical destination writes rollback requires reconciliation rather than discarding acknowledged changes. [The recovery guide](garden-migration.md) explains those retained boundaries. Low-level v1 import is not endpoint activation.
+
 ## G7 qualification, 2026-11-15
+
+This is historical milestone evidence. G8 was subsequently integrated and pushed at `df6c6eb07337ab28a153f5c9decf27d63b34d8d1`; current release/platform/scale gates are reported separately in the [G9 assessment](benchmarks/garden-acceptance.md). Statements below about uncommitted work and remaining G8 work describe the G7 checkpoint only.
 
 Validated in the isolated `g9000/mother-garden-backups` worktree on Windows with synthetic context, private temporary directories and no changes to installed harness settings or live databases.
 

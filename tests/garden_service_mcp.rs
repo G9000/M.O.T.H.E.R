@@ -12,6 +12,8 @@ use std::{
     thread,
     time::{Duration, Instant},
 };
+#[path = "support/mcp_discovery.rs"]
+mod discovery;
 
 struct Process(Child);
 impl Drop for Process {
@@ -171,13 +173,11 @@ fn two_stdio_harnesses_share_one_local_owner_and_reconcile_the_same_write() {
     );
     let mut first = Harness::new(&config);
     let mut second = Harness::new(&config);
-    let tools = first.rpc("tools/list", json!({}));
-    assert_eq!(tools["result"]["tools"].as_array().unwrap().len(), 19);
+    let tools = discovery::collect(|params| first.rpc("tools/list", params));
+    assert_eq!(tools.len(), 19);
     let legacy: Value = serde_json::from_str(include_str!("../contracts/mcp-tools.json")).unwrap();
     for expected in legacy.as_array().unwrap() {
-        let actual = tools["result"]["tools"]
-            .as_array()
-            .unwrap()
+        let actual = tools
             .iter()
             .find(|tool| tool["name"] == expected["name"])
             .unwrap();

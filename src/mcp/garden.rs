@@ -59,10 +59,10 @@ impl ServerHandler for GraphServer {
     }
     async fn list_tools(
         &self,
-        _: Option<PaginatedRequestParams>,
+        request: Option<PaginatedRequestParams>,
         _: RequestContext<RoleServer>,
     ) -> std::result::Result<ListToolsResult, ErrorData> {
-        Ok(ListToolsResult::with_all_items(self.tools.clone()))
+        super::discovery::list_tools(&self.tools, request)
     }
     async fn call_tool(
         &self,
@@ -123,21 +123,21 @@ fn dispatch(
             return Err(input_error());
         }
         let v1_enabled = store.v1_initialized()?;
-        let identity = match store.identity(&auth) {
-            Ok(identity) => identity,
+        let (identity, graph_available) = match store.identity(&auth) {
+            Ok(identity) => (identity, true),
             Err(error) if error.code == GardenErrorCode::Forbidden && v1_enabled => {
-                store.v1_identity(&auth)?
+                (store.v1_identity(&auth)?, false)
             }
             Err(error) => return Err(domain_error(error)),
         };
         return Ok(
             json!({"version":1,"v1":{"available":v1_enabled,"contractVersion":1},
-            "workspace":identity,"garden":{"contractVersion":2,"available":true,"status":"prototype",
+            "workspace":identity,"garden":{"contractVersion":2,"available":graph_available,"status":"prototype",
             "optionalVectorProfile":mother::search::embedding_profile(),"vectorPreparation":"explicit_local_sdk_or_owner_cli",
-            "capabilities":["garden.entities.v2","garden.assertions.v2","garden.proposals.v2","garden.query.v2","garden.changes.v2"],
-            "availableTools":TOOLS,"definedCapabilities":["garden.entities.v2","garden.assertions.v2","garden.query.v2","garden.changes.v2","garden.proposals.v2"],
+            "capabilities":if graph_available {vec!["garden.entities.v2","garden.assertions.v2","garden.proposals.v2","garden.query.v2","garden.changes.v2"]} else {vec![]},
+            "availableTools":if graph_available {TOOLS.as_slice()} else {&[]},"definedCapabilities":["garden.entities.v2","garden.assertions.v2","garden.query.v2","garden.changes.v2","garden.proposals.v2"],
             "definedTools":["mother_garden_get","mother_garden_query","mother_garden_apply","mother_garden_propose","mother_garden_get_proposal","mother_garden_get_receipt","mother_garden_changes"],
-            "reason":if v1_enabled {"native_v1_compatibility_with_independent_graph_authority"} else {"graph_only_prototype_without_v1_compatibility_or_migration"}}}),
+            "reason":if !graph_available {"native_context_only_current_grant"} else if v1_enabled {"native_v1_compatibility_with_independent_graph_authority"} else {"graph_only_prototype_without_v1_compatibility_or_migration"}}}),
         );
     }
     if !TOOLS.contains(&name) {
@@ -200,6 +200,14 @@ pub(super) fn advertised_tools(v1_enabled: bool) -> Result<Vec<Tool>> {
         .cloned()
         .collect();
     for tool in &mut available {
+        // Each canonical branch already describes an object. Make the MCP root
+        // explicit without replacing any reference, alternative or constraint.
+        for field in ["inputSchema", "outputSchema"] {
+            tool[field]
+                .as_object_mut()
+                .ok_or_else(input_error)?
+                .insert("type".into(), json!("object"));
+        }
         tool["description"] = json!(match tool["name"].as_str().ok_or_else(input_error)? {
             "mother_garden_get" =>
                 "Read an authorized current or historical graph object in the explicitly configured graph prototype.",
@@ -240,6 +248,17 @@ pub(super) fn advertised_tools(v1_enabled: bool) -> Result<Vec<Tool>> {
     Ok(tools)
 }
 
+pub(super) fn advertised_context_tools() -> Result<Vec<Tool>> {
+    let mut tools = super::advertised_tools()?;
+    if let Some(capabilities) = tools
+        .iter_mut()
+        .find(|tool| tool.name == "mother_get_capabilities")
+    {
+        capabilities.description = Some("Discover native shared context under the current credential. Graph tools require an independent graph grant; reconnect after owner changes the granted surface.".into());
+    }
+    Ok(tools)
+}
+
 /// Start the explicitly configured native runtime with independently authorized views.
 pub async fn serve(config_path: &Path) -> Result<()> {
     let path = config_path.to_owned();
@@ -248,9 +267,21 @@ pub async fn serve(config_path: &Path) -> Result<()> {
         let store = GardenStore::open_active(&config.database_path)?;
         config.authorize(&store)?;
         let v1_enabled = store.v1_initialized()?;
+        let graph_available = match store.identity(&config.auth()) {
+            Ok(_) => true,
+            Err(error) if error.code == GardenErrorCode::Forbidden && v1_enabled => {
+                store.v1_identity(&config.auth())?;
+                false
+            }
+            Err(error) => return Err(domain_error(error)),
+        };
         Ok(GraphServer {
             config,
-            tools: advertised_tools(v1_enabled)?,
+            tools: if graph_available {
+                advertised_tools(v1_enabled)?
+            } else {
+                advertised_context_tools()?
+            },
             v1_enabled,
             search: Arc::new(NativeSearch::from_environment()),
             gate: Arc::new(Mutex::new(())),

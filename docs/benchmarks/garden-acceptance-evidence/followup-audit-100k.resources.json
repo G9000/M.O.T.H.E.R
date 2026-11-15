@@ -1,0 +1,14 @@
+{
+  "synthetic": true,
+  "exit_code": 0,
+  "guard": null,
+  "wall_seconds": 106.95013164599999,
+  "sample_interval_ms": 500,
+  "resource_samples": 213,
+  "peak_observed_rss_bytes": 1997213696,
+  "observed_process_peak_rss_bytes": 1997213696,
+  "database_bytes": 10737487872,
+  "original_database_sha256_before": "0f7b0dc13849bb6b5d7119290f0c933098f612ea86b8853f36147585e9ebb280",
+  "original_database_sha256_after": "0f7b0dc13849bb6b5d7119290f0c933098f612ea86b8853f36147585e9ebb280",
+  "qualified_executable_sha256": "6446736c98ef754b6cee3ea25fa82ff8de8a2eae5ada4be3b43f5d36af770033"
+}

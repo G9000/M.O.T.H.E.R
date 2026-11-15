@@ -1,0 +1,14 @@
+{
+  "entities": 10000,
+  "elapsed_seconds": 363.7722813,
+  "exit_code": 0,
+  "resource_samples": 592,
+  "sample_interval_ms": 500,
+  "peak_observed_working_set_bytes": 3941769216,
+  "peak_observed_private_bytes": 4045410304,
+  "peak_observed_database_bytes": 1140854784,
+  "guard": null,
+  "source_sha256": "B75BDF704B4C44C92B2A0816FFC52FE532900A825D0FCFB8E5540183C0AE857E",
+  "source_unchanged": true,
+  "forced_termination_progress": "Last checkpoint only; not proof that no later canonical writes committed"
+}

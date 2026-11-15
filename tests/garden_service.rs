@@ -31,14 +31,17 @@ impl Fixture {
     fn new() -> Self {
         let directory =
             tempfile::tempdir_in(std::fs::canonicalize(std::env::temp_dir()).unwrap()).unwrap();
+        let parent = directory.path().to_owned();
+        Self::in_directory(directory, &parent)
+    }
+    fn in_directory(directory: tempfile::TempDir, parent: &Path) -> Self {
         #[cfg(unix)]
         {
             use std::os::unix::fs::PermissionsExt;
-            std::fs::set_permissions(directory.path(), std::fs::Permissions::from_mode(0o700))
-                .unwrap();
+            std::fs::set_permissions(parent, std::fs::Permissions::from_mode(0o700)).unwrap();
         }
-        let db = directory.path().join("garden.redb");
-        let endpoint = directory.path().join("service.json");
+        let db = parent.join("garden.redb");
+        let endpoint = parent.join("service.json");
         let workspace_id = Uuid::new_v4().to_string();
         let generation = Uuid::new_v4().to_string();
         let store = GardenStore::initialize(&db, &workspace_id, &generation).unwrap();
@@ -100,6 +103,119 @@ impl Fixture {
                 "draft":{"kind":"entity","entityType":"test:person","displayName":"synthetic",
                     "aliases":[],"extensions":{}}}]})
     }
+}
+
+#[cfg(unix)]
+fn fixture_with_private_parent_length(length: usize) -> Fixture {
+    use std::os::unix::ffi::OsStrExt;
+    let directory =
+        tempfile::tempdir_in(std::fs::canonicalize(std::env::temp_dir()).unwrap()).unwrap();
+    let padding = length
+        .checked_sub(directory.path().as_os_str().as_bytes().len() + 1)
+        .filter(|padding| *padding > 0)
+        .expect("synthetic temporary root must leave room for the test parent");
+    let parent = directory.path().join("p".repeat(padding));
+    std::fs::create_dir(&parent).unwrap();
+    Fixture::in_directory(directory, &parent)
+}
+
+#[cfg(unix)]
+#[test]
+fn unix_service_authenticates_under_a_long_private_parent() {
+    let fixture = fixture_with_private_parent_length(72);
+    let _owner = fixture.start();
+    let client = LocalClient::new(fixture.config.clone()).unwrap();
+    let info = client.info();
+    assert_eq!(
+        Uuid::parse_str(&info.service_id).unwrap().to_string(),
+        info.service_id
+    );
+    assert_eq!(Path::new(&info.address).parent(), fixture.endpoint.parent());
+    assert!(
+        info.address.len() <= 103,
+        "address must also fit macOS sun_path"
+    );
+    assert_eq!(
+        client.call("mother_get_capabilities", &json!({})).unwrap()["workspace"]["workspaceId"],
+        fixture.config.workspace_id
+    );
+
+    let mut redirected = info.clone();
+    redirected.address = fixture
+        .endpoint
+        .with_file_name("unrelated.sock")
+        .to_str()
+        .unwrap()
+        .into();
+    std::fs::write(&fixture.endpoint, serde_json::to_vec(&redirected).unwrap()).unwrap();
+    assert_eq!(
+        LocalClient::new(fixture.config.clone()).unwrap_err().code(),
+        "INVALID_INPUT"
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn unix_service_replaces_only_an_exact_legacy_descriptor() {
+    let directory = tempfile::tempdir_in(std::fs::canonicalize("/tmp").unwrap()).unwrap();
+    let parent = directory.path().to_owned();
+    let fixture = Fixture::in_directory(directory, &parent);
+    let service_id = Uuid::new_v4().to_string();
+    let legacy_address = parent.join(format!(".mother-{service_id}.sock"));
+    std::os::unix::net::SocketAddr::from_pathname(&legacy_address).unwrap();
+    let mut descriptor = json!({
+        "version":1, "serviceId":service_id, "address":legacy_address,
+        "workspaceId":fixture.config.workspace_id, "generation":fixture.config.generation,
+        "v1Available":false
+    });
+    descriptor["address"] = json!(parent.join("unrelated.sock"));
+    let unrelated = serde_json::to_vec(&descriptor).unwrap();
+    std::fs::write(&fixture.endpoint, &unrelated).unwrap();
+    assert_eq!(
+        LocalService::bind(&fixture.db, &fixture.endpoint)
+            .unwrap_err()
+            .code(),
+        "INVALID_INPUT"
+    );
+    assert_eq!(std::fs::read(&fixture.endpoint).unwrap(), unrelated);
+
+    descriptor["address"] = json!(legacy_address);
+    std::fs::write(&fixture.endpoint, serde_json::to_vec(&descriptor).unwrap()).unwrap();
+    let service = LocalService::bind(&fixture.db, &fixture.endpoint).unwrap();
+    assert_ne!(service.info().service_id, service_id);
+    assert_ne!(service.info().address, legacy_address.to_str().unwrap());
+    assert!(service.info().address.len() < legacy_address.as_os_str().len());
+}
+
+#[cfg(unix)]
+#[test]
+fn unix_service_rejects_an_overlong_address_before_creating_owner_state() {
+    let fixture = fixture_with_private_parent_length(160);
+    let before = std::fs::read_dir(fixture.endpoint.parent().unwrap())
+        .unwrap()
+        .count();
+    let error = LocalService::bind(&fixture.db, &fixture.endpoint).unwrap_err();
+    assert_eq!(error.code(), "INVALID_INPUT");
+    assert!(
+        error
+            .to_string()
+            .contains("shorter owner-private directory")
+    );
+    assert!(!fixture.endpoint.exists());
+    assert!(
+        !fixture
+            .db
+            .with_added_extension("service-owner.lock")
+            .exists()
+    );
+    assert_eq!(
+        std::fs::read_dir(fixture.endpoint.parent().unwrap())
+            .unwrap()
+            .count(),
+        before
+    );
+    let store = GardenStore::open(&fixture.db).expect("rejected bind must release the database");
+    drop(store);
 }
 
 #[test]
@@ -274,6 +390,8 @@ fn v1_transport_reuses_native_contracts_and_preserves_independent_graph_authorit
     let client = LocalClient::new(fixture.config.clone()).unwrap();
     let capabilities = client.call("mother_get_capabilities", &json!({})).unwrap();
     assert_eq!(capabilities["v1"]["available"], true);
+    assert_eq!(capabilities["garden"]["available"], false);
+    assert_eq!(capabilities["garden"]["availableTools"], json!([]));
     assert_eq!(
         client.call("mother_write_record", &write).unwrap(),
         expected

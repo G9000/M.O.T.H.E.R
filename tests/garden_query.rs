@@ -12,6 +12,85 @@ use serde_json::{Value, json};
 use std::sync::{Arc, Mutex};
 use uuid::Uuid;
 
+#[test]
+fn concurrent_query_admission_does_not_treat_an_earlier_clock_sample_as_rollback() {
+    use std::sync::{
+        atomic::{AtomicBool, Ordering},
+        mpsc,
+    };
+    use std::time::Duration;
+    #[derive(Debug)]
+    struct DelayedClock {
+        armed: AtomicBool,
+        sampled: mpsc::Sender<()>,
+        release: Mutex<mpsc::Receiver<()>>,
+    }
+    impl Clock for DelayedClock {
+        fn now(&self) -> DateTime<Utc> {
+            if self.armed.swap(false, Ordering::SeqCst) {
+                let sampled = "2026-01-01T00:00:00Z".parse().unwrap();
+                self.sampled.send(()).unwrap();
+                self.release
+                    .lock()
+                    .unwrap()
+                    .recv_timeout(Duration::from_secs(5))
+                    .unwrap();
+                sampled
+            } else {
+                "2026-01-01T00:00:01Z".parse().unwrap()
+            }
+        }
+    }
+    let (sampled_tx, sampled_rx) = mpsc::channel();
+    let (release_tx, release_rx) = mpsc::channel();
+    let clock = Arc::new(DelayedClock {
+        armed: AtomicBool::new(false),
+        sampled: sampled_tx,
+        release: Mutex::new(release_rx),
+    });
+    let dir = tempfile::tempdir().unwrap();
+    let workspace = Uuid::new_v4().to_string();
+    let generation = Uuid::new_v4().to_string();
+    let store = GardenStore::initialize_with_clock(
+        dir.path().join("concurrent.redb"),
+        &workspace,
+        &generation,
+        clock.clone(),
+    )
+    .unwrap();
+    let auth = store
+        .grant(
+            "reader",
+            &["garden:read".into()],
+            &ClientAccess::default(),
+            &GardenAccess::All {},
+        )
+        .unwrap();
+    let store = Arc::new(store);
+    let request:QueryRequest=serde_json::from_value(json!({"version":2,"workspaceId":workspace,"generation":generation,"requiredExtensions":{},"ids":[],"kinds":[],"limit":1,"cursor":null})).unwrap();
+    clock.armed.store(true, Ordering::SeqCst);
+    let first_store = store.clone();
+    let first_auth = auth.clone();
+    let first_request = request.clone();
+    let first = std::thread::spawn(move || first_store.query(&first_auth, &first_request));
+    sampled_rx.recv_timeout(Duration::from_secs(5)).unwrap();
+    let (done_tx, done_rx) = mpsc::channel();
+    let second = std::thread::spawn(move || {
+        let result = store.query(&auth, &request);
+        let _ = done_tx.send(());
+        result
+    });
+    // A later query can finish first only if the first sample was taken outside
+    // the writer gate. With correct admission, release the sampled reader first.
+    let _ = done_rx.recv_timeout(Duration::from_secs(1));
+    release_tx.send(()).unwrap();
+    assert!(
+        first.join().unwrap().is_ok(),
+        "admission order must not manufacture clock rollback"
+    );
+    assert!(second.join().unwrap().is_ok());
+}
+
 #[derive(Debug)]
 struct TestClock(Mutex<DateTime<Utc>>);
 impl Clock for TestClock {

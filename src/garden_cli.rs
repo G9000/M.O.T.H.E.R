@@ -1,4 +1,4 @@
-//! Shared native Garden owner commands for both executable feature builds.
+//! Native Garden owner commands.
 use clap::Subcommand;
 use mother::{
     access::{AccessMode, ClientAccess},
@@ -9,7 +9,7 @@ use mother::{
 use serde_json::{Value, json};
 use std::{
     fs,
-    io::{Read, Write},
+    io::{IsTerminal, Read, Write},
     path::{Path, PathBuf},
 };
 const MAX_SOUL_BYTES: u64 = 128_000;
@@ -277,28 +277,20 @@ fn read_soul(path: &Path) -> Result<String> {
     Ok(content)
 }
 fn run_v1_inbox(path: PathBuf) -> Result<()> {
-    #[cfg(feature = "legacy-sqlite")]
-    {
-        crate::tui::run_native_inbox(path)
+    if std::io::stdin().is_terminal() && std::io::stdout().is_terminal() {
+        return crate::tui::run_native_inbox(path);
     }
-    #[cfg(not(feature = "legacy-sqlite"))]
-    {
-        print_json(mother::garden::store::GardenStore::open_active(path)?.v1_inbox_list()?)
-    }
+    print_json(mother::garden::store::GardenStore::open_active(path)?.v1_inbox_list()?)
 }
 fn run_graph_inbox(path: PathBuf) -> Result<()> {
-    #[cfg(feature = "legacy-sqlite")]
-    {
-        crate::tui::run_garden(path)
+    if std::io::stdin().is_terminal() && std::io::stdout().is_terminal() {
+        return crate::tui::run_garden(path);
     }
-    #[cfg(not(feature = "legacy-sqlite"))]
-    {
-        print_json(
-            mother::garden::store::GardenStore::open_active(path)?
-                .owner_inbox_list()
-                .map_err(mother::garden::config::domain_error)?,
-        )
-    }
+    print_json(
+        mother::garden::store::GardenStore::open_active(path)?
+            .owner_inbox_list()
+            .map_err(mother::garden::config::domain_error)?,
+    )
 }
 pub(crate) fn execute_garden(command: GardenCommand) -> Result<()> {
     use mother::garden::{

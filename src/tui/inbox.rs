@@ -3,7 +3,7 @@
 mod tests;
 
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
-use mother::{error::Result, garden::store::GardenStore, store::Store};
+use mother::{error::Result, garden::store::GardenStore};
 use ratatui::{
     Frame,
     layout::Rect,
@@ -22,15 +22,8 @@ enum InboxPage {
     ConfirmDismiss,
 }
 
-#[derive(Debug, Clone, Copy)]
-enum InboxBackend {
-    Sqlite,
-    Native,
-}
-
 pub(super) struct Inbox {
     path: PathBuf,
-    backend: InboxBackend,
     page: InboxPage,
     workspace: Value,
     items: Vec<Value>,
@@ -48,7 +41,6 @@ impl Inbox {
     fn empty(path: PathBuf) -> Self {
         Self {
             path,
-            backend: InboxBackend::Sqlite,
             page: InboxPage::List,
             workspace: Value::Null,
             items: vec![],
@@ -63,14 +55,8 @@ impl Inbox {
                 .into(),
         }
     }
-    pub(super) fn open(path: PathBuf) -> Result<Self> {
-        let mut inbox = Self::empty(path);
-        inbox.reload()?;
-        Ok(inbox)
-    }
     pub(super) fn open_native(path: PathBuf) -> Result<Self> {
         let mut inbox = Self::empty(path);
-        inbox.backend = InboxBackend::Native;
         inbox.reload()?;
         Ok(inbox)
     }
@@ -78,24 +64,13 @@ impl Inbox {
         self.pending.is_some()
     }
     fn list(&self) -> Result<Value> {
-        match self.backend {
-            InboxBackend::Sqlite => Store::open(&self.path)?.inbox_list(),
-            InboxBackend::Native => GardenStore::open_active(&self.path)?.v1_inbox_list(),
-        }
+        GardenStore::open_active(&self.path)?.v1_inbox_list()
     }
     fn get(&self, id: &str) -> Result<Value> {
-        match self.backend {
-            InboxBackend::Sqlite => Store::open(&self.path)?.inbox_get(id),
-            InboxBackend::Native => GardenStore::open_active(&self.path)?.v1_inbox_get(id),
-        }
+        GardenStore::open_active(&self.path)?.v1_inbox_get(id)
     }
     fn review(&self, request: Value) -> Result<Value> {
-        match self.backend {
-            InboxBackend::Sqlite => Store::open(&self.path)?.review_proposal(request),
-            InboxBackend::Native => {
-                GardenStore::open_active(&self.path)?.v1_review_proposal(request)
-            }
-        }
+        GardenStore::open_active(&self.path)?.v1_review_proposal(request)
     }
     fn reload(&mut self) -> Result<()> {
         let list = self.list()?;
@@ -259,20 +234,6 @@ impl Inbox {
             && let Some(editor) = self.editor.as_mut()
         {
             editor.insert(text);
-        }
-    }
-    pub(super) fn hints(&self) -> &'static str {
-        match self.page {
-            InboxPage::List => "↑↓ select   Enter review   r refresh   Esc home",
-            InboxPage::Review => {
-                "↑↓ / PgUp PgDn scroll   e edit   s Save   d Dismiss   r refresh   Esc inbox"
-            }
-            InboxPage::Edit => {
-                "Tab field   arrows move/change choice   Enter newline   Ctrl+U clear   Ctrl+S review   Esc cancel"
-            }
-            InboxPage::ConfirmSave | InboxPage::ConfirmDismiss => {
-                "Enter confirm   Esc back (unless result is uncertain)"
-            }
         }
     }
     pub(super) fn render(&self, frame: &mut Frame, area: Rect) {

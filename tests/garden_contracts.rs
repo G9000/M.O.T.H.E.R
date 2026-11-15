@@ -104,22 +104,30 @@ fn bounds_names_aliases_batch_json_and_extension_depth() {
     assert!(parse(&value).is_err());
 }
 #[test]
-#[cfg(feature = "legacy-sqlite")]
 fn v1_write_rejects_v2_fields() {
-    use mother::{contracts::Auth, store::Store};
+    use mother::{access::ClientAccess, garden::store::GardenStore};
     let dir = tempfile::tempdir().unwrap();
-    let mut s =
-        Store::initialize(&dir.path().join("synthetic.sqlite"), "Synthetic persona").unwrap();
-    let g = s
-        .grant("synthetic-client", &["memory:write".into()])
+    let workspace = uuid::Uuid::new_v4().to_string();
+    let generation = uuid::Uuid::new_v4().to_string();
+    let store =
+        GardenStore::initialize(dir.path().join("native.redb"), &workspace, &generation).unwrap();
+    store.v1_initialize("Synthetic persona").unwrap();
+    let auth = store
+        .v1_grant(
+            "synthetic-client",
+            &["memory:write".into()],
+            &ClientAccess::default(),
+            None,
+        )
         .unwrap();
-    let a = Auth {
-        client_id: "synthetic-client".into(),
-        token: g["token"].as_str().unwrap().into(),
-    };
-    let w = s.workspace().unwrap();
-    let value = json!({"workspaceId":w["id"],"generation":w["generation"],"operationId":uuid::Uuid::new_v4().to_string(),"expectedRevision":0,"record":{"kind":"memory","title":"Synthetic","content":"Example","status":"active","basis":"owner_statement","extensions":{}}});
-    assert_eq!(s.write(&a, value).unwrap_err().code(), "INVALID_INPUT");
+    let value = json!({"workspaceId":workspace,"generation":generation,"operationId":uuid::Uuid::new_v4().to_string(),"expectedRevision":0,"record":{"kind":"memory","title":"Synthetic","content":"Example","status":"active","basis":"owner_statement","extensions":{}}});
+    assert_eq!(
+        store
+            .v1_call(&auth, "mother_write_record", value)
+            .unwrap_err()
+            .code(),
+        "INVALID_INPUT"
+    );
 }
 #[test]
 fn every_future_tool_has_resolvable_standalone_schemas() {

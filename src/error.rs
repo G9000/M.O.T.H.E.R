@@ -5,9 +5,6 @@ use thiserror::Error;
 pub enum Error {
     #[error("{code}: {message}")]
     Domain { code: &'static str, message: String },
-    #[cfg(feature = "legacy-sqlite")]
-    #[error("Storage operation failed")]
-    Sqlite(#[from] rusqlite::Error),
     #[error("File operation failed: {0}")]
     Io(#[from] std::io::Error),
     #[error("Invalid JSON data")]
