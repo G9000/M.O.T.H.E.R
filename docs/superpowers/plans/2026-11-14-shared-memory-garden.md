@@ -152,14 +152,14 @@ G2 and G3 may be researched independently; G4 depends on both. AnimaOS A6 follow
 
 **Modify:** `src/main.rs`, `src/cli.rs`, `src/mcp.rs`, `src/config.rs`, `src/connection.rs`, `src/portability.rs`, plus feature/build layout needed to isolate legacy SQLite conversion.
 
-- [ ] Test two MCP clients using one local writer service; reject a second owner process, unauthorized IPC client and wrong workspace/generation.
-- [ ] Implement bounded authenticated local IPC and a stdio MCP bridge. Keep operation semantics identical through direct/service paths. Do not expose a new public listener.
-- [ ] Implement dry-run migration to a new destination, validation manifest and explicit cutover journal. Keep runtime upgrades distinct from restore-style generation changes.
-- [ ] Exercise the design's stop-writers/final-snapshot/rebind sequence with synthetic clients. Require owner-managed restricted-grant reissuance; no tokens in exports/logs.
-- [ ] Block old-generation proposals, preserve historical receipts and disable use of the archived source as an active endpoint. Detect stale configs rather than silently choosing an old file.
-- [ ] Document rollback before and after first destination write. After-write rollback must reconcile new acknowledged state; reject a rollback that would discard it.
-- [ ] Audit the new runtime dependency graph for native database/index code. Put SQLite import support in a separate migration build; document OS library calls separately from the pure-Rust engine claim.
-- [ ] Run `cargo test --locked --test garden_service` and `cargo test --locked --test garden_migration` on Windows, Linux and macOS.
+- [x] Test two MCP clients using one local writer service; reject a second owner process, unauthorized IPC client and wrong workspace/generation.
+- [x] Implement bounded authenticated local IPC and a stdio MCP bridge. Keep operation semantics identical through direct/service paths. Do not expose a new public listener.
+- [x] Implement dry-run migration to a new destination, validation manifest and explicit cutover journal. Keep runtime upgrades distinct from restore-style generation changes.
+- [x] Exercise the design's stop-writers/final-snapshot/rebind sequence with synthetic clients. Require owner-managed restricted-grant reissuance; no tokens in exports/logs.
+- [x] Block old-generation proposals, preserve historical receipts and disable use of the archived source as an active endpoint. Detect stale configs rather than silently choosing an old file.
+- [x] Document rollback before and after first destination write. After-write rollback must reconcile new acknowledged state; reject a rollback that would discard it.
+- [x] Audit the new runtime dependency graph for native database/index code. Put SQLite import support in a separate migration build; document OS library calls separately from the pure-Rust engine claim.
+- [ ] Run `cargo test --locked --test garden_service` and `cargo test --locked --test garden_migration` on Windows, Linux and macOS. Windows passed; Linux/macOS runtime qualification remains in G9.
 
 **Acceptance:** No dual authoritative stores, no lost acknowledged mutations across supported cutover/recovery cases, and unchanged behavior for an ordinary v1 runtime upgrade.
 

@@ -1,9 +1,13 @@
 //! Private client configuration and bounded file access.
+#[cfg(feature = "legacy-sqlite")]
 use crate::{
     access::AccessMode,
-    contracts::{Auth, hex_digest, integer, valid_client},
-    error::{Error, Result, invalid},
+    contracts::{hex_digest, integer, valid_client},
     store::Store,
+};
+use crate::{
+    contracts::Auth,
+    error::{Error, Result, invalid},
 };
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -31,6 +35,7 @@ impl std::fmt::Debug for ClientConfig {
 }
 impl ClientConfig {
     /// Authenticate current read access; v2 credentials also require an explicit policy.
+    #[cfg(feature = "legacy-sqlite")]
     pub fn authorize(&self, store: &Store) -> Result<()> {
         if !matches!(self.version, 1 | 2) {
             return Err(invalid("Invalid client config version"));
@@ -52,6 +57,20 @@ impl ClientConfig {
         }
     }
 }
+/// Verify a credential output resides inside an owner-private directory.
+///
+/// # Errors
+/// Rejects relative paths, aliases and directories another local principal can replace.
+pub fn check_private_output(path: &Path) -> Result<()> {
+    if !path.is_absolute() {
+        return Err(invalid("Private output must be absolute"));
+    }
+    crate::private_paths::owner_directory(
+        path.parent()
+            .ok_or_else(|| invalid("Private output needs a parent"))?,
+    )?;
+    crate::private_paths::single_link(path)
+}
 /// Read at most the specified number of bytes and parse a UTF-8 JSON file.
 pub fn read_json(path: &Path, max: usize) -> Result<Value> {
     let mut bytes = Vec::new();
@@ -65,6 +84,7 @@ pub fn read_json(path: &Path, max: usize) -> Result<Value> {
     Ok(serde_json::from_str(text.trim_start_matches('\u{feff}'))?)
 }
 /// Load legacy credentials or authenticate policy-aware credentials without revealing secrets.
+#[cfg(feature = "legacy-sqlite")]
 pub fn load_config(path: &Path) -> Result<ClientConfig> {
     let mut value = read_json(path, 16384)?;
     value["version"] = serde_json::json!(integer(&value, "version", 1, 2)?);
@@ -80,6 +100,14 @@ pub fn load_config(path: &Path) -> Result<ClientConfig> {
         config.authorize(&Store::open(&config.database_path)?)?;
     }
     Ok(config)
+}
+/// Legacy credentials require a build with the SQLite compatibility feature.
+#[cfg(not(feature = "legacy-sqlite"))]
+pub fn load_config(_path: &Path) -> Result<ClientConfig> {
+    Err(Error::domain(
+        "LEGACY_UNAVAILABLE",
+        "Legacy credentials require the legacy-sqlite feature; use native Garden credentials.",
+    ))
 }
 /// Select the existing private user data directory, independently of AnimaOS.
 pub fn data_directory() -> Result<PathBuf> {
@@ -109,4 +137,14 @@ pub fn create_private_file(path: &Path) -> Result<File> {
         options.mode(0o600);
     }
     Ok(options.open(path)?)
+}
+
+#[cfg(all(test, not(feature = "legacy-sqlite")))]
+mod tests {
+    #[test]
+    fn legacy_configuration_is_rejected_before_reading_or_opening_a_database() {
+        let error =
+            super::load_config(std::path::Path::new("synthetic-missing-config.json")).unwrap_err();
+        assert_eq!(error.code(), "LEGACY_UNAVAILABLE");
+    }
 }

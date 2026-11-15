@@ -1,3 +1,5 @@
+#![cfg(feature = "legacy-sqlite")]
+
 //! Earlier revisions of a record can be read back from its retained receipts.
 use mother::{
     access::{AccessMode, ClientAccess},

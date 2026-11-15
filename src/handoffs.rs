@@ -4,21 +4,34 @@
 //! receiving harness picks the task up under its own permissions and moves it
 //! through the ordinary task statuses. Assignments live in an additive table,
 //! so an older executable still reads every record.
+#[cfg(feature = "legacy-sqlite")]
+use crate::store::{self, Store};
+#[cfg(feature = "legacy-sqlite")]
 use crate::{
     access::{self, AccessMode, ClientAccess},
-    contracts::{self, Auth, string, valid_client},
-    error::{Error, Result, invalid},
-    store::{self, Store},
+    contracts::Auth,
 };
+use crate::{
+    contracts::{self, string, valid_client},
+    error::{Error, Result, invalid},
+};
+#[cfg(feature = "legacy-sqlite")]
 use rusqlite::{Connection, OptionalExtension, TransactionBehavior, params};
-use serde_json::{Value, json};
+use serde_json::Value;
+#[cfg(feature = "legacy-sqlite")]
+use serde_json::json;
 use std::collections::HashSet;
 
+#[cfg(feature = "legacy-sqlite")]
 const SHOWN: usize = 10;
+#[cfg(feature = "legacy-sqlite")]
 const CONTENT_CHARS: usize = 600;
+#[cfg(feature = "legacy-sqlite")]
 const OPEN: &str = "status IN ('todo','doing','blocked')";
+#[cfg(feature = "legacy-sqlite")]
 const SCHEMA: &str = "CREATE TABLE IF NOT EXISTS assignments(record_id TEXT PRIMARY KEY, assignee TEXT NOT NULL, assigned_by TEXT NOT NULL, assigned_at TEXT NOT NULL)";
 
+#[cfg(feature = "legacy-sqlite")]
 fn exists(conn: &Connection) -> Result<bool> {
     Ok(conn.query_row(
         "SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE type='table' AND name='assignments')",
@@ -28,6 +41,7 @@ fn exists(conn: &Connection) -> Result<bool> {
 }
 
 /// Active harness names a task could be handed to; shared clients are not told.
+#[cfg(feature = "legacy-sqlite")]
 pub(crate) fn harnesses(conn: &Connection, access: &ClientAccess) -> Result<Option<Value>> {
     if access.mode == AccessMode::Shared {
         return Ok(None);
@@ -40,6 +54,7 @@ pub(crate) fn harnesses(conn: &Connection, access: &ClientAccess) -> Result<Opti
 }
 
 /// Open tasks handed to this client, oldest handoff first, limited to what it may see.
+#[cfg(feature = "legacy-sqlite")]
 pub(crate) fn assigned_to(
     conn: &Connection,
     client: &str,
@@ -84,6 +99,7 @@ pub(crate) fn assigned_to(
 }
 
 /// All assignments, for a portable export. `None` when nothing was ever handed off.
+#[cfg(feature = "legacy-sqlite")]
 pub(crate) fn export(conn: &Connection) -> Result<Option<Value>> {
     if !exists(conn)? {
         return Ok(None);
@@ -139,6 +155,7 @@ pub(crate) fn validate_with_limits(
 }
 
 /// Write validated assignments into a fresh destination inside the restore transaction.
+#[cfg(feature = "legacy-sqlite")]
 pub(crate) fn restore(conn: &Connection, assignments: &Value) -> Result<()> {
     conn.execute_batch(SCHEMA)?;
     for a in assignments
@@ -161,6 +178,7 @@ pub(crate) fn restore(conn: &Connection, assignments: &Value) -> Result<()> {
 /// Validate and apply an assignment inside the caller's transaction; true if it changed.
 ///
 /// The caller has already checked its own authority. `by` is recorded as the assigner.
+#[cfg(feature = "legacy-sqlite")]
 pub(crate) fn set(tx: &Connection, id: &str, assignee: Option<&str>, by: &str) -> Result<bool> {
     let (record, _) = store::read_record(tx, id)?;
     if record["kind"] != "task" {
@@ -214,6 +232,7 @@ pub(crate) fn set(tx: &Connection, id: &str, assignee: Option<&str>, by: &str) -
     Ok(changed)
 }
 
+#[cfg(feature = "legacy-sqlite")]
 impl Store {
     /// Hand an open task to a named harness, move it to another, or clear it with `null`.
     ///
@@ -235,6 +254,7 @@ impl Store {
         let tx = self
             .conn
             .transaction_with_behavior(TransactionBehavior::Immediate)?;
+        store::source_guard(&tx)?;
         store::authorize(&tx, auth, "task:write")?;
         access::load(&tx, &auth.client_id)?.require(id)?;
         let changed = set(&tx, id, assignee.as_deref(), &auth.client_id)?;

@@ -1,3 +1,5 @@
+#![cfg(feature = "legacy-sqlite")]
+
 //! The owner tends pins, handoffs and history directly, without going through a harness.
 use mother::{contracts::Auth, store::Store};
 use serde_json::{Value, json};

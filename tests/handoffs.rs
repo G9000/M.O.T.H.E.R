@@ -1,3 +1,5 @@
+#![cfg(feature = "legacy-sqlite")]
+
 //! A task can be handed to a named harness, which finds it when it next reads context.
 use mother::{
     access::{AccessMode, ClientAccess},

@@ -1,3 +1,5 @@
+#![cfg(feature = "legacy-sqlite")]
+
 //! She shows up at session start, and each harness gets setup it can paste.
 use mother::{
     access::{AccessMode, ClientAccess},

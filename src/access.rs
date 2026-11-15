@@ -3,6 +3,7 @@ use crate::{
     contracts,
     error::{Error, Result, invalid},
 };
+#[cfg(feature = "legacy-sqlite")]
 use rusqlite::{Connection, OptionalExtension, params};
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
@@ -67,6 +68,7 @@ impl ClientAccess {
             Err(Error::domain("NOT_FOUND", "Record does not exist."))
         }
     }
+    #[cfg(feature = "legacy-sqlite")]
     pub(crate) fn filter(&self) -> String {
         if self.mode != AccessMode::Shared {
             "1".into()
@@ -167,6 +169,7 @@ impl ClientAccess {
         Ok(())
     }
 }
+#[cfg(feature = "legacy-sqlite")]
 pub(crate) fn load(conn: &Connection, client: &str) -> Result<ClientAccess> {
     // This grant anchor is separate from withdrawable policy content. Reads occur
     // inside the caller's canonical transaction, so policy loss cannot become legacy.
@@ -215,6 +218,7 @@ pub(crate) fn load(conn: &Connection, client: &str) -> Result<ClientAccess> {
     }
     Ok(p)
 }
+#[cfg(feature = "legacy-sqlite")]
 pub(crate) fn save(
     conn: &Connection,
     client: &str,

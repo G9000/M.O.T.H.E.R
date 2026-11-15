@@ -1,3 +1,5 @@
+#![cfg(feature = "legacy-sqlite")]
+
 //! Owner commands for records, pins, handoffs and history.
 use mother::{config::load_config, store::Store};
 use serde_json::{Value, json};

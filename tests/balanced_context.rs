@@ -1,3 +1,5 @@
+#![cfg(feature = "legacy-sqlite")]
+
 //! An unfiltered context read keeps every record category visible within its preview limit.
 use mother::{
     access::{AccessMode, ClientAccess},

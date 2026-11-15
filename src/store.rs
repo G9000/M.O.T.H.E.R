@@ -18,6 +18,16 @@ const SCHEMA: &str = include_str!("../contracts/schema-v1.sql");
 pub struct Store {
     pub(crate) conn: Connection,
 }
+/// Reject legacy operations once a migration has fenced this source database.
+pub(crate) fn source_guard(conn: &Connection) -> Result<()> {
+    let path = conn.path().filter(|path| !path.is_empty()).ok_or_else(|| {
+        Error::domain(
+            "STORE_UNAVAILABLE",
+            "Legacy operations require a file-backed workspace.",
+        )
+    })?;
+    crate::garden::migrate::check_source(Path::new(path))
+}
 pub(crate) fn metadata(conn: &Connection, key: &str) -> Result<Value> {
     let raw: String = conn.query_row("SELECT value FROM metadata WHERE key=?", [key], |r| {
         r.get(0)
@@ -46,6 +56,7 @@ pub(crate) fn now() -> String {
     Utc::now().to_rfc3339_opts(SecondsFormat::Millis, true)
 }
 pub(crate) fn authorize(conn: &Connection, auth: &Auth, scope: &str) -> Result<()> {
+    source_guard(conn)?;
     let row: Option<(String, String, i64)> = conn
         .query_row(
             "SELECT token_hash,scopes,revoked FROM clients WHERE id=?",
@@ -195,6 +206,7 @@ impl Store {
         content: &str,
         populate: impl FnOnce(&Connection) -> Result<()>,
     ) -> Result<Self> {
+        crate::garden::migrate::check_source(path)?;
         let p = json!({"content":content,"hash":contracts::hash(content)});
         contracts::validate_persona(&p)?;
         drop(create_private_file(path)?);
@@ -203,6 +215,7 @@ impl Store {
             conn.busy_timeout(Duration::from_secs(5))?;
             conn.execute_batch("PRAGMA journal_mode=WAL; PRAGMA synchronous=FULL;")?;
             let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
+            source_guard(&tx)?;
             tx.execute_batch(SCHEMA)?;
             let w = json!({"id":uuid::Uuid::new_v4().to_string(),"generation":uuid::Uuid::new_v4().to_string(),"schemaVersion":1,"createdAt":now()});
             for (key, value) in [
@@ -234,6 +247,7 @@ impl Store {
     }
     /// Open the existing schema without migration, replacement, or identity regeneration.
     pub fn open(path: &Path) -> Result<Self> {
+        crate::garden::migrate::check_source(path)?;
         if !path.exists() {
             return Err(Error::domain(
                 "NOT_INITIALIZED",
@@ -282,6 +296,7 @@ impl Store {
         let tx = self
             .conn
             .transaction_with_behavior(TransactionBehavior::Immediate)?;
+        source_guard(&tx)?;
         let current = persona(&tx)?;
         if current["hash"].as_str() != Some(expected_hash) {
             return Err(Error::domain(
@@ -328,6 +343,7 @@ impl Store {
         let tx = self
             .conn
             .transaction_with_behavior(TransactionBehavior::Immediate)?;
+        source_guard(&tx)?;
         let mut g = grant(&tx, client, scopes)?;
         access::save(&tx, client, scopes, access)?;
         g["access"] = access.metadata();
@@ -373,11 +389,13 @@ impl Store {
                 "Graph scopes require an explicit graph access policy",
             ));
         }
+        source_guard(&self.conn)?;
         let mut file = create_private_file(path)?;
         let result = (|| -> Result<()> {
             let tx = self
                 .conn
                 .transaction_with_behavior(TransactionBehavior::Immediate)?;
+            source_guard(&tx)?;
             let g = grant(&tx, client, scopes)?;
             access::save(&tx, client, scopes, access)?;
             let config = ClientConfig {
@@ -404,13 +422,14 @@ impl Store {
     }
     /// Revoke access for subsequent requests from a named client.
     pub fn revoke(&mut self, client: &str) -> Result<()> {
-        if self
+        let tx = self
             .conn
-            .execute("UPDATE clients SET revoked=1 WHERE id=?", [client])?
-            == 0
-        {
+            .transaction_with_behavior(TransactionBehavior::Immediate)?;
+        source_guard(&tx)?;
+        if tx.execute("UPDATE clients SET revoked=1 WHERE id=?", [client])? == 0 {
             return Err(Error::domain("NOT_FOUND", "Unknown client."));
         }
+        tx.commit()?;
         Ok(())
     }
     /// Read a complete current record, including explicit retractions.
@@ -614,6 +633,7 @@ impl Store {
         let tx = self
             .conn
             .transaction_with_behavior(TransactionBehavior::Immediate)?;
+        source_guard(&tx)?;
         authorize(&tx, auth, &input.kind.scope())?;
         let receipt = write_transaction(&tx, &auth.client_id, &input)?;
         tx.commit()?;
@@ -626,6 +646,7 @@ pub(crate) fn write_transaction(
     actor: &str,
     input: &contracts::Write,
 ) -> Result<Value> {
+    source_guard(tx)?;
     let v = &input.value;
     let w = workspace(tx)?;
     if v["workspaceId"] != w["id"] {

@@ -1,18 +1,25 @@
 //! Rebuildable, bounded vector cache. It never supplies canonical record text.
+#[cfg(feature = "legacy-sqlite")]
+use crate::config::create_private_file;
+#[cfg(feature = "legacy-sqlite")]
 use crate::{
-    config::create_private_file,
     embedding::DIMENSIONS,
     error::{Error, Result},
 };
+#[cfg(feature = "legacy-sqlite")]
 use rusqlite::{Connection, OptionalExtension, TransactionBehavior, params};
+#[cfg(feature = "legacy-sqlite")]
 use std::{
     collections::HashMap,
     path::{Path, PathBuf},
     time::Duration,
 };
 
+#[cfg(feature = "legacy-sqlite")]
 pub(super) const MAX_PASSAGES: usize = 32_000;
+#[cfg(feature = "legacy-sqlite")]
 const MAX_WINDOWS: usize = 32;
+#[cfg(feature = "legacy-sqlite")]
 const WINDOW_BYTES: usize = 8 + DIMENSIONS * 4;
 
 pub(super) fn profile_fingerprint() -> String {
@@ -29,11 +36,13 @@ pub(crate) struct Entry {
     pub partial: bool,
     pub vectors: Vec<Vector>,
 }
+#[cfg(feature = "legacy-sqlite")]
 #[derive(Debug)]
 pub(super) struct Cache {
     conn: Connection,
     scope: String,
 }
+#[cfg(feature = "legacy-sqlite")]
 fn invalid() -> Error {
     Error::domain(
         "SEARCH_CACHE",
@@ -41,11 +50,13 @@ fn invalid() -> Error {
     )
 }
 
+#[cfg(feature = "legacy-sqlite")]
 pub(super) fn path(database: &Path) -> PathBuf {
     let mut name = database.as_os_str().to_os_string();
     name.push(".search.sqlite");
     PathBuf::from(name)
 }
+#[cfg(feature = "legacy-sqlite")]
 impl Cache {
     pub fn open(path: &Path, scope: &str) -> Result<Self> {
         if std::fs::metadata(path).is_ok_and(|m| m.len() > 128 * 1024 * 1024) {
@@ -178,6 +189,7 @@ impl Cache {
         Ok(true)
     }
 }
+#[cfg(feature = "legacy-sqlite")]
 fn ensure_scope(conn: &Connection, expected: &str) -> Result<()> {
     let current: String = conn.query_row("SELECT value FROM scope WHERE id=1", [], |r| r.get(0))?;
     if current != expected {
@@ -185,6 +197,7 @@ fn ensure_scope(conn: &Connection, expected: &str) -> Result<()> {
     }
     Ok(())
 }
+#[cfg(feature = "legacy-sqlite")]
 pub(super) fn validate_vector(values: &[f32]) -> Result<()> {
     if values.len() != DIMENSIONS || values.iter().any(|n| !n.is_finite()) {
         return Err(invalid());
@@ -195,6 +208,7 @@ pub(super) fn validate_vector(values: &[f32]) -> Result<()> {
     }
     Ok(())
 }
+#[cfg(feature = "legacy-sqlite")]
 fn decode(partial: bool, count: usize, bytes: &[u8], text: &str) -> Result<Entry> {
     if count > MAX_WINDOWS || bytes.len() != count * WINDOW_BYTES {
         return Err(invalid());
@@ -223,7 +237,7 @@ fn decode(partial: bool, count: usize, bytes: &[u8], text: &str) -> Result<Entry
     Ok(Entry { partial, vectors })
 }
 
-#[cfg(test)]
+#[cfg(all(test, feature = "legacy-sqlite"))]
 mod tests {
     use super::*;
     fn entry() -> Entry {

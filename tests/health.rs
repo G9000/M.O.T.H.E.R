@@ -1,3 +1,5 @@
+#![cfg(feature = "legacy-sqlite")]
+
 use mother::{config::load_config, store::Store};
 use serde_json::Value;
 use std::{path::Path, process::Command};

@@ -1,3 +1,5 @@
+#![cfg(feature = "legacy-sqlite")]
+
 //! Pinned core memories are always part of context, outside the preview limit.
 use mother::{
     access::{AccessMode, ClientAccess},

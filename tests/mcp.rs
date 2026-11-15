@@ -1,3 +1,5 @@
+#![cfg(feature = "legacy-sqlite")]
+
 use serde_json::{Value, json};
 use std::{
     io::{BufRead, BufReader, Write},

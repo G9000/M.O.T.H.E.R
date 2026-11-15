@@ -41,6 +41,7 @@ impl GardenClientConfig {
     /// Rejects malformed configuration, revoked keys or absent supported scopes.
     pub fn authorize(&self, store: &GardenStore) -> Result<()> {
         self.validate()?;
+        super::migrate::check_destination(&self.database_path)?;
         match store.authorize(&self.auth()) {
             Ok(()) => Ok(()),
             Err(error) if error.code == GardenErrorCode::Forbidden && store.v1_initialized()? => {

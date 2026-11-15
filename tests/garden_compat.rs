@@ -1,8 +1,9 @@
+#[cfg(feature = "legacy-sqlite")]
+use mother::store::Store;
 use mother::{
     access::ClientAccess,
     contracts::Auth,
     garden::{access::GardenAccess, store::GardenStore},
-    store::Store,
 };
 use serde_json::{Value, json};
 use uuid::Uuid;
@@ -71,6 +72,7 @@ fn native_import_replays_typescript_receipts_and_preserves_portable_state() {
 }
 
 #[test]
+#[cfg(feature = "legacy-sqlite")]
 fn synthetic_sql_and_native_context_history_and_literal_search_match() {
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("old.sqlite");
@@ -199,10 +201,12 @@ fn native_writes_conflict_retry_shared_visibility_and_proposal_review() {
     assert_eq!(s.v1_review_proposal(review).unwrap(), saved);
 }
 
+#[cfg(feature = "legacy-sqlite")]
 enum Backend {
     Legacy(Store),
     Native(GardenStore),
 }
+#[cfg(feature = "legacy-sqlite")]
 impl Backend {
     fn call(&mut self, auth: &Auth, tool: &str, args: Value) -> mother::error::Result<Value> {
         match self {
@@ -269,6 +273,7 @@ impl Backend {
         }
     }
 }
+#[cfg(feature = "legacy-sqlite")]
 fn backends(dir: &std::path::Path) -> [Backend; 2] {
     let f = fixture();
     let b = &f["bundle"];
@@ -295,6 +300,7 @@ fn memory(content: &str) -> Value {
 }
 
 #[test]
+#[cfg(feature = "legacy-sqlite")]
 fn common_semantic_runner_covers_all_eleven_tools_and_current_grants() {
     let dir = tempfile::tempdir().unwrap();
     for mut backend in backends(dir.path()) {

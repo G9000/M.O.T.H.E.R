@@ -1,3 +1,5 @@
+#![cfg(feature = "legacy-sqlite")]
+
 use serde_json::Value;
 use std::{
     fs,

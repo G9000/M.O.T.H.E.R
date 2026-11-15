@@ -1,3 +1,5 @@
+#![cfg(feature = "legacy-sqlite")]
+
 //! Opt-in acceptance with the actual pinned local model, never private records or remote inference.
 use mother::{contracts::Auth, search::Search, store::Store};
 use serde_json::{Value, json};

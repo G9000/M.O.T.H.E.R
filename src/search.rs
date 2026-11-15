@@ -1,18 +1,32 @@
 //! Local semantic retrieval over authorized canonical records, with truthful literal fallback.
 pub(crate) mod cache;
 use crate::{
-    access::{self, AccessMode, ClientAccess},
-    contracts::{self, Auth, Kind},
-    embedding::{LocalEmbedder, MODEL_ID, MODEL_REVISION, PROFILE},
-    error::{Error, Result, invalid},
+    access::ClientAccess,
+    contracts::{self, Kind},
+    embedding::{MODEL_ID, PROFILE},
+    error::{Result, invalid},
+};
+#[cfg(feature = "legacy-sqlite")]
+use crate::{
+    access::{self, AccessMode},
+    contracts::Auth,
+    embedding::{LocalEmbedder, MODEL_REVISION},
+    error::Error,
     store::{self, Store},
 };
-use cache::{Cache, Entry, Vector};
+use cache::Entry;
+#[cfg(feature = "legacy-sqlite")]
+use cache::{Cache, Vector};
 use serde_json::{Value, json};
-use std::{collections::HashMap, path::PathBuf, sync::Mutex};
+use std::collections::HashMap;
+#[cfg(feature = "legacy-sqlite")]
+use std::{path::PathBuf, sync::Mutex};
 const MIN_SIMILARITY: f32 = 0.35;
+#[cfg(feature = "legacy-sqlite")]
 const QUERY_RECORDS: usize = 8;
+#[cfg(feature = "legacy-sqlite")]
 const QUERY_PASSAGES: usize = 32;
+#[cfg(feature = "legacy-sqlite")]
 const INDEX_PASSAGES: usize = 1024;
 
 /// Describe the optional local candidate space without changing v1 search defaults.
@@ -25,10 +39,12 @@ pub fn embedding_profile_fingerprint() -> String {
 }
 
 /// Reuses one local model; concurrent searches fall back instead of blocking writes.
+#[cfg(feature = "legacy-sqlite")]
 pub struct Search {
     model_dir: Option<PathBuf>,
     model: Mutex<Option<LocalEmbedder>>,
 }
+#[cfg(feature = "legacy-sqlite")]
 impl std::fmt::Debug for Search {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("Search")
@@ -140,6 +156,7 @@ pub(crate) struct Snapshot {
     pub(crate) fingerprint: String,
 }
 impl Snapshot {
+    #[cfg(feature = "legacy-sqlite")]
     fn capture(store: &mut Store, auth: &Auth, query: &Query) -> Result<Self> {
         let tx = store.conn.transaction()?;
         store::authorize(&tx, auth, "read")?;
@@ -216,6 +233,7 @@ impl Snapshot {
             fingerprint: contracts::hash(&fingerprint),
         })
     }
+    #[cfg(feature = "legacy-sqlite")]
     fn scope(&self) -> String {
         format!(
             "{}:{}:{MODEL_REVISION}:{PROFILE}",
@@ -355,6 +373,7 @@ pub(crate) struct Progress {
     pub(crate) new_passages: usize,
     pub(crate) capacity: bool,
 }
+#[cfg(feature = "legacy-sqlite")]
 fn cache_path(store: &Store, auth: &Auth, snapshot: &Snapshot) -> Result<PathBuf> {
     store.authorize(auth, "read")?;
     let access = &snapshot.access;
@@ -375,6 +394,7 @@ fn cache_path(store: &Store, auth: &Auth, snapshot: &Snapshot) -> Result<PathBuf
         Ok(path)
     }
 }
+#[cfg(feature = "legacy-sqlite")]
 fn entries(cache: &Cache, snapshot: &Snapshot) -> Result<HashMap<String, Entry>> {
     snapshot
         .records
@@ -388,6 +408,7 @@ fn entries(cache: &Cache, snapshot: &Snapshot) -> Result<HashMap<String, Entry>>
         )
         .collect()
 }
+#[cfg(feature = "legacy-sqlite")]
 fn prepare(
     cache: &mut Cache,
     snapshot: &Snapshot,
@@ -445,6 +466,7 @@ fn prepare(
     }
     Ok((cached, progress))
 }
+#[cfg(feature = "legacy-sqlite")]
 pub(crate) fn semantic_response(
     snapshot: Snapshot,
     query: &Query,
@@ -525,6 +547,7 @@ pub(crate) fn semantic_response_validated(
     let metadata = json!({"requestedMode":query.mode.name(),"effectiveMode":query.mode.name(),"semanticUsed":true,"reason":reason,"model":MODEL_ID,"profile":PROFILE,"similarityFloor":0.35,"eligibleRecords":eligible,"indexedRecords":indexed,"unindexedRecords":eligible-indexed,"partialRecords":partial,"unembeddableRecords":unembeddable,"newlyIndexedRecords":progress.new_records,"newlyIndexedPassages":progress.new_passages});
     Ok(snapshot.response(query, hits, metadata))
 }
+#[cfg(feature = "legacy-sqlite")]
 fn finish(
     store: &mut Store,
     auth: &Auth,
@@ -540,6 +563,7 @@ fn finish(
     }
     semantic_response(final_snapshot, query, cached, vector, progress)
 }
+#[cfg(feature = "legacy-sqlite")]
 impl Search {
     /// Select local model assets; this does not load or download a model.
     pub fn new(model_dir: PathBuf) -> Self {

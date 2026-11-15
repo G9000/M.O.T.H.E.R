@@ -1,27 +1,34 @@
 //! Synthetic checks for future graph authority helpers, not graph handlers.
 use mother::{
     access::{AccessMode, ClientAccess},
+    garden::access::GardenAccess,
+};
+#[cfg(feature = "legacy-sqlite")]
+use mother::{
     contracts::{Auth, SCOPES},
     garden::{
-        access::{GardenAccess, GardenAction, GardenObjectVisibility, GardenOperationIdentity},
+        access::{GardenAction, GardenObjectVisibility, GardenOperationIdentity},
         contracts::{ExternalReference, GardenKind},
     },
     store::Store,
 };
 use serde_json::json;
 
+#[cfg(feature = "legacy-sqlite")]
 fn reference(kind: GardenKind) -> ExternalReference {
     ExternalReference {
         kind,
         id: uuid::Uuid::new_v4().to_string(),
     }
 }
+#[cfg(feature = "legacy-sqlite")]
 fn fixture() -> (tempfile::TempDir, Store) {
     let dir = tempfile::tempdir().unwrap();
     let store =
         Store::initialize(&dir.path().join("synthetic.sqlite"), "Synthetic persona").unwrap();
     (dir, store)
 }
+#[cfg(feature = "legacy-sqlite")]
 fn auth(grant: serde_json::Value) -> Auth {
     Auth {
         client_id: grant["clientId"].as_str().unwrap().into(),
@@ -35,6 +42,7 @@ fn shared() -> ClientAccess {
         records: vec![],
     }
 }
+#[cfg(feature = "legacy-sqlite")]
 fn grant(store: &mut Store, name: &str, scopes: &[&str], objects: Vec<ExternalReference>) -> Auth {
     auth(
         store
@@ -47,6 +55,7 @@ fn grant(store: &mut Store, name: &str, scopes: &[&str], objects: Vec<ExternalRe
             .unwrap(),
     )
 }
+#[cfg(feature = "legacy-sqlite")]
 fn check(
     store: &mut Store,
     auth: &Auth,
@@ -64,6 +73,7 @@ fn check(
 }
 
 #[test]
+#[cfg(feature = "legacy-sqlite")]
 fn graph_scopes_require_explicit_policy_and_never_follow_v1_scopes() {
     let (_dir, mut store) = fixture();
     let old = auth(store.grant("legacy", &SCOPES.map(str::to_owned)).unwrap());
@@ -108,6 +118,7 @@ fn graph_scopes_require_explicit_policy_and_never_follow_v1_scopes() {
 }
 
 #[test]
+#[cfg(feature = "legacy-sqlite")]
 fn every_typed_endpoint_evidence_and_object_needs_separate_graph_visibility() {
     let (_dir, mut store) = fixture();
     let assertion = reference(GardenKind::Assertion);
@@ -167,6 +178,7 @@ fn every_typed_endpoint_evidence_and_object_needs_separate_graph_visibility() {
 }
 
 #[test]
+#[cfg(feature = "legacy-sqlite")]
 fn graph_allowlist_never_inherits_canonical_records_or_claims_object_existence() {
     let (_dir, mut store) = fixture();
     let owner = auth(store.grant("owner", &SCOPES.map(str::to_owned)).unwrap());
@@ -211,6 +223,7 @@ fn graph_allowlist_never_inherits_canonical_records_or_claims_object_existence()
 }
 
 #[test]
+#[cfg(feature = "legacy-sqlite")]
 fn full_visibility_is_explicit_companion_or_legacy_only() {
     let (dir, mut store) = fixture();
     let full = GardenAccess::All {};
@@ -276,6 +289,7 @@ fn full_visibility_is_explicit_companion_or_legacy_only() {
 }
 
 #[test]
+#[cfg(feature = "legacy-sqlite")]
 fn graph_grant_anchors_and_shared_write_denial_survive_policy_tampering() {
     let (dir, mut store) = fixture();
     let client = grant(&mut store, "graph", &["garden:read"], vec![]);
@@ -349,6 +363,7 @@ fn garden_policy_wire_shape_is_separate_and_strict() {
 }
 
 #[test]
+#[cfg(feature = "legacy-sqlite")]
 fn missing_graph_policy_revocation_and_generation_changes_fail_closed() {
     let (dir, mut store) = fixture();
     let client = grant(&mut store, "graph", &["read", "garden:read"], vec![]);
@@ -392,6 +407,7 @@ fn missing_graph_policy_revocation_and_generation_changes_fail_closed() {
 }
 
 #[test]
+#[cfg(feature = "legacy-sqlite")]
 fn own_approved_proposal_metadata_does_not_grant_new_object_visibility() {
     let (dir, mut store) = fixture();
     let client = grant(

@@ -3,11 +3,7 @@
 mod tests;
 
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
-use mother::{
-    error::Result,
-    garden::{config::domain_error, store::GardenStore},
-    store::Store,
-};
+use mother::{error::Result, garden::store::GardenStore, store::Store};
 use ratatui::{
     Frame,
     layout::Rect,
@@ -84,25 +80,21 @@ impl Inbox {
     fn list(&self) -> Result<Value> {
         match self.backend {
             InboxBackend::Sqlite => Store::open(&self.path)?.inbox_list(),
-            InboxBackend::Native => GardenStore::open(&self.path)
-                .map_err(domain_error)?
-                .v1_inbox_list(),
+            InboxBackend::Native => GardenStore::open_active(&self.path)?.v1_inbox_list(),
         }
     }
     fn get(&self, id: &str) -> Result<Value> {
         match self.backend {
             InboxBackend::Sqlite => Store::open(&self.path)?.inbox_get(id),
-            InboxBackend::Native => GardenStore::open(&self.path)
-                .map_err(domain_error)?
-                .v1_inbox_get(id),
+            InboxBackend::Native => GardenStore::open_active(&self.path)?.v1_inbox_get(id),
         }
     }
     fn review(&self, request: Value) -> Result<Value> {
         match self.backend {
             InboxBackend::Sqlite => Store::open(&self.path)?.review_proposal(request),
-            InboxBackend::Native => GardenStore::open(&self.path)
-                .map_err(domain_error)?
-                .v1_review_proposal(request),
+            InboxBackend::Native => {
+                GardenStore::open_active(&self.path)?.v1_review_proposal(request)
+            }
         }
     }
     fn reload(&mut self) -> Result<()> {

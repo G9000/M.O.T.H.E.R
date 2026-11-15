@@ -1,3 +1,5 @@
+#![cfg(feature = "legacy-sqlite")]
+
 //! A new checkpoint can retire the one it replaces in the same transaction.
 use mother::{
     contracts::{Auth, SCOPES},

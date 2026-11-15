@@ -37,6 +37,7 @@ impl Store {
         let tx = self
             .conn
             .transaction_with_behavior(TransactionBehavior::Immediate)?;
+        store::source_guard(&tx)?;
         let changed = handoffs::set(&tx, id, assignee, OWNER)?;
         tx.commit()?;
         Ok(json!({"id":id,"assignee":assignee,"changed":changed}))

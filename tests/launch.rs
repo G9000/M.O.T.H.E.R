@@ -1,3 +1,5 @@
+#![cfg(feature = "legacy-sqlite")]
+
 //! The owner starts a harness on a handed-off task through a declared launcher.
 use mother::{config::load_config, store::Store};
 use serde_json::{Value, json};

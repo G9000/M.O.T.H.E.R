@@ -1,3 +1,5 @@
+#![cfg(feature = "legacy-sqlite")]
+
 use mother::{contracts::Auth, error::Result, store::Store};
 use serde_json::{Value, json};
 use uuid::Uuid;

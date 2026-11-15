@@ -38,12 +38,16 @@ pub(crate) mod changes;
 pub(crate) mod compat;
 #[path = "inbox.rs"]
 pub(crate) mod inbox;
+#[path = "migration_state.rs"]
+mod migration_state;
 #[path = "pager.rs"]
 pub(crate) mod pager;
 #[path = "query.rs"]
 pub(crate) mod query;
 #[path = "search.rs"]
 pub(crate) mod search;
+#[path = "service_auth.rs"]
+pub(crate) mod service_auth;
 
 const MAX_TRANSACTION_OBJECTS: usize = 10_000;
 

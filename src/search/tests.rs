@@ -1,6 +1,9 @@
 use super::*;
+#[cfg(feature = "legacy-sqlite")]
 use tempfile::TempDir;
+#[cfg(feature = "legacy-sqlite")]
 use uuid::Uuid;
+#[cfg(feature = "legacy-sqlite")]
 fn fixture() -> (TempDir, Store, Auth) {
     let d = tempfile::tempdir().unwrap();
     let mut s = Store::initialize(&d.path().join("context.sqlite"), "Synthetic persona").unwrap();
@@ -13,6 +16,7 @@ fn fixture() -> (TempDir, Store, Auth) {
     };
     (d, s, a)
 }
+#[cfg(feature = "legacy-sqlite")]
 fn write(s: &mut Store, a: &Auth, content: &str, old: Option<&Value>, status: &str) -> Value {
     let w = s.workspace().unwrap();
     let mut q = json!({"workspaceId":w["id"],"generation":w["generation"],"operationId":Uuid::new_v4().to_string(),"expectedRevision":0,"record":{"kind":"memory","title":"Synthetic","content":content,"status":status,"basis":"source"}});
@@ -22,11 +26,13 @@ fn write(s: &mut Store, a: &Auth, content: &str, old: Option<&Value>, status: &s
     }
     s.write(a, q).unwrap()["record"].clone()
 }
+#[cfg(feature = "legacy-sqlite")]
 fn axis() -> Vec<f32> {
     let mut v = vec![0.; crate::embedding::DIMENSIONS];
     v[0] = 1.;
     v
 }
+#[cfg(feature = "legacy-sqlite")]
 fn cached(s: &Snapshot) -> HashMap<String, Entry> {
     s.records
         .iter()
@@ -46,6 +52,7 @@ fn cached(s: &Snapshot) -> HashMap<String, Entry> {
         .collect()
 }
 #[test]
+#[cfg(feature = "legacy-sqlite")]
 fn changed_records_and_retractions_never_return_stale_semantic_matches() {
     let (_d, mut s, a) = fixture();
     let original = write(&mut s, &a, "old answer", None, "active");
@@ -89,6 +96,7 @@ fn changed_records_and_retractions_never_return_stale_semantic_matches() {
     assert!(result["records"].as_array().unwrap().is_empty());
 }
 #[test]
+#[cfg(feature = "legacy-sqlite")]
 fn revoked_grants_are_errors_even_after_candidates_were_ranked() {
     let (_d, mut s, a) = fixture();
     write(&mut s, &a, "evidence", None, "active");
@@ -109,6 +117,7 @@ fn revoked_grants_are_errors_even_after_candidates_were_ranked() {
     assert_eq!(error.code(), "UNAUTHORIZED");
 }
 #[test]
+#[cfg(feature = "legacy-sqlite")]
 fn missing_model_is_truthful_and_literal_retains_sqlite_unicode_and_punctuation_rules() {
     let (d, mut s, a) = fixture();
     write(&mut s, &a, "A 100%_ token CAFÉ and cafe", None, "active");
@@ -124,6 +133,7 @@ fn missing_model_is_truthful_and_literal_retains_sqlite_unicode_and_punctuation_
     assert!(!cache::path(&d.path().join("context.sqlite")).exists());
 }
 #[test]
+#[cfg(feature = "legacy-sqlite")]
 fn ranking_keeps_exact_hits_and_reports_partial_coverage_and_offsets() {
     let (_d, mut s, a) = fixture();
     let literal = write(&mut s, &a, "ZX-731 exact identifier", None, "active");
@@ -143,6 +153,7 @@ fn ranking_keeps_exact_hits_and_reports_partial_coverage_and_offsets() {
     );
 }
 #[test]
+#[cfg(feature = "legacy-sqlite")]
 fn nothing_to_index_is_not_reported_as_an_incomplete_index() {
     let (_d, mut s, a) = fixture();
     let q = Query::parse(json!({"query":"anything"})).unwrap();
@@ -162,6 +173,7 @@ fn nothing_to_index_is_not_reported_as_an_incomplete_index() {
     assert_eq!(result["search"]["semanticUsed"], false);
 }
 #[test]
+#[cfg(feature = "legacy-sqlite")]
 fn a_time_window_limits_search_candidates_and_is_reported() {
     let (d, mut s, a) = fixture();
     let old = write(&mut s, &a, "Synthetic tea note", None, "active");
@@ -203,6 +215,7 @@ fn a_time_window_limits_search_candidates_and_is_reported() {
     );
 }
 #[test]
+#[cfg(feature = "legacy-sqlite")]
 fn similarity_floor_excludes_unrelated_vectors_and_validates_query_vectors() {
     let (_d, mut s, a) = fixture();
     write(&mut s, &a, "A record", None, "active");
@@ -217,6 +230,7 @@ fn similarity_floor_excludes_unrelated_vectors_and_validates_query_vectors() {
     assert!(semantic_response(snapshot, &q, &c, &[f32::NAN], &Progress::default()).is_err());
 }
 #[test]
+#[cfg(feature = "legacy-sqlite")]
 fn restored_identity_never_reuses_a_prior_snapshot() {
     let (_d, mut s, a) = fixture();
     write(&mut s, &a, "current answer", None, "active");
@@ -233,6 +247,7 @@ fn restored_identity_never_reuses_a_prior_snapshot() {
 }
 
 #[test]
+#[cfg(feature = "legacy-sqlite")]
 fn model_busy_fallback_is_current_and_does_not_wait() {
     let (d, mut s, a) = fixture();
     let record = write(&mut s, &a, "available context", None, "active");
@@ -303,6 +318,7 @@ fn neighbouring_context_survives_line_breaks_and_repeated_punctuation() {
     }
 }
 #[test]
+#[cfg(feature = "legacy-sqlite")]
 fn owner_persona_change_during_search_returns_the_new_snapshot() {
     let (_dir, mut s, auth) = fixture();
     write(&mut s, &auth, "evidence", None, "active");
@@ -327,6 +343,7 @@ fn owner_persona_change_during_search_returns_the_new_snapshot() {
     assert_eq!(result["records"].as_array().unwrap().len(), 1);
 }
 #[test]
+#[cfg(feature = "legacy-sqlite")]
 fn policy_withdrawal_during_semantic_search_discards_old_candidates_and_cache_is_isolated() {
     use crate::access::{AccessMode, ClientAccess};
     let (_d, mut s, a) = fixture();
@@ -373,6 +390,7 @@ fn policy_withdrawal_during_semantic_search_discards_old_candidates_and_cache_is
     assert!(v.get("persona").is_none());
 }
 #[test]
+#[cfg(feature = "legacy-sqlite")]
 fn in_flight_shared_cache_never_switches_to_global_when_policy_changes() {
     use crate::access::{AccessMode, ClientAccess};
     let (_d, mut s, a) = fixture();

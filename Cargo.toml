@@ -13,7 +13,17 @@ path = "src/lib.rs"
 name = "mother"
 path = "src/main.rs"
 
+[features]
+default = ["legacy-sqlite"]
+legacy-sqlite = ["dep:rusqlite", "dep:keyring", "dep:ratatui", "dep:crossterm", "dep:zeroize"]
+
+[[example]]
+name = "garden_v1_baseline"
+required-features = ["legacy-sqlite"]
+
 [dependencies]
+hmac = "=0.12.1"
+interprocess = "=2.4.8"
 redb = "=4.6.0"
 candle-core = "0.9.2"
 candle-nn = "0.9.2"
@@ -24,7 +34,7 @@ chrono = { version = "0.4", features = ["serde"] }
 clap = { version = "4", features = ["derive"] }
 rand = "0.9"
 rmcp = { version = "3.9", features = ["server", "client", "transport-io", "transport-child-process"] }
-rusqlite = { version = "0.41", features = ["bundled"] }
+rusqlite = { version = "0.41", features = ["bundled"], optional = true }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 sha2 = "0.10"
@@ -34,16 +44,20 @@ tokio = { version = "1", features = ["macros", "rt-multi-thread", "io-std", "pro
 url = "2"
 uuid = { version = "1", features = ["v4"] }
 
-ratatui = { version = "0.30", default-features = false, features = ["crossterm_0_29", "layout-cache"] }
-crossterm = "0.29"
-keyring = { version = "3.6", features = ["apple-native", "windows-native", "sync-secret-service", "crypto-rust", "vendored"] }
-zeroize = "1"
+ratatui = { version = "0.30", default-features = false, features = ["crossterm_0_29", "layout-cache"], optional = true }
+crossterm = { version = "0.29", optional = true }
+keyring = { version = "3.6", features = ["apple-native", "windows-native", "sync-secret-service", "crypto-rust", "vendored"], optional = true }
+zeroize = { version = "1", optional = true }
 tempfile = "3"
 wait-timeout = "0.2"
 fs2 = "0.4"
 
 [dev-dependencies]
 jsonschema = { version = "0.60", default-features = false }
+
+[target.'cfg(windows)'.dependencies]
+winapi-util = "=0.1.11"
+windows-permissions = "=0.2.4"
 
 [lints.rust]
 unsafe_code = "forbid"

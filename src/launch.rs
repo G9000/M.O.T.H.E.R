@@ -5,14 +5,19 @@
 //! involved. `{prompt}` and `{task}` are replaced inside arguments, and the
 //! prompt names the task by ID only, so saved text never decides what runs.
 //! Every launch is an `action` record that moves from pending to its outcome.
+#[cfg(feature = "legacy-sqlite")]
+use crate::contracts;
+#[cfg(feature = "legacy-sqlite")]
+use crate::store::{self, Store};
 use crate::{
     config::{create_private_file, data_directory, read_json},
-    contracts::{self, valid_client},
+    contracts::valid_client,
     error::{Error, Result, invalid},
-    store::{self, Store},
 };
+#[cfg(feature = "legacy-sqlite")]
 use rusqlite::{OptionalExtension, TransactionBehavior};
 use serde::Deserialize;
+#[cfg(feature = "legacy-sqlite")]
 use serde_json::{Value, json};
 use std::{
     collections::BTreeMap,
@@ -194,6 +199,7 @@ pub fn log_path(action: &str) -> Result<PathBuf> {
     Ok(dir.join(format!("{action}.log")))
 }
 
+#[cfg(feature = "legacy-sqlite")]
 impl Store {
     /// Check the task, hand it to the launcher's harness and record a pending launch.
     ///
@@ -210,6 +216,7 @@ impl Store {
         let tx = self
             .conn
             .transaction_with_behavior(TransactionBehavior::Immediate)?;
+        store::source_guard(&tx)?;
         let (record, _) = store::read_record(&tx, task)?;
         if record["kind"] != "task"
             || !matches!(
@@ -277,6 +284,7 @@ impl Store {
         let tx = self
             .conn
             .transaction_with_behavior(TransactionBehavior::Immediate)?;
+        store::source_guard(&tx)?;
         let workspace = store::workspace(&tx)?;
         let ending = match outcome.status {
             "unknown" => format!(

@@ -2,22 +2,34 @@
 //!
 //! Pins live in an additive table rather than as a record field, so an older
 //! executable that does not know about pins can still read every record.
+#[cfg(feature = "legacy-sqlite")]
+use crate::store::{self, Store};
+#[cfg(feature = "legacy-sqlite")]
 use crate::{
     access::{self, ClientAccess},
-    contracts::{self, Auth, Kind, string},
-    error::{Error, Result, invalid},
-    store::{self, Store},
+    contracts::{Auth, Kind},
 };
+use crate::{
+    contracts::{self, string},
+    error::{Error, Result, invalid},
+};
+#[cfg(feature = "legacy-sqlite")]
 use rusqlite::{Connection, OptionalExtension, TransactionBehavior, params};
-use serde_json::{Value, json};
+use serde_json::Value;
+#[cfg(feature = "legacy-sqlite")]
+use serde_json::json;
 use std::collections::HashSet;
 
 /// Most pins a workspace can hold, so the pinned core stays small enough to read every time.
 pub(crate) const MAX_PINS: usize = 12;
+#[cfg(feature = "legacy-sqlite")]
 const CONTENT_UNITS: usize = 2000;
+#[cfg(feature = "legacy-sqlite")]
 const SCHEMA: &str = "CREATE TABLE IF NOT EXISTS pins(record_id TEXT PRIMARY KEY, actor TEXT NOT NULL, pinned_at TEXT NOT NULL)";
+#[cfg(feature = "legacy-sqlite")]
 const RECALLABLE: &str = "status NOT IN ('retracted','superseded','cancelled')";
 
+#[cfg(feature = "legacy-sqlite")]
 fn exists(conn: &Connection) -> Result<bool> {
     Ok(conn.query_row(
         "SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE type='table' AND name='pins')",
@@ -28,6 +40,7 @@ fn exists(conn: &Connection) -> Result<bool> {
 fn pinnable(kind: &str) -> bool {
     matches!(kind, "memory" | "decision")
 }
+#[cfg(feature = "legacy-sqlite")]
 fn bounded(content: &str) -> (String, bool) {
     let mut used = 0;
     let text: String = content
@@ -42,6 +55,7 @@ fn bounded(content: &str) -> (String, bool) {
 }
 
 /// The pinned section of a context read, limited to records this client may see.
+#[cfg(feature = "legacy-sqlite")]
 pub(crate) fn context(conn: &Connection, access: &ClientAccess) -> Result<(Value, Value)> {
     let summary = |total: usize, shown: usize| json!({"total":total,"shown":shown,"inactive":total - shown,"limit":MAX_PINS});
     if !exists(conn)? {
@@ -77,6 +91,7 @@ pub(crate) fn context(conn: &Connection, access: &ClientAccess) -> Result<(Value
 }
 
 /// All pins, for a portable export. `None` when the workspace has never pinned anything.
+#[cfg(feature = "legacy-sqlite")]
 pub(crate) fn export(conn: &Connection) -> Result<Option<Value>> {
     if !exists(conn)? {
         return Ok(None);
@@ -119,6 +134,7 @@ pub(crate) fn validate(pins: &Value, records: &[Value]) -> Result<()> {
 }
 
 /// Write validated pins into a fresh destination inside the restore transaction.
+#[cfg(feature = "legacy-sqlite")]
 pub(crate) fn restore(conn: &Connection, pins: &Value) -> Result<()> {
     conn.execute_batch(SCHEMA)?;
     for pin in pins.as_array().ok_or_else(|| invalid("Invalid pins"))? {
@@ -135,6 +151,7 @@ pub(crate) fn restore(conn: &Connection, pins: &Value) -> Result<()> {
 }
 
 /// Apply a pin change inside the caller's transaction, after the caller checked its own authority.
+#[cfg(feature = "legacy-sqlite")]
 pub(crate) fn set(tx: &Connection, id: &str, pinned: bool, actor: &str) -> Result<Value> {
     let (record, _) = store::read_record(tx, id)?;
     let kind = string(&record, "kind")?;
@@ -187,6 +204,7 @@ pub(crate) fn set(tx: &Connection, id: &str, pinned: bool, actor: &str) -> Resul
     Ok(result)
 }
 
+#[cfg(feature = "legacy-sqlite")]
 impl Store {
     /// Pin or unpin a memory or decision so every context read includes it.
     ///
@@ -203,6 +221,7 @@ impl Store {
         let tx = self
             .conn
             .transaction_with_behavior(TransactionBehavior::Immediate)?;
+        store::source_guard(&tx)?;
         store::authorize(&tx, auth, "read")?;
         let access = access::load(&tx, &auth.client_id)?;
         access.require(id)?;
@@ -222,6 +241,7 @@ impl Store {
         let tx = self
             .conn
             .transaction_with_behavior(TransactionBehavior::Immediate)?;
+        store::source_guard(&tx)?;
         let result = set(&tx, id, pinned, crate::tend::OWNER)?;
         tx.commit()?;
         Ok(result)

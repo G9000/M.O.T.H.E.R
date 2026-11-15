@@ -1,17 +1,22 @@
 //! Durable, isolated capture proposals and local owner review.
+#[cfg(feature = "legacy-sqlite")]
+use crate::store::{self, Store};
+#[cfg(feature = "legacy-sqlite")]
+use crate::{access, contracts::Auth, error::Error};
 use crate::{
-    access,
-    contracts::{self, Auth, Kind, Write, integer, string},
-    error::{Error, Result, invalid},
+    contracts::{self, Kind, Write, integer, string},
+    error::{Result, invalid},
     limits::Usage,
-    store::{self, Store},
 };
+#[cfg(feature = "legacy-sqlite")]
 use rusqlite::{Connection, OptionalExtension, TransactionBehavior, params};
 use serde_json::{Value, json};
 const OWNER: &str = "@owner-review";
 const MAX_PROPOSALS: usize = 10000;
 const MAX_OPERATIONS: usize = 100000;
+#[cfg(feature = "legacy-sqlite")]
 const SCHEMA: &str = "CREATE TABLE IF NOT EXISTS inbox_proposals(id TEXT PRIMARY KEY, status TEXT NOT NULL, dedup_hash TEXT NOT NULL, payload TEXT NOT NULL); CREATE INDEX IF NOT EXISTS inbox_pending ON inbox_proposals(status,dedup_hash); CREATE TABLE IF NOT EXISTS inbox_operations(actor TEXT NOT NULL,generation TEXT NOT NULL,operation_id TEXT NOT NULL,family TEXT NOT NULL,request_hash TEXT NOT NULL,request TEXT NOT NULL,receipt TEXT NOT NULL,PRIMARY KEY(actor,generation,operation_id));";
+#[cfg(feature = "legacy-sqlite")]
 fn exists(conn: &Connection) -> Result<bool> {
     Ok(conn.query_row(
         "SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE type='table' AND name='inbox_proposals')",
@@ -19,6 +24,7 @@ fn exists(conn: &Connection) -> Result<bool> {
         |r| r.get(0),
     )?)
 }
+#[cfg(feature = "legacy-sqlite")]
 pub(crate) fn operation_receipt(
     conn: &Connection,
     actor: &str,
@@ -30,6 +36,7 @@ pub(crate) fn operation_receipt(
     }
     Ok(conn.query_row("SELECT receipt FROM inbox_operations WHERE actor=? AND generation=? AND operation_id=?",params![actor,generation,op],|r|r.get(0)).optional()?)
 }
+#[cfg(feature = "legacy-sqlite")]
 pub(crate) fn reject_operation_collision(
     conn: &Connection,
     actor: &str,
@@ -41,12 +48,14 @@ pub(crate) fn reject_operation_collision(
     }
     Ok(())
 }
+#[cfg(feature = "legacy-sqlite")]
 fn reused() -> Error {
     Error::domain(
         "OPERATION_REUSED",
         "An operation ID cannot be reused for another request or operation family.",
     )
 }
+#[cfg(feature = "legacy-sqlite")]
 fn identity(conn: &Connection, v: &Value) -> Result<Value> {
     let w = store::workspace(conn)?;
     if v["workspaceId"] != w["id"] {
@@ -63,6 +72,7 @@ fn identity(conn: &Connection, v: &Value) -> Result<Value> {
     }
     Ok(w)
 }
+#[cfg(feature = "legacy-sqlite")]
 fn eligible(conn: &Connection, actor: &str, kind: Kind) -> Result<()> {
     let row: Option<(String, i64)> = conn
         .query_row(
@@ -92,6 +102,7 @@ fn eligible(conn: &Connection, actor: &str, kind: Kind) -> Result<()> {
     }
     Ok(())
 }
+#[cfg(feature = "legacy-sqlite")]
 fn authenticate_proposal(conn: &Connection, auth: &Auth, kind: Kind) -> Result<()> {
     match store::authorize(conn, auth, "context:propose") {
         Ok(()) => Ok(()),
@@ -162,6 +173,7 @@ pub(crate) fn parse_review(mut v: Value) -> Result<Value> {
     }
     Ok(v)
 }
+#[cfg(feature = "legacy-sqlite")]
 fn refs(conn: &Connection, draft: &Value) -> Result<()> {
     for id in draft["references"]
         .as_array()
@@ -189,9 +201,11 @@ pub(crate) fn candidate(record: &Value) -> Result<Value> {
     }
     contracts::normalize_draft(v)
 }
+#[cfg(feature = "legacy-sqlite")]
 fn duplicate(conn: &Connection, draft: &Value) -> Result<Option<String>> {
     duplicate_visible(conn, draft, &access::ClientAccess::default())
 }
+#[cfg(feature = "legacy-sqlite")]
 fn duplicate_visible(
     conn: &Connection,
     draft: &Value,
@@ -212,6 +226,7 @@ fn duplicate_visible(
 pub(crate) fn dedup(p: &Value) -> String {
     contracts::hash(&json!({"actor":p["actor"],"workspaceId":p["workspaceId"],"generation":p["generation"],"source":p["source"],"basis":p["basis"],"record":p["record"],"targetId":p["targetId"],"expectedRevision":p["expectedRevision"]}).to_string())
 }
+#[cfg(feature = "legacy-sqlite")]
 fn read(conn: &Connection, id: &str) -> Result<Value> {
     contracts::id(id)?;
     if !exists(conn)? {
@@ -228,9 +243,11 @@ fn read(conn: &Connection, id: &str) -> Result<Value> {
         Error::domain("NOT_FOUND", "Proposal does not exist.")
     })?)?)
 }
+#[cfg(feature = "legacy-sqlite")]
 fn full(conn: &Connection, p: Value) -> Result<Value> {
     full_visible(conn, p, &access::ClientAccess::default())
 }
+#[cfg(feature = "legacy-sqlite")]
 fn full_visible(conn: &Connection, mut p: Value, access: &access::ClientAccess) -> Result<Value> {
     let w = store::workspace(conn)?;
     let current = match p["targetId"].as_str() {
@@ -265,6 +282,7 @@ fn full_visible(conn: &Connection, mut p: Value, access: &access::ClientAccess) 
     p["similarRecordIds"] = json!(similar);
     Ok(p)
 }
+#[cfg(feature = "legacy-sqlite")]
 fn prior(conn: &Connection, actor: &str, family: &str, v: &Value) -> Result<Option<Value>> {
     let generation = string(v, "generation")?;
     let op = string(v, "operationId")?;
@@ -287,6 +305,7 @@ fn prior(conn: &Connection, actor: &str, family: &str, v: &Value) -> Result<Opti
     }
     Ok(None)
 }
+#[cfg(feature = "legacy-sqlite")]
 fn persist_operation(
     conn: &Connection,
     actor: &str,
@@ -308,10 +327,12 @@ fn persist_operation(
     )?;
     Ok(())
 }
+#[cfg(feature = "legacy-sqlite")]
 fn persist_proposal(conn: &Connection, p: &Value) -> Result<()> {
     conn.execute("INSERT INTO inbox_proposals VALUES(?,?,?,?) ON CONFLICT(id) DO UPDATE SET status=excluded.status,payload=excluded.payload",params![string(p,"id")?,string(p,"status")?,dedup(p),p.to_string()])?;
     Ok(())
 }
+#[cfg(feature = "legacy-sqlite")]
 pub(crate) fn check_capacity(conn: &Connection) -> Result<()> {
     if !exists(conn)? {
         return Ok(());
@@ -328,6 +349,7 @@ pub(crate) fn check_capacity(conn: &Connection) -> Result<()> {
     u.payload_bytes += u64::try_from(b + c).map_err(|_| invalid("Invalid inbox counter"))?;
     u.check()
 }
+#[cfg(feature = "legacy-sqlite")]
 impl Store {
     /// Submit one attributed memory, decision or task for local owner review.
     pub fn propose(&mut self, auth: &Auth, raw: Value) -> Result<Value> {
@@ -336,6 +358,7 @@ impl Store {
         let tx = self
             .conn
             .transaction_with_behavior(TransactionBehavior::Immediate)?;
+        store::source_guard(&tx)?;
         authenticate_proposal(&tx, auth, kind)?;
         identity(&tx, &v)?;
         let access = access::load(&tx, &auth.client_id)?;
@@ -429,6 +452,7 @@ impl Store {
         let tx = self
             .conn
             .transaction_with_behavior(TransactionBehavior::Immediate)?;
+        store::source_guard(&tx)?;
         identity(&tx, &v)?;
         if let Some(r) = prior(&tx, OWNER, "review", &v)? {
             tx.commit()?;
@@ -493,6 +517,7 @@ impl Store {
         Ok(result)
     }
 }
+#[cfg(feature = "legacy-sqlite")]
 pub(crate) fn export(conn: &Connection) -> Result<Option<Value>> {
     if !exists(conn)? {
         return Ok(None);
@@ -892,6 +917,7 @@ pub(crate) fn validate_with_limits(
     }
     Ok(())
 }
+#[cfg(feature = "legacy-sqlite")]
 pub(crate) fn restore(conn: &Connection, extension: &Value) -> Result<()> {
     conn.execute_batch(SCHEMA)?;
     for p in list(extension, "proposals", MAX_PROPOSALS)? {

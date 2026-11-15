@@ -1,3 +1,5 @@
+#![cfg(feature = "legacy-sqlite")]
+
 use std::process::{Command, Stdio};
 use tempfile::TempDir;
 

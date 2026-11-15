@@ -4,6 +4,7 @@ pub mod config;
 pub mod contracts;
 pub mod history;
 pub mod indexes;
+pub mod migrate;
 pub mod store;
 
 /// Optional learned v1 search over native canonical records and disposable native vectors.

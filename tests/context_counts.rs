@@ -1,3 +1,5 @@
+#![cfg(feature = "legacy-sqlite")]
+
 use mother::{
     contracts::{Auth, SCOPES},
     store::Store,

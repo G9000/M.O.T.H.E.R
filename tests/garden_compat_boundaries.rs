@@ -1,14 +1,13 @@
-use mother::{
-    access::{AccessMode, ClientAccess},
-    contracts::Auth,
-    garden::store::GardenStore,
-    store::Store,
-};
+#[cfg(feature = "legacy-sqlite")]
+use mother::{access::AccessMode, store::Store};
+use mother::{access::ClientAccess, contracts::Auth, garden::store::GardenStore};
 use serde_json::{Value, json};
+#[cfg(feature = "legacy-sqlite")]
 use std::path::Path;
 use uuid::Uuid;
 
 enum Backend {
+    #[cfg(feature = "legacy-sqlite")]
     Sqlite(Store),
     Native(GardenStore),
 }
@@ -17,6 +16,7 @@ impl Backend {
         let scopes = scopes.iter().map(|s| s.to_string()).collect::<Vec<_>>();
         match self {
             Self::Native(s) => s.v1_grant(name, &scopes, &access, None).unwrap(),
+            #[cfg(feature = "legacy-sqlite")]
             Self::Sqlite(s) => {
                 let grant = s.grant_with_access(name, &scopes, &access).unwrap();
                 Auth {
@@ -43,6 +43,7 @@ impl Backend {
     fn call(&mut self, auth: &Auth, tool: &str, args: Value) -> mother::error::Result<Value> {
         match self {
             Self::Native(s) => s.v1_call(auth, tool, args),
+            #[cfg(feature = "legacy-sqlite")]
             Self::Sqlite(s) => match tool {
                 "mother_get_context" => s.context(auth, args),
                 "mother_write_record" | "mother_checkpoint" => s.write(auth, args),
@@ -60,21 +61,26 @@ impl Backend {
     fn review(&mut self, args: Value) -> mother::error::Result<Value> {
         match self {
             Self::Native(s) => s.v1_review_proposal(args),
+            #[cfg(feature = "legacy-sqlite")]
             Self::Sqlite(s) => s.review_proposal(args),
         }
     }
     fn inbox_get(&self, id: &str) -> Value {
         match self {
             Self::Native(s) => s.v1_inbox_get(id).unwrap(),
+            #[cfg(feature = "legacy-sqlite")]
             Self::Sqlite(s) => s.inbox_get(id).unwrap(),
         }
     }
+    #[cfg(feature = "legacy-sqlite")]
     fn revoke(&mut self, id: &str) {
         match self {
             Self::Native(s) => s.revoke(id).unwrap(),
+            #[cfg(feature = "legacy-sqlite")]
             Self::Sqlite(s) => s.revoke(id).unwrap(),
         }
     }
+    #[cfg(feature = "legacy-sqlite")]
     fn set_scopes(&mut self, owned_root: &Path, id: &str, scopes: &[&str]) {
         let scopes = scopes.iter().map(|s| s.to_string()).collect::<Vec<_>>();
         match self {
@@ -82,6 +88,7 @@ impl Backend {
                 s.v1_grant(id, &scopes, &ClientAccess::default(), None)
                     .unwrap();
             }
+            #[cfg(feature = "legacy-sqlite")]
             Self::Sqlite(_) => {
                 // The legacy owner API provisions new identities. This fixture
                 // withdraws scopes only in its own synthetic temporary store.
@@ -100,6 +107,7 @@ impl Backend {
     fn export(&mut self) -> Value {
         match self {
             Self::Native(s) => s.v1_export().unwrap(),
+            #[cfg(feature = "legacy-sqlite")]
             Self::Sqlite(s) => s.export().unwrap(),
         }
     }
@@ -114,6 +122,7 @@ impl Backend {
         request
     }
 }
+#[cfg(feature = "legacy-sqlite")]
 fn backends(dir: &Path) -> [Backend; 2] {
     let sqlite =
         Store::initialize(&dir.join("legacy.sqlite"), "Synthetic explicit persona").unwrap();
@@ -132,6 +141,7 @@ fn memory(text: &str) -> Value {
 fn task() -> Value {
     json!({"kind":"task","title":"Synthetic task","content":"Do explicit work","status":"todo"})
 }
+#[cfg(feature = "legacy-sqlite")]
 fn checkpoint(title: &str) -> Value {
     json!({"kind":"checkpoint","title":title,"content":"Synthetic handoff","status":"active","nextStep":"Inspect evidence"})
 }
@@ -140,6 +150,7 @@ fn review(proposal: &Value, action: &str) -> Value {
 }
 
 #[test]
+#[cfg(feature = "legacy-sqlite")]
 fn both_backends_recheck_current_proposer_grant_and_target_revision_before_approval() {
     let dir = tempfile::tempdir().unwrap();
     for mut backend in backends(dir.path()) {
@@ -233,6 +244,7 @@ fn both_backends_recheck_current_proposer_grant_and_target_revision_before_appro
 }
 
 #[test]
+#[cfg(feature = "legacy-sqlite")]
 fn both_backends_owner_edits_validate_references_and_keep_failed_approvals_atomic() {
     let dir = tempfile::tempdir().unwrap();
     for mut backend in backends(dir.path()) {
@@ -278,6 +290,7 @@ fn both_backends_owner_edits_validate_references_and_keep_failed_approvals_atomi
 }
 
 #[test]
+#[cfg(feature = "legacy-sqlite")]
 fn both_backends_checkpoint_supersession_retires_once_and_conflicts_roll_back_every_receipt() {
     let dir = tempfile::tempdir().unwrap();
     for mut backend in backends(dir.path()) {
@@ -336,6 +349,7 @@ fn both_backends_checkpoint_supersession_retires_once_and_conflicts_roll_back_ev
 }
 
 #[test]
+#[cfg(feature = "legacy-sqlite")]
 fn both_backends_scrub_shared_references_and_never_implicitly_share_saved_new_proposals() {
     let dir = tempfile::tempdir().unwrap();
     for mut backend in backends(dir.path()) {
@@ -503,8 +517,13 @@ fn native_full_backup_preserves_all_v1_auxiliary_state_and_blocks_old_generation
         ])
     );
     let bundle = dir.path().join("backup");
-    let Backend::Native(source) = backend else {
-        unreachable!()
+    #[cfg(not(feature = "legacy-sqlite"))]
+    let Backend::Native(source) = backend;
+    #[cfg(feature = "legacy-sqlite")]
+    let source = match backend {
+        Backend::Native(store) => store,
+        #[cfg(feature = "legacy-sqlite")]
+        Backend::Sqlite(_) => unreachable!("This fixture explicitly creates a native backend"),
     };
     source.backup_to(&bundle).unwrap();
     let restored = GardenStore::restore_backup(&bundle, &dir.path().join("restored.redb")).unwrap();
@@ -594,8 +613,13 @@ fn native_full_backup_preserves_all_v1_auxiliary_state_and_blocks_old_generation
     restored
         .call(&fresh, "mother_write_record", request)
         .unwrap();
-    let Backend::Native(restored) = restored else {
-        unreachable!()
+    #[cfg(not(feature = "legacy-sqlite"))]
+    let Backend::Native(restored) = restored;
+    #[cfg(feature = "legacy-sqlite")]
+    let restored = match restored {
+        Backend::Native(store) => store,
+        #[cfg(feature = "legacy-sqlite")]
+        Backend::Sqlite(_) => unreachable!("This fixture explicitly creates a native backend"),
     };
     restored
         .backup_to(&dir.path().join("second-backup"))

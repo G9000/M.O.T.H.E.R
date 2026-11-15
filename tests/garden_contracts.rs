@@ -104,6 +104,7 @@ fn bounds_names_aliases_batch_json_and_extension_depth() {
     assert!(parse(&value).is_err());
 }
 #[test]
+#[cfg(feature = "legacy-sqlite")]
 fn v1_write_rejects_v2_fields() {
     use mother::{contracts::Auth, store::Store};
     let dir = tempfile::tempdir().unwrap();

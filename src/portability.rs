@@ -1,16 +1,17 @@
 //! Credential-free portable v1 recovery, separate from executable/runtime replacement.
+#[cfg(feature = "legacy-sqlite")]
+use crate::store::{self, Store};
 use crate::{
     contracts::{self, integer, parse_record, string},
     error::{Error, Result, invalid},
     limits::Usage,
-    store::{self, Store},
 };
+#[cfg(feature = "legacy-sqlite")]
 use rusqlite::params;
 use serde_json::{Value, json};
-use std::{
-    collections::{BTreeSet, HashMap, HashSet},
-    path::Path,
-};
+use std::collections::{BTreeSet, HashMap, HashSet};
+#[cfg(feature = "legacy-sqlite")]
+use std::path::Path;
 fn export_error(message: &str) -> Error {
     Error::domain("INVALID_EXPORT", message)
 }
@@ -196,6 +197,7 @@ pub(crate) fn validate(mut v: Value) -> Result<Value> {
     v["omittedExternalSources"] = json!(omitted);
     Ok(v)
 }
+#[cfg(feature = "legacy-sqlite")]
 impl Store {
     /// Capture a consistent credential-free bundle, including historic receipts and persona.
     pub fn export(&mut self) -> Result<Value> {

@@ -1,3 +1,5 @@
+#![cfg(feature = "legacy-sqlite")]
+
 //! Context can be limited to records last updated within a time window.
 use mother::{
     contracts::{Auth, SCOPES},

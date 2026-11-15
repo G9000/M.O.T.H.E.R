@@ -84,8 +84,8 @@ impl Inbox {
         Ok(())
     }
     fn read_page(&self, cursor: Option<&str>) -> Result<Value> {
-        GardenStore::open(&self.path)
-            .and_then(|store| store.owner_inbox_page(cursor))
+        GardenStore::open_active(&self.path)?
+            .owner_inbox_page(cursor)
             .map_err(domain_error)
     }
     fn install_page(&mut self, list: Value) {
@@ -164,7 +164,16 @@ impl Inbox {
             return;
         }
         if let Some(request) = self.pending.as_ref() {
-            let outcome = GardenStore::open(&self.path)
+            let outcome = GardenStore::open_active(&self.path)
+                .map_err(|error| GardenError {
+                    code: if error.code() == "MIGRATION_FENCED" {
+                        GardenErrorCode::GenerationMismatch
+                    } else {
+                        GardenErrorCode::StoreUnavailable
+                    },
+                    message: error.to_string(),
+                    restart_required: false,
+                })
                 .and_then(|store| store.review_proposal(request.clone()));
             self.finish(outcome);
         }
@@ -247,8 +256,8 @@ impl Inbox {
                         .get(self.selected)
                         .and_then(|item| item["id"].as_str())
                     {
-                        let proposal = GardenStore::open(&self.path)
-                            .and_then(|store| store.owner_inbox_get(id))
+                        let proposal = GardenStore::open_active(&self.path)?
+                            .owner_inbox_get(id)
                             .map_err(domain_error)?;
                         self.open_proposal(proposal);
                     }

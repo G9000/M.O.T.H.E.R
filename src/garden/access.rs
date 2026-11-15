@@ -4,14 +4,15 @@
 //! Handlers must obtain references from trusted stored objects, check every returned
 //! object, endpoint and evidence reference, and serialize within the same transaction.
 use super::contracts::ExternalReference;
-use crate::{
-    access::ClientAccess,
-    contracts::Auth,
-    error::{Error, Result, invalid},
-    store::{self, Store},
-};
+use crate::error::{Error, Result, invalid};
+#[cfg(feature = "legacy-sqlite")]
+use crate::store::{self, Store};
+#[cfg(feature = "legacy-sqlite")]
+use crate::{access::ClientAccess, contracts::Auth};
+#[cfg(feature = "legacy-sqlite")]
 use rusqlite::{Connection, OptionalExtension, TransactionBehavior, params};
 use serde::{Deserialize, Serialize};
+#[cfg(feature = "legacy-sqlite")]
 use serde_json::{Value, json};
 
 /// Owner-declared graph object allowlist, independent of canonical record access.
@@ -121,6 +122,7 @@ pub struct GardenReceiptVisibility {
     pub payload_visible: bool,
 }
 
+#[cfg(feature = "legacy-sqlite")]
 fn table_exists(conn: &Connection, table: &str) -> Result<bool> {
     Ok(conn.query_row(
         "SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE type='table' AND name=?)",
@@ -129,6 +131,7 @@ fn table_exists(conn: &Connection, table: &str) -> Result<bool> {
     )?)
 }
 
+#[cfg(feature = "legacy-sqlite")]
 pub(crate) fn load(conn: &Connection, client: &str) -> Result<GardenAccess> {
     let forbidden = || Error::domain("FORBIDDEN", "An explicit current graph policy is required.");
     if !table_exists(conn, "client_garden_policy_requirements")?
@@ -161,6 +164,7 @@ pub(crate) fn load(conn: &Connection, client: &str) -> Result<GardenAccess> {
     Ok(policy)
 }
 
+#[cfg(feature = "legacy-sqlite")]
 fn save(conn: &Connection, client: &str, policy: &GardenAccess) -> Result<()> {
     policy.validate()?;
     // Additive owner provisioning only. Opening a v1 store does not mutate its
@@ -177,6 +181,7 @@ fn save(conn: &Connection, client: &str, policy: &GardenAccess) -> Result<()> {
     Ok(())
 }
 
+#[cfg(feature = "legacy-sqlite")]
 fn current_workspace(conn: &Connection, workspace_id: &str, generation: &str) -> Result<()> {
     crate::contracts::id(workspace_id)?;
     crate::contracts::id(generation)?;
@@ -196,6 +201,7 @@ fn current_workspace(conn: &Connection, workspace_id: &str, generation: &str) ->
     Ok(())
 }
 
+#[cfg(feature = "legacy-sqlite")]
 impl Store {
     /// Provision explicit graph scopes and an independent graph allowlist.
     /// This owner-only API validates ID syntax without claiming graph objects exist.
@@ -223,6 +229,7 @@ impl Store {
         let tx = self
             .conn
             .transaction_with_behavior(TransactionBehavior::Immediate)?;
+        store::source_guard(&tx)?;
         let mut grant = store::grant(&tx, client, scopes)?;
         crate::access::save(&tx, client, scopes, access)?;
         save(&tx, client, garden)?;
