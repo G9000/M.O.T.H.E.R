@@ -1,0 +1,17 @@
+{
+  "name": "mother-memory-garden",
+  "private": true,
+  "type": "module",
+  "license": "MIT",
+  "description": "The memory garden page served by `mother garden explore`: Patch's painted valley (MIT/CC0) with the owner's records planted in it.",
+  "scripts": {
+    "dev": "vite --config vite.config.mjs --host 127.0.0.1 --port 5384 --strictPort",
+    "build": "node build.mjs"
+  },
+  "dependencies": {
+    "three": "0.186.1"
+  },
+  "devDependencies": {
+    "vite": "8.3.5"
+  }
+}
