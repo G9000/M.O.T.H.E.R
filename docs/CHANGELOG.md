@@ -1,5 +1,9 @@
 # Documentation changes
 
+## 16 November 2026
+
+- Added the [memory garden explorer guide](garden-explorer.md) for the new read-only `mother garden explore` command, and noted in the memory garden design note that a first version now exists. Checked with synthetic gardens only; no real workspace was opened. The guide now describes the walkable painted valley (Patch's Painted valley, MIT code and CC0 art) that replaced the first meadow page, its source in `web/garden/` and how the embedded page is rebuilt. A later pass the next day made the place the garden's own: one hill whose spiral path is the timeline of records, first-person only, with the borrowed valley, village, wanderer and physics removed.
+
 ## 15 November 2026
 
 - Reconciled current setup, harness, context, retrieval, review, recovery and contributor guides with complete removal of the SQLite runtime, converter and Cargo feature. Native redb is the default and sole runtime; v1 MCP compatibility and native owner inbox review remain supported.
