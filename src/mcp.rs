@@ -1,6 +1,7 @@
 //! Official MCP SDK adapter for the standalone native garden.
 mod discovery;
 mod garden;
+mod read_output;
 mod service;
 
 use mother::error::{Error, Result};

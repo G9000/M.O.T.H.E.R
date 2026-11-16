@@ -75,6 +75,7 @@ impl ServerHandler for GraphServer {
         let config = self.config.clone();
         let gate = self.gate.clone();
         let search = Arc::clone(&self.search);
+        let name = request.name.clone();
         let result = tokio::task::spawn_blocking(move || {
             let _guard = gate
                 .lock()
@@ -91,7 +92,7 @@ impl ServerHandler for GraphServer {
         })
         .await;
         let result = match result {
-            Ok(Ok(value)) => CallToolResult::structured(value),
+            Ok(Ok(value)) => super::read_output::result(&name, value),
             Ok(Err(error)) => tool_error(error),
             Err(_) => tool_error(Error::domain("STORE_UNAVAILABLE", UNCONFIRMED)),
         };

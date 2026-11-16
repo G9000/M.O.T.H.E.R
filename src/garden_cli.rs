@@ -189,6 +189,17 @@ pub(crate) enum GardenCommand {
         #[arg(long)]
         db: PathBuf,
     },
+    /// Open the read-only memory garden: a local web view of one snapshot of the v1 view.
+    Explore {
+        #[arg(long)]
+        db: PathBuf,
+        /// Most records to show; pinned records first, then the most recently updated.
+        #[arg(long, default_value_t = 500, value_parser = clap::value_parser!(u16).range(1..=2000))]
+        limit: u16,
+        /// Also open the one-time link in the default browser.
+        #[arg(long)]
+        open: bool,
+    },
     /// Serve graph MCP tools using graph-only private credentials.
     Mcp {
         #[arg(long)]
@@ -309,6 +320,7 @@ pub(crate) fn execute_garden(command: GardenCommand) -> Result<()> {
         | GardenCommand::ImportV1 { db, .. }
         | GardenCommand::Inbox { db, .. }
         | GardenCommand::V1Inbox { db, .. }
+        | GardenCommand::Explore { db, .. }
         | GardenCommand::Service { db, .. } => Some(db),
         _ => None,
     };
@@ -510,6 +522,9 @@ pub(crate) fn execute_garden(command: GardenCommand) -> Result<()> {
             print_json(serde_json::to_value(report)?)
         }
         GardenCommand::Inbox { db } => run_graph_inbox(absolute(&db)?),
+        GardenCommand::Explore { db, limit, open } => {
+            crate::explorer::run(&absolute(&db)?, usize::from(limit), open)
+        }
         GardenCommand::Mcp { .. } => unreachable!("Graph MCP is dispatched asynchronously"),
     }
 }

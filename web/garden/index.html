@@ -1,0 +1,462 @@
+<!doctype html>
+<!-- The memory garden: served only by `mother garden explore`, on this machine, with every file embedded in the executable. The valley is Patch's painted valley (MIT code, CC0 art; see LICENCE-NOTES.md). -->
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="referrer" content="no-referrer" />
+    <title>Memory Garden</title>
+    <link rel="icon" href="data:," />
+    <style>
+      :root {
+        color-scheme: light;
+        --glass: rgba(255, 255, 255, 0.84);
+        --line: rgba(40, 50, 70, 0.2);
+        --fg: #1f2a33;
+        --muted: #4c5a66;
+        --faint: #66737f;
+        --accent: #2f6fb0;
+        --gold: #8a5200;
+        --bad: #b0304a;
+        --display: Georgia, 'Iowan Old Style', 'Times New Roman', serif;
+        --body: 'Segoe UI', system-ui, sans-serif;
+        --mono: ui-monospace, 'Cascadia Mono', Menlo, monospace;
+      }
+      * {
+        box-sizing: border-box;
+      }
+      html,
+      body {
+        margin: 0;
+        height: 100%;
+        overflow: hidden;
+        background: #dfeaf0;
+        color: var(--fg);
+        font: 15px/1.5 var(--body);
+      }
+      button,
+      input {
+        font: inherit;
+        color: inherit;
+      }
+      :focus-visible {
+        outline: 2px solid var(--accent);
+        outline-offset: 2px;
+      }
+      canvas {
+        display: block;
+        width: 100%;
+        height: 100%;
+      }
+      #loading,
+      #start {
+        position: fixed;
+        inset: 0;
+        display: grid;
+        place-items: center;
+        font-family: var(--display);
+        letter-spacing: 0.06em;
+        pointer-events: none;
+        user-select: none;
+      }
+      #loading {
+        background: #dfeaf0;
+        padding: 24px;
+        text-align: center;
+        z-index: 9;
+      }
+      #start {
+        display: none;
+        align-content: end;
+        padding-bottom: 9vh;
+        color: #fff;
+        text-shadow: 0 1px 10px rgba(20, 50, 80, 0.6);
+      }
+      #start b {
+        display: block;
+        font-size: 19px;
+        font-weight: normal;
+        text-align: center;
+      }
+      #start span {
+        display: block;
+        margin-top: 4px;
+        font-size: 13px;
+        opacity: 0.9;
+        text-align: center;
+      }
+      .ready:not(.playing) #start {
+        display: grid;
+      }
+      #note {
+        position: fixed;
+        top: 11vh;
+        left: 0;
+        right: 0;
+        text-align: center;
+        font: 19px var(--display);
+        letter-spacing: 0.06em;
+        color: #fff;
+        text-shadow: 0 1px 10px rgba(20, 50, 80, 0.55);
+        opacity: 0;
+        transition: opacity 0.6s;
+        pointer-events: none;
+      }
+      #note.on {
+        opacity: 1;
+        transition: opacity 0.15s;
+      }
+      /* the eye's aim while walking, and what it rests on */
+      #aim {
+        position: fixed;
+        left: 50%;
+        top: 50%;
+        width: 6px;
+        height: 6px;
+        margin: -3px;
+        border-radius: 50%;
+        background: rgba(255, 255, 255, 0.85);
+        box-shadow: 0 0 0 1px rgba(20, 40, 60, 0.45);
+        pointer-events: none;
+        display: none;
+      }
+      .playing #aim {
+        display: block;
+      }
+      #hint {
+        position: fixed;
+        left: 0;
+        right: 0;
+        bottom: 16vh;
+        text-align: center;
+        color: #fff;
+        font: 15px var(--display);
+        letter-spacing: 0.05em;
+        text-shadow: 0 1px 8px rgba(20, 50, 80, 0.7);
+        pointer-events: none;
+      }
+      #era {
+        position: fixed;
+        left: 18px;
+        bottom: 16px;
+        color: #fff;
+        font: italic 600 20px var(--display);
+        letter-spacing: 0.04em;
+        text-shadow: 0 1px 10px rgba(20, 50, 80, 0.7);
+        pointer-events: none;
+      }
+      body:not(.playing) #hint {
+        display: none;
+      }
+      .glass {
+        background: var(--glass);
+        border: 1px solid var(--line);
+        border-radius: 12px;
+        backdrop-filter: blur(12px) saturate(1.2);
+        box-shadow: 0 8px 30px rgba(20, 40, 70, 0.18);
+      }
+      .bar {
+        position: fixed;
+        top: 14px;
+        left: 16px;
+        right: 16px;
+        display: none;
+        align-items: center;
+        gap: 12px;
+        pointer-events: none;
+        z-index: 3;
+      }
+      .ready .bar {
+        display: flex;
+      }
+      .bar > * {
+        pointer-events: auto;
+      }
+      .brand {
+        display: flex;
+        align-items: baseline;
+        gap: 10px;
+        pointer-events: none;
+        color: #fff;
+        text-shadow: 0 1px 10px rgba(20, 50, 80, 0.6);
+      }
+      .brand .acr {
+        font: 11px var(--mono);
+        letter-spacing: 0.24em;
+      }
+      .brand h1 {
+        margin: 0;
+        font: italic 600 26px/1 var(--display);
+      }
+      .badge {
+        font-size: 12px;
+        color: var(--gold);
+        border: 1px solid rgba(138, 82, 0, 0.45);
+        border-radius: 999px;
+        padding: 1px 9px;
+        background: rgba(255, 255, 255, 0.82);
+        pointer-events: none;
+      }
+      .spacer {
+        flex: 1;
+      }
+      .btn {
+        border: 1px solid var(--line);
+        background: var(--glass);
+        border-radius: 10px;
+        padding: 6px 12px;
+        cursor: pointer;
+      }
+      .btn kbd {
+        font: 11px var(--mono);
+        color: var(--faint);
+        margin-left: 6px;
+      }
+      #labels {
+        position: fixed;
+        inset: 0;
+        pointer-events: none;
+        overflow: hidden;
+        z-index: 2;
+      }
+      .label {
+        position: absolute;
+        transform: translate(-50%, -100%);
+        white-space: nowrap;
+        max-width: 60vw;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        font-size: 13px;
+        padding: 2px 9px;
+        border-radius: 999px;
+        background: rgba(255, 255, 255, 0.9);
+        border: 1px solid var(--line);
+        box-shadow: 0 2px 10px rgba(20, 40, 70, 0.2);
+      }
+      .label.bed {
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+        font: italic 600 15px var(--display);
+        background: rgba(255, 255, 255, 0.78);
+      }
+      .label[hidden] {
+        display: none;
+      }
+      .dot {
+        width: 8px;
+        height: 8px;
+        border-radius: 50%;
+        flex: none;
+        display: inline-block;
+        box-shadow: 0 0 0 1px rgba(30, 40, 55, 0.3);
+      }
+      .card,
+      .panel {
+        position: fixed;
+        z-index: 4;
+        top: 62px;
+        max-height: calc(100% - 90px);
+        overflow: auto;
+      }
+      .card {
+        right: 16px;
+        width: min(380px, calc(100% - 32px));
+        padding: 18px;
+        display: grid;
+        gap: 12px;
+      }
+      .panel {
+        left: 16px;
+        width: min(330px, calc(100% - 32px));
+        padding: 14px;
+      }
+      .card[hidden],
+      .panel[hidden] {
+        display: none;
+      }
+      .card .close {
+        position: absolute;
+        top: 10px;
+        right: 10px;
+        border: 0;
+        background: none;
+        width: 32px;
+        height: 32px;
+        border-radius: 8px;
+        cursor: pointer;
+        color: var(--muted);
+        font-size: 20px;
+        line-height: 1;
+      }
+      .pills {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 6px;
+        padding-right: 28px;
+      }
+      .pill {
+        font-size: 12px;
+        border-radius: 999px;
+        padding: 1px 9px;
+        border: 1px solid var(--line);
+        color: var(--muted);
+      }
+      .pill.kind {
+        color: #14181c;
+        font-weight: 600;
+      }
+      .pill.pinned,
+      .pill.warn {
+        color: var(--gold);
+        border-color: rgba(138, 82, 0, 0.5);
+      }
+      .pill.bad {
+        color: var(--bad);
+        border-color: rgba(176, 48, 74, 0.5);
+      }
+      .card h2 {
+        margin: 0;
+        font: 600 26px/1.15 var(--display);
+        text-wrap: balance;
+        overflow-wrap: anywhere;
+      }
+      .sub {
+        margin: -6px 0 0;
+        font: 12px var(--mono);
+        color: var(--faint);
+      }
+      .content {
+        margin: 0;
+        overflow-wrap: anywhere;
+        white-space: pre-wrap;
+      }
+      .note {
+        background: rgba(47, 111, 176, 0.1);
+        border-radius: 10px;
+        padding: 9px 11px;
+        font-size: 14px;
+      }
+      .note b,
+      .rel h3,
+      .panel h3 {
+        display: block;
+        margin: 0;
+        font: 500 11px var(--mono);
+        letter-spacing: 0.14em;
+        text-transform: uppercase;
+        color: var(--faint);
+      }
+      .rel {
+        display: grid;
+        gap: 6px;
+      }
+      .chips {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 6px;
+      }
+      .chip {
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+        border: 1px solid var(--line);
+        background: rgba(255, 255, 255, 0.75);
+        border-radius: 999px;
+        padding: 3px 10px;
+        font-size: 13px;
+        cursor: pointer;
+        max-width: 100%;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+      .chip:hover {
+        border-color: var(--accent);
+      }
+      details summary {
+        cursor: pointer;
+        font-size: 13.5px;
+        color: var(--muted);
+      }
+      .hist {
+        display: grid;
+        gap: 6px;
+        margin-top: 8px;
+        font-size: 13px;
+      }
+      .hist div {
+        display: grid;
+        grid-template-columns: 46px minmax(0, 1fr);
+        gap: 8px;
+      }
+      .hist .r {
+        font-family: var(--mono);
+        color: var(--faint);
+      }
+      .hist .x {
+        color: var(--muted);
+      }
+      .panel input {
+        width: 100%;
+        border: 1px solid var(--line);
+        border-radius: 8px;
+        background: rgba(255, 255, 255, 0.8);
+        padding: 7px 10px;
+      }
+      .panel h3 {
+        margin: 12px 0 4px;
+      }
+      .panel .item {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        width: 100%;
+        border: 0;
+        background: none;
+        padding: 4px;
+        border-radius: 6px;
+        cursor: pointer;
+        text-align: left;
+      }
+      .panel .item:hover {
+        background: rgba(47, 111, 176, 0.12);
+      }
+      .panel .item.off {
+        color: var(--faint);
+      }
+      .panel .none {
+        color: var(--muted);
+        margin: 12px 0 0;
+      }
+    </style>
+  </head>
+  <body>
+    <canvas id="view" aria-label="A painted hill to walk down. A path winds from today back to the first record, with one tall flower for each record beside it; the List button offers the same records as text."></canvas>
+    <div id="labels" aria-hidden="true"></div>
+    <div id="aim" aria-hidden="true"></div>
+    <div id="hint" hidden>E or click to read</div>
+    <div id="era" aria-live="off"></div>
+    <header class="bar">
+      <div class="brand"><span class="acr">M.O.T.H.E.R</span><h1>Memory garden</h1></div>
+      <span class="badge" id="count">Read-only</span>
+      <span class="spacer"></span>
+      <button class="btn" id="listBtn" aria-controls="list">List<kbd>L</kbd></button>
+    </header>
+    <aside class="card glass" id="card" hidden aria-live="polite"></aside>
+    <aside class="panel glass" id="list" hidden aria-label="All records">
+      <label><span hidden>Search the garden</span><input id="q" type="search" placeholder="Search records" autocomplete="off" /></label>
+      <div id="items"></div>
+    </aside>
+    <div id="start">
+      <div>
+        <b>Click to walk</b>
+        <span>W A S D · Shift to run · the path leads back through time · look at a flower and press E to read it · L for the list · T for time of day</span>
+      </div>
+    </div>
+    <div id="note"></div>
+    <div id="loading"><span>Memory garden</span></div>
+    <noscript><div id="loading">The garden needs JavaScript to draw. Nothing leaves this machine.</div></noscript>
+    <script type="module" src="./src/valley/main.js"></script>
+  </body>
+</html>

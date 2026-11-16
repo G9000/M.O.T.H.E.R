@@ -1,6 +1,8 @@
 //! Native v1 compatibility records, credentials and receipts in the Garden transaction.
 #[path = "compat_search.rs"]
 pub(crate) mod learned;
+#[path = "compat_view.rs"]
+pub(crate) mod view;
 use super::{
     CURRENT, GardenStore, PRINCIPALS, Principal, bump_epoch, inbox, operation_key, state_write,
 };

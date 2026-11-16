@@ -40,6 +40,7 @@ impl ServerHandler for Bridge {
             return Err(ErrorData::invalid_params("Unknown tool name.", None));
         }
         let client = self.client.clone();
+        let name = request.name.clone();
         let result = tokio::task::spawn_blocking(move || {
             client.call(
                 &request.name,
@@ -48,7 +49,7 @@ impl ServerHandler for Bridge {
         })
         .await;
         let reply = match result {
-            Ok(Ok(value)) => CallToolResult::structured(value),
+            Ok(Ok(value)) => super::read_output::result(&name, value),
             other => {
                 let error = match other {
                     Ok(Err(error)) => error,

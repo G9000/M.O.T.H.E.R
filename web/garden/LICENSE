@@ -1,0 +1,40 @@
+MIT License
+
+Copyright (c) 2026 Patch
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+-------------------------------------------------------------------------------
+Third-party parts
+
+three.js, MIT License, Copyright (c) 2010-2025 three.js authors. Installed by
+npm; its notice ships with the built demo as THIRD-PARTY-NOTICES.md.
+
+Rapier, by Dimforge (Sebastien Crozet and contributors), Apache License 2.0.
+src/figure/rapier/ holds @dimforge/rapier3d-compat 0.21.0 with its licence
+(src/figure/rapier/LICENSE). https://rapier.rs
+
+The pictures and sounds in this repo (public/textures/, the footsteps in
+public/audio/, shots/) are CC0 1.0: see LICENCE-NOTES.md and
+public/LICENSES/CC0-1.0.txt.
+
+Patch's starter man and his clips (public/figure/) are CC0 1.0: see
+LICENCE-NOTES.md.
+
+The released demo also plays five recordings that are not in this repo and
+are not under an open licence: see MISSING_ASSETS.md.
