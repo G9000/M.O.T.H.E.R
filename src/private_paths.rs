@@ -120,6 +120,12 @@ fn windows_directory(path: &Path) -> Result<()> {
                     if sid == owner || sid == system.as_ref() || sid == admins.as_ref() {
                         continue;
                     }
+                    // Packaged and sandboxed apps (Codex, Store apps) are granted their own app-container
+                    // identity on profile folders such as AppData, and re-grant it while they run. Such a
+                    // grant on an ancestor is tolerated; on the directory itself it still is not.
+                    if ordinal > 0 && sandboxed_app(sid) {
+                        continue;
+                    }
                     // Reject child deletion, ancestor replacement, ownership/DACL changes and generic writes.
                     const REPLACE_BOUNDARY: u32 =
                         0x40 | 0x10000 | 0x40000 | 0x80000 | 0x10000000 | 0x40000000;
@@ -132,6 +138,17 @@ fn windows_directory(path: &Path) -> Result<()> {
         }
     }
     Ok(())
+}
+
+/// One sandboxed app's own identity (S-1-15-2-… app container or S-1-15-3-… capability), not a user or group.
+#[cfg(windows)]
+fn sandboxed_app(sid: &windows_permissions::Sid) -> bool {
+    const APP_PACKAGE_AUTHORITY: [u8; 6] = [0, 0, 0, 0, 0, 15];
+    // (one package's own identity is a long hash; short forms such as S-1-15-2-1, "all application
+    // packages", are groups that admit every app and stay refused)
+    *sid.id_authority() == APP_PACKAGE_AUTHORITY
+        && matches!(sid.sub_authority(0), Some(2 | 3))
+        && sid.sub_authority_count() >= 8
 }
 
 #[cfg(test)]
@@ -157,6 +174,52 @@ mod tests {
             fs::set_permissions(dir.path(), fs::Permissions::from_mode(0o700)).unwrap();
         }
         owner_directory(dir.path()).unwrap();
+    }
+    #[cfg(windows)]
+    #[test]
+    fn only_sandboxed_app_identities_are_tolerated() {
+        use windows_permissions::{LocalBox, Sid};
+        let is = |text: &str| sandboxed_app(&text.parse::<LocalBox<Sid>>().unwrap());
+        assert!(is(
+            "S-1-15-3-3557520199-3666692283-3112367039-3524159787-2791857073-3163583606-3692855932"
+        ));
+        assert!(is(
+            "S-1-15-2-2968813833-811790644-2202111208-3784096404-1081847329-2708967783-1438471679"
+        ));
+        // (Windows' own "all application packages" group, and ordinary users and groups, are not)
+        assert!(!is("S-1-15-2-1"));
+        assert!(!is("S-1-15-3-1"));
+        assert!(!is("S-1-5-32-545"));
+        assert!(!is("S-1-1-0"));
+    }
+    #[cfg(windows)]
+    #[test]
+    fn an_ancestor_grant_to_a_sandboxed_app_changes_nothing_but_a_broad_one_fences() {
+        let root =
+            tempfile::tempdir_in(std::fs::canonicalize(std::env::temp_dir()).unwrap()).unwrap();
+        let journal = root.path().join("journal");
+        fs::create_dir(&journal).unwrap();
+        let grant = |who: &str| {
+            let out = std::process::Command::new("icacls")
+                .arg(root.path())
+                .args(["/grant", &format!("{who}:(F)")])
+                .output()
+                .unwrap();
+            assert!(
+                out.status.success(),
+                "{}",
+                String::from_utf8_lossy(&out.stdout)
+            );
+        };
+        // (this machine's own temp folder may already fail the check; a sandbox grant must not change that)
+        let before = owner_directory(&journal).is_ok();
+        grant("*S-1-15-3-1024-1-2-3-4-5-6-7");
+        assert_eq!(owner_directory(&journal).is_ok(), before);
+        grant("*S-1-5-32-545");
+        assert_eq!(
+            owner_directory(&journal).unwrap_err().code(),
+            "MIGRATION_FENCED"
+        );
     }
     #[cfg(unix)]
     #[test]
