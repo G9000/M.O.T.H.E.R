@@ -53,12 +53,46 @@ fn removal_index(value: &Value, collection: &str) -> Option<usize> {
     }
 }
 
-fn bound_previews(mut value: Value, collection: &str) -> Option<Value> {
+// Reduce only presentation excerpts. Keep every pin's identity and attribution,
+// and size the serialized JSON so multilingual text and escaping count correctly.
+fn compact_pins(value: &mut Value) -> Option<()> {
+    if value.get("responseBudget").is_none() {
+        value["responseBudget"] = json!({"omittedItems":0,"reason":"byte_budget"});
+    }
+    value["responseBudget"]["maxBytes"] = json!(PREVIEW_BYTES);
+    value["responseBudget"]["pinnedContentTruncated"] = json!(true);
+    value["responseBudget"]["pinnedContentNote"] = json!(
+        "Pinned content excerpts shortened to fit. Use mother_get_record with each pin's id for complete records."
+    );
+    while !fits(value, PREVIEW_BYTES) {
+        let pins = value["pinned"].as_array_mut()?;
+        let pin = pins
+            .iter_mut()
+            .filter(|pin| pin["content"].as_str().is_some_and(|s| !s.is_empty()))
+            .max_by_key(|pin| serde_json::to_vec(&pin["content"]).map_or(0, |s| s.len()))?;
+        let content = pin["content"].as_str()?;
+        let mut end = content.len() / 2;
+        while !content.is_char_boundary(end) {
+            end -= 1;
+        }
+        pin["content"] = json!(&content[..end]);
+        pin["truncated"] = json!(true);
+    }
+    Some(())
+}
+
+fn bound_previews(mut value: Value, collection: &str, compact_core: bool) -> Option<Value> {
     let mut removed = 0;
     while !fits(&value, PREVIEW_BYTES) {
-        // Remove whole navigation items only. Required context stays untouched;
-        // if it alone is too large, return an explicit error instead of a fragment.
-        let index = removal_index(&value, collection)?;
+        // Remove whole navigation items first. If required context still exceeds
+        // the budget, explicitly compact pin excerpts, never persona or metadata.
+        let Some(index) = removal_index(&value, collection) else {
+            if compact_core {
+                compact_pins(&mut value)?;
+                break;
+            }
+            return None;
+        };
         let item = value.get_mut(collection)?.as_array_mut()?.remove(index);
         removed += 1;
         let shown = value[collection].as_array()?.len();
@@ -112,7 +146,7 @@ pub(super) fn result(name: &str, value: Value) -> CallToolResult {
         _ => None,
     };
     let value = match collection {
-        Some(collection) => match bound_previews(value, collection) {
+        Some(collection) => match bound_previews(value, collection, name == "mother_get_context") {
             Some(value) => value,
             None => return size_error(),
         },
@@ -281,8 +315,8 @@ mod tests {
     }
 
     #[test]
-    fn preview_required_persona_pins_and_assignments_fail_explicitly_when_too_large() {
-        for key in ["persona", "pinned", "assignedToYou", "unsettledWork"] {
+    fn preview_required_persona_and_assignments_fail_explicitly_when_too_large() {
+        for key in ["persona", "assignedToYou", "unsettledWork"] {
             let mut original = context();
             if key == "persona" {
                 original[key]["content"] = json!("人".repeat(12_000));
@@ -298,6 +332,76 @@ mod tests {
             );
             assert!(serde_json::to_vec(&reply).unwrap().len() < 2048);
         }
+    }
+
+    #[test]
+    fn preview_pins_fit_without_losing_identity_or_changing_full_records() {
+        for count in [3, 12] {
+            let mut original = context();
+            let pins: Vec<_> = (0..count).map(|i| json!({
+                "id":uuid::Uuid::new_v4().to_string(),"kind":"memory",
+                "title":format!("Synthetic core {i}"),"status":"active","revision":3,
+                "updatedAt":"2026-11-17T00:00:00Z","content":"記憶🪽\\\"".repeat(250),
+                "truncated":false,"pinnedBy":"synthetic-owner","pinnedAt":"2026-11-17T00:00:00Z"
+            })).collect();
+            original["pinned"] = json!(pins);
+            original["pinnedSummary"] =
+                json!({"total":count,"shown":count,"inactive":0,"limit":12});
+            let reply = result("mother_get_context", original.clone());
+            let value = data(&reply);
+            assert!(fits(&value, BUDGET));
+            assert!(fits(&reply, READ_REPLY_BYTES));
+            assert_eq!(value["persona"], original["persona"]);
+            assert_eq!(value["pinnedSummary"], original["pinnedSummary"]);
+            assert_eq!(value["responseBudget"]["pinnedContentTruncated"], true);
+            let actual = value["pinned"].as_array().unwrap();
+            assert_eq!(actual.len(), count);
+            for (pin, before) in actual.iter().zip(&pins) {
+                let mut expected = before.clone();
+                let content = pin["content"].as_str().unwrap();
+                assert!(before["content"].as_str().unwrap().starts_with(content));
+                assert!(!content.is_empty());
+                assert!(content.len() < before["content"].as_str().unwrap().len());
+                expected["content"] = pin["content"].clone();
+                expected["truncated"] = json!(true);
+                assert_eq!(*pin, expected);
+                assert_eq!(data(&result("mother_get_record", before.clone())), *before);
+            }
+            assert_eq!(
+                data(&result("mother_get_context", original)),
+                value,
+                "deterministic"
+            );
+        }
+    }
+
+    #[test]
+    fn preview_pin_metadata_that_cannot_fit_still_fails_explicitly() {
+        let mut original = context();
+        original["pinned"] = json!([{"id":"synthetic","title":"x".repeat(BUDGET),"content":"small","truncated":false}]);
+        let reply = serde_json::to_value(result("mother_get_context", original)).unwrap();
+        assert_eq!(
+            reply["structuredContent"]["error"]["code"],
+            "READ_RESULT_TOO_LARGE"
+        );
+    }
+
+    #[test]
+    fn preview_small_pins_are_unchanged_and_filtered_reads_report_compaction() {
+        let mut original = context();
+        original["records"] = json!([]);
+        original["pinned"] =
+            json!([{"id":"synthetic-pin","content":"Core context","truncated":false}]);
+        assert_eq!(
+            data(&result("mother_get_context", original.clone())),
+            original
+        );
+        original["pinned"][0]["content"] = json!("記憶🪽".repeat(1000));
+        let value = data(&result("mother_get_context", original));
+        assert_eq!(value["responseBudget"]["omittedItems"], 0);
+        assert_eq!(value["responseBudget"]["reason"], "byte_budget");
+        assert_eq!(value["pinned"][0]["truncated"], true);
+        assert!(fits(&value, BUDGET));
     }
 
     #[test]

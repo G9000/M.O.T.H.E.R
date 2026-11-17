@@ -12,6 +12,9 @@ use tempfile::TempDir;
 #[path = "mcp/capabilities.rs"]
 mod capabilities;
 
+#[path = "mcp/pinned_budget.rs"]
+mod pinned_budget;
+
 struct Client {
     child: Child,
     stdin: ChildStdin,
