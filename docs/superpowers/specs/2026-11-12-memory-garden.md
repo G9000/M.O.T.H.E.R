@@ -1,4 +1,4 @@
-# Memory garden (design reference, not built)
+# Memory garden (design reference; first version built)
 
 **Idea.** A way to see and walk through what M.O.T.H.E.R holds: a sunny wildflower meadow where each record is a flower. Each kind grows its own species (memories are daisies, decisions tulips, tasks poppies, checkpoints bellflowers, artifacts sunflowers, actions roses); pinned records float as lotuses on a pond around a candle. Record flowers are larger and more saturated than the wild ones and carry a small sun-glint. Clicking a flower flies to it and opens its record, with saved links drawn as threads and "similar in meaning" links as dots. A slider replays the week; search and a harness filter dim what does not match; a List panel is the keyboard-accessible way in.
 
@@ -6,4 +6,6 @@
 
 **If it is built.** A read-only `mother garden` command inside the existing executable: a local web server (axum on the existing tokio runtime) bound to 127.0.0.1 on a random port, opened with a one-time token, with origin checks and no outside requests; Three.js bundled into the binary rather than loaded from a CDN. It would read the store directly, as the inbox TUI does. "Similar in meaning" links would come from the local search model. Tending from the garden (pin, hand off, retract, launch) is a later step that needs request-forgery protection. A terminal (ASCII) garden inside the TUI was also discussed as a lighter companion with no server at all.
 
-**Decision.** Not building it for now; the mockup is kept as the reference for the look and interactions.
+**Decision (12 November 2026).** Not building it for now; the mockup is kept as the reference for the look and interactions.
+
+**Update (16 November 2026).** A read-only first version is built as `mother garden explore`; see [the explorer guide](../../garden-explorer.md). It follows this note with three differences: the command sits under the `garden` group, the server is a small loopback listener in the executable rather than axum (no new dependencies), and it serves one snapshot taken at start instead of holding the database open. "Similar in meaning" links, tending from the garden and the terminal garden are still not built. The same day its page was replaced by a walkable painted valley built on Patch's Painted valley (MIT code, CC0 art), so the mockup is now the record of the original idea and no longer the look; the time slider, harness filter and link threads were not carried over. On 17 November that valley was replaced in turn by the garden's own land, a hill whose spiral path is the timeline of records, keeping only the borrowed way of drawing. The status paragraph above describes the mockup.
