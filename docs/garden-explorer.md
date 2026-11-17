@@ -14,7 +14,7 @@ Each record of the native v1 view is one tall flower beside the path, drawn in f
 | Action | pink rose |
 | Pinned (any kind) | a stone lantern in the ring round the start, not on the path |
 
-A flower stands taller the more often its record has been revised. Retracted, superseded and cancelled records are grey and low; tasks in progress or blocked, and actions pending or unknown, slowly pulse. Labels over the path mark where each month begins, and the month you are walking through is shown at the bottom left. The path is as long as the records need, so the hill grows with the garden.
+A flower stands taller the more often its record has been revised. Retracted, superseded and cancelled records are grey and low; tasks in progress or blocked, and actions pending or unknown, slowly pulse. A wooden signpost beside the path marks where each month begins, and the month you are walking through is shown at the bottom left. The path is as long as the records need, so the hill grows with the garden. The garden opens in the gold light of a summer evening and stays there; the lanterns' windows glow, and fireflies come out over the flowers as the sun goes down.
 
 ## Open it
 
@@ -33,7 +33,7 @@ The database must have the v1 view enabled (`garden compat-init`). Graph-only ob
 - Click the picture to walk: the mouse looks, `W A S D` move, Shift runs, Space jumps. Esc gives the mouse back.
 - Look at a flower within a few steps and press `E`, or click, to read its record: text, status, handoff, next step, linked records and recent revisions. Linked records are buttons that take you to them.
 - `L` opens the list of every record, grouped by kind, with a search box; choosing one stands you on the path beside its flower. The list works from the keyboard and needs no walking.
-- `T` and `1`–`4` change the time of day; `P` turns the paint finish off and on.
+- `T` and `1`–`4` change the time of day, `0` lets the evening pass on to sunset, and `,` and `.` nudge the hour; `P` turns the paint finish off and on.
 
 Nothing can be changed from the garden. Pinning, handoffs and review stay with the existing owner tools.
 

@@ -82,7 +82,8 @@ const quality = params.get('quality') ?? 'high';
 const EXTENT = 1280;
 const GROUND = { extent: EXTENT, extentRes: EXTENT, centre: [0, 0] };
 const FLOOR_SIZE = quality === 'low' ? 1024 : 1536;
-const hour0 = params.has('hour') ? Number(params.get('hour')) : 15.5;
+// the garden is seen in the low gold light of a late summer evening; T and 1 to 4 change it
+const hour0 = params.has('hour') ? Number(params.get('hour')) : 19.2;
 const groundJob = offThread({ job: 'ground', world: WORLD, ...GROUND }, () => bakeGround({ heightAt, paint, ...GROUND }));
 const floorJob = offThread({ job: 'floor', world: WORLD, size: FLOOR_SIZE }, () => ({ pixels: paintFloor(FLOOR_SIZE) }));
 await stage(0.04, 'Painting the sky');
@@ -203,7 +204,7 @@ scene.add(stones.group);
 if (quality !== 'low' && params.get('seeds') !== '0') scene.add(createFluff(field, quality === 'medium' ? 200 : 320));
 // time passes: the afternoon you start in is sunset twenty minutes later. ?drift=0 holds the hour; T and 1 to 4
 // pick a time of day and hold it there, 0 lets it pass again, and , and . nudge it.
-let drift = params.has('drift') ? Number(params.get('drift')) : 1;
+let drift = params.has('drift') ? Number(params.get('drift')) : 0;
 const TIMES = [
   { hour: 12.5, name: 'Noon' },
   { hour: 15.5, name: 'Afternoon' },
@@ -512,7 +513,7 @@ await stage(0.9, 'Warming up');
   Object.assign(player, { x: x0, z: z0, vx: 0, vz: 0, walked: 0, stride: 0, bob: 0, yaw: Math.atan2(-HERO[0], -HERO[1]), pitch: 0.04 });
   field.reset();
   clock = 0;
-  setHour(params.has('hour') ? Number(params.get('hour')) : 15.5);
+  setHour(hour0);
   tick(1 / 60);
   await gpuDone();
 }

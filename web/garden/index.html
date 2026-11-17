@@ -429,6 +429,167 @@
         color: var(--muted);
         margin: 12px 0 0;
       }
+
+      /* ---- the painted look: paper panels, ink and gold, signs that belong in the garden ---------------------- */
+      :root {
+        --paper: #f6eedb;
+        --paper-edge: #e4d4b0;
+        --ink: #2c2318;
+        --ink-soft: #5b4a36;
+        --ink-faint: #7d6a52;
+        --gold: #9a6514;
+        --accent: #8a5a1c;
+        --line: rgba(80, 56, 28, 0.28);
+        --grain: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='160' height='160'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='3' stitchTiles='stitch'/%3E%3CfeColorMatrix values='0 0 0 0 0.35 0 0 0 0 0.25 0 0 0 0 0.12 0 0 0 0.09 0'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
+      }
+      .glass {
+        color: var(--ink);
+        background: var(--grain), radial-gradient(ellipse at 30% 0%, #fbf6e9 0%, var(--paper) 55%, #efe3c6 100%);
+        border: 1px solid var(--paper-edge);
+        border-radius: 6px 14px 8px 12px;
+        box-shadow:
+          0 1px 0 rgba(255, 255, 255, 0.6) inset,
+          0 0 0 1px rgba(80, 56, 28, 0.06),
+          0 14px 34px rgba(40, 28, 10, 0.32);
+        backdrop-filter: none;
+      }
+      .card h2 {
+        font-family: Georgia, 'Iowan Old Style', serif;
+        font-weight: 600;
+        color: var(--ink);
+        letter-spacing: 0.005em;
+      }
+      .card h2::after {
+        content: '';
+        display: block;
+        width: 54px;
+        height: 3px;
+        margin-top: 9px;
+        border-radius: 3px;
+        background: linear-gradient(90deg, var(--gold), rgba(154, 101, 20, 0));
+      }
+      .content {
+        font-family: Georgia, 'Iowan Old Style', serif;
+        font-size: 15.5px;
+        line-height: 1.6;
+        color: var(--ink);
+      }
+      .sub,
+      .hist .r {
+        color: var(--ink-faint);
+      }
+      .note {
+        background: rgba(154, 101, 20, 0.09);
+        border-left: 3px solid rgba(154, 101, 20, 0.55);
+        border-radius: 2px 8px 8px 2px;
+      }
+      .note b,
+      .rel h3,
+      .panel h3 {
+        color: var(--ink-faint);
+      }
+      .pill {
+        border-color: var(--line);
+        color: var(--ink-soft);
+        background: rgba(255, 255, 255, 0.35);
+      }
+      .pill.kind {
+        color: #1d1710;
+        border-color: rgba(40, 28, 10, 0.25);
+        box-shadow: 0 1px 0 rgba(255, 255, 255, 0.5) inset;
+      }
+      .chip {
+        background: rgba(255, 252, 244, 0.7);
+        border-color: var(--line);
+        color: var(--ink);
+      }
+      .chip:hover,
+      .panel .item:hover {
+        border-color: var(--accent);
+        background: rgba(154, 101, 20, 0.1);
+      }
+      .panel input {
+        background: rgba(255, 252, 244, 0.85);
+        border-color: var(--line);
+        color: var(--ink);
+        font-family: Georgia, serif;
+      }
+      .panel h3 {
+        border-bottom: 1px solid var(--line);
+        padding-bottom: 3px;
+      }
+      .panel .item {
+        color: var(--ink);
+      }
+      .panel .item.off {
+        color: var(--ink-faint);
+        text-decoration: line-through rgba(125, 106, 82, 0.5);
+      }
+      .btn {
+        color: var(--ink);
+        background: var(--grain), var(--paper);
+        border: 1px solid var(--paper-edge);
+        border-radius: 5px 10px 6px 9px;
+        box-shadow: 0 6px 18px rgba(40, 28, 10, 0.25);
+      }
+      .badge {
+        color: var(--ink-soft);
+        background: var(--grain), rgba(246, 238, 219, 0.92);
+        border-color: var(--paper-edge);
+      }
+      /* the flower you are looking at: its name on a small paper tag */
+      .label {
+        color: var(--ink);
+        background: var(--grain), var(--paper);
+        border: 1px solid var(--paper-edge);
+        border-radius: 4px 9px 5px 8px;
+        box-shadow: 0 4px 14px rgba(40, 28, 10, 0.3);
+        font-family: Georgia, serif;
+      }
+      /* a month, painted on its signpost's board */
+      .label.bed {
+        transform: translate(-50%, -50%);
+        color: #fff8e8;
+        background: none;
+        border: 0;
+        box-shadow: none;
+        font: italic 600 16px Georgia, serif;
+        text-shadow:
+          0 1px 0 rgba(60, 36, 14, 0.9),
+          0 0 8px rgba(60, 36, 14, 0.75);
+      }
+      #era {
+        font-family: Georgia, serif;
+        color: #fff6df;
+        text-shadow:
+          0 1px 0 rgba(60, 36, 14, 0.8),
+          0 0 14px rgba(60, 36, 14, 0.6);
+      }
+      #era::before {
+        content: '';
+        display: inline-block;
+        width: 22px;
+        height: 1px;
+        margin: 0 10px 6px 0;
+        vertical-align: middle;
+        background: rgba(255, 246, 223, 0.8);
+      }
+      #hint {
+        font-family: Georgia, serif;
+        font-style: italic;
+      }
+      #aim {
+        width: 5px;
+        height: 5px;
+        margin: -2.5px;
+        background: rgba(255, 246, 223, 0.95);
+        box-shadow: 0 0 0 1px rgba(60, 36, 14, 0.5), 0 0 8px rgba(255, 220, 160, 0.6);
+      }
+      #loading {
+        color: var(--ink-soft);
+        background: radial-gradient(ellipse at 50% 40%, #fbf3df 0%, #efe0bd 70%, #e2cc9c 100%);
+        font: italic 22px Georgia, serif;
+      }
     </style>
   </head>
   <body>

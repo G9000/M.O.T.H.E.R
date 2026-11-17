@@ -31,8 +31,12 @@ const PAINT = {
   dark: [[0.26, 0.14, 0.2], [0.12, 0.07, 0.12]],
   brown: [[0.46, 0.28, 0.14], [0.24, 0.14, 0.1]],
   green: [[0.38, 0.62, 0.28], [0.15, 0.33, 0.22]],
+  leaf: [[0.42, 0.7, 0.3], [0.13, 0.33, 0.24]],
+  pale: [[1.0, 0.96, 0.78], [0.72, 0.68, 0.6]],
+  wood: [[0.56, 0.4, 0.26], [0.27, 0.2, 0.2]],
+  plank: [[0.78, 0.62, 0.42], [0.42, 0.32, 0.3]],
   stone: [[0.74, 0.72, 0.66], [0.4, 0.41, 0.52]],
-  flame: [[2.2, 1.5, 0.7], [1.9, 1.2, 0.55]],
+  flame: [[2.6, 1.7, 0.75], [2.2, 1.4, 0.6]],
 };
 // The line is drawn where two different small alphas meet (see lib/frame.js): one per part of a flower.
 const INK = { outer: 0.05, inner: 0.08, core: 0.11, green: 0.17 };
@@ -98,22 +102,40 @@ function readRecords(snapshot) {
 }
 
 // ---- the flowers ----------------------------------------------------------------------------------------------
-const SPHERE = new THREE.SphereGeometry(1, 12, 7);
+const SPHERE = new THREE.SphereGeometry(1, 14, 9);
 const TUBE = new THREE.CylinderGeometry(1, 1, 1, 8);
-const CONE = new THREE.ConeGeometry(1, 1, 10, 1, true);
+const TAPER = new THREE.CylinderGeometry(0.55, 1, 1, 8);
+const CONE = new THREE.ConeGeometry(1, 1, 14, 3, true);
 const M = () => new THREE.Matrix4();
 
-/** One part of a flower: a shape, put in its place, in one paint and with one number for the line. */
-function part(shape, matrix, paint, ink) {
-  const g = shape.clone().applyMatrix4(matrix);
-  g.deleteAttribute('uv');
-  const n = g.attributes.position.count;
+/** Paint graded from a part's foot (t = 0) to its tip (t = 1): deeper at the foot, as a painter lays it in. */
+function grade(paint, t, deep = 0.3) {
+  const [l, s] = PAINT[paint];
+  const k = 1 - deep * (1 - t);
+  // (the foot is deeper and a little cooler, not only darker)
+  return [
+    [l[0] * k, l[1] * k, l[2] * (k + (1 - k) * 0.35)],
+    [s[0] * k, s[1] * k, s[2] * (k + (1 - k) * 0.35)],
+  ];
+}
+
+/** One part of a flower: a shape, put in its place, painted from foot to tip, with one number for the line. */
+function part(shape, matrix, paint, ink, deep = 0.25) {
+  const g = shape.clone();
+  g.computeBoundingBox();
+  const { min, max } = g.boundingBox;
+  const span = max.y - min.y || 1;
+  const local = g.attributes.position;
+  const n = local.count;
   const lit = new Float32Array(n * 3);
   const shade = new Float32Array(n * 3);
   for (let i = 0; i < n; i++) {
-    lit.set(PAINT[paint][0], i * 3);
-    shade.set(PAINT[paint][1], i * 3);
+    const [a, b] = grade(paint, (local.getY(i) - min.y) / span, deep);
+    lit.set(a, i * 3);
+    shade.set(b, i * 3);
   }
+  g.applyMatrix4(matrix);
+  g.deleteAttribute('uv');
   g.setAttribute('aLit', new THREE.BufferAttribute(lit, 3));
   g.setAttribute('aShade', new THREE.BufferAttribute(shade, 3));
   g.setAttribute('aInk', new THREE.BufferAttribute(new Float32Array(n).fill(ink), 1));
@@ -121,70 +143,163 @@ function part(shape, matrix, paint, ink) {
 }
 const place = (x, y, z, sx, sy, sz, rz = 0, rx = 0) => M().makeTranslation(x, y, z).multiply(M().makeRotationZ(rz)).multiply(M().makeRotationX(rx)).multiply(M().makeScale(sx, sy, sz));
 
-/** A ring of petals round the top of the stem, each hinged at the middle and tilted up. */
-function ring(parts, n, len, wid, tilt, paint, ink, { y = 0, r0 = 0, turn = 0, thick = 0.022 } = {}) {
+/**
+ * One petal (or leaf), lying along +x from the origin with its face up: wide in the middle and pointed or round at
+ * the tip, cupped across, curled along its length, and painted from a deep foot to a light tip.
+ */
+function petal(paint, ink, { len, wid, cup = 0.3, curl = 0, round = 0.6, wave = 0, deep = 0.45 }) {
+  const NU = 7;
+  const NV = 4;
+  const pos = [];
+  const lit = [];
+  const shade = [];
+  const idx = [];
+  for (let i = 0; i <= NU; i++) {
+    const u = i / NU;
+    // the outline: narrow at the foot, widest past the middle, closing to a point or a round tip
+    // (a round petal keeps its width almost to the tip and closes in a curve; a pointed one narrows to a point)
+    const w = wid * 0.5 * Math.pow(Math.sin(Math.PI * Math.pow(u, 0.62)), 1 - 0.7 * round) * (round + (1 - round) * (1 - u * u)) + wid * 0.04;
+    const [a, b] = grade(paint, u, deep);
+    for (let j = 0; j <= NV; j++) {
+      const v = (j / NV) * 2 - 1;
+      const x = u * len;
+      const z = v * w;
+      const y = cup * w * v * v + curl * len * u * u + wave * w * Math.sin(v * 3.1 + u * 5.0) * u;
+      pos.push(x, y, z);
+      // (the middle vein a shade deeper than the blade)
+      const vein = 1 - 0.1 * (1 - Math.abs(v)) * (1 - u);
+      lit.push(a[0] * vein, a[1] * vein, a[2] * vein);
+      shade.push(b[0], b[1], b[2]);
+    }
+  }
+  for (let i = 0; i < NU; i++) {
+    for (let j = 0; j < NV; j++) {
+      const p = i * (NV + 1) + j;
+      idx.push(p, p + NV + 1, p + 1, p + 1, p + NV + 1, p + NV + 2);
+    }
+  }
+  const g = new THREE.BufferGeometry();
+  g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
+  g.setAttribute('aLit', new THREE.Float32BufferAttribute(lit, 3));
+  g.setAttribute('aShade', new THREE.Float32BufferAttribute(shade, 3));
+  g.setAttribute('aInk', new THREE.Float32BufferAttribute(new Float32Array(pos.length / 3).fill(ink), 1));
+  g.setIndex(idx);
+  g.computeVertexNormals();
+  return g;
+}
+
+/** A ring of petals round a centre (by default the top of a one-metre stem), each tilted up from flat by `tilt`. */
+function ring(parts, n, tilt, paint, ink, shape, { base = M().makeTranslation(0, 1, 0), y = 0, r0 = 0, turn = 0, jitter = 0.08 } = {}) {
   for (let i = 0; i < n; i++) {
-    const m = M()
-      .makeTranslation(0, 1 + y, 0)
-      .multiply(M().makeRotationY((i / n) * TAU + turn))
-      .multiply(M().makeRotationZ(tilt))
-      .multiply(M().makeTranslation(r0 + len / 2, 0, 0))
-      .multiply(M().makeScale(len / 2, thick, wid / 2));
-    parts.push(part(SPHERE, m, paint, ink));
+    const m = base
+      .clone()
+      .multiply(M().makeTranslation(0, y, 0))
+      .multiply(M().makeRotationY((i / n) * TAU + turn + Math.sin(i * 12.9898) * jitter))
+      .multiply(M().makeRotationZ(tilt + Math.sin(i * 78.233) * jitter * 0.6))
+      .multiply(M().makeTranslation(r0, 0, 0));
+    parts.push(petal(paint, ink, shape).applyMatrix4(m));
   }
 }
 
-/** A whole flower one metre tall, its foot at the origin: a stem, two leaves and the head of its kind. */
-function flowerGeometry(kind) {
-  if (kind === 'pinned') {
-    // the pinned core: a stone lantern with a light in it
-    const stone = [
-      part(TUBE, place(0, 0.05, 0, 0.2, 0.1, 0.2), 'stone', INK.green),
-      part(TUBE, place(0, 0.38, 0, 0.075, 0.56, 0.075), 'stone', INK.inner),
-      part(TUBE, place(0, 0.68, 0, 0.19, 0.05, 0.19), 'stone', INK.green),
-      part(TUBE, place(0, 0.8, 0, 0.12, 0.2, 0.12), 'flame', INK.core),
-      part(CONE, place(0, 0.99, 0, 0.27, 0.2, 0.27), 'stone', INK.outer),
-      part(SPHERE, place(0, 1.1, 0, 0.045, 0.045, 0.045), 'stone', INK.inner),
-    ];
-    const lantern = mergeGeometries(stone);
-    for (const g of stone) g.dispose();
-    return lantern;
+/** Little round dots round a centre: stamens, seeds. */
+function dots(parts, n, radius, size, paint, ink, { y = 1.0, lift = 0, base = M() } = {}) {
+  for (let i = 0; i < n; i++) {
+    const a = i * 2.39996;
+    const r = radius * Math.sqrt((i + 0.5) / n);
+    parts.push(part(SPHERE, base.clone().multiply(place(Math.cos(a) * r, y + lift * (1 - r / radius), Math.sin(a) * r, size, size, size)), paint, ink, 0.1));
   }
-  const parts = [part(TUBE, place(0, 0.5, 0, 0.016, 1, 0.016), 'green', INK.green)];
-  parts.push(part(SPHERE, place(0.13, 0.3, 0, 0.15, 0.014, 0.055, 0.55), 'green', INK.green));
-  parts.push(part(SPHERE, place(-0.12, 0.5, 0.02, 0.14, 0.014, 0.05, -0.6), 'green', INK.green));
+}
+
+/** A stem with two real leaves and, at the top, the head of its kind: one metre tall, its foot at the origin. */
+function flowerGeometry(kind) {
+  if (kind === 'pinned') return lanternGeometry();
+  const parts = [part(TAPER, place(0, 0.5, 0, 0.017, 1, 0.017), 'green', INK.green, 0.35)];
+  // leaves: long, pointed, arching out and down from the stem
+  const leaf = { len: 0.32, wid: 0.1, cup: 0.25, curl: -0.25, round: 0.15, deep: 0.35 };
+  parts.push(petal('leaf', INK.green, leaf).applyMatrix4(M().makeTranslation(0, 0.26, 0).multiply(M().makeRotationZ(0.75))));
+  parts.push(petal('leaf', INK.green, { ...leaf, len: 0.27 }).applyMatrix4(M().makeTranslation(0, 0.48, 0).multiply(M().makeRotationY(2.6)).multiply(M().makeRotationZ(0.65))));
+  // (a small green cup under every head)
+  if (kind !== 'checkpoint') ring(parts, 5, -0.5, 'leaf', INK.green, { len: 0.07, wid: 0.045, cup: 0.4, round: 0.3 }, { y: -0.015 });
+
   if (kind === 'memory') {
-    ring(parts, 13, 0.25, 0.085, 0.16, kind, INK.outer);
-    parts.push(part(SPHERE, place(0, 1.02, 0, 0.075, 0.045, 0.075), 'gold', INK.core));
+    // a daisy: two rings of narrow rays round a domed gold heart
+    ring(parts, 14, 0.12, kind, INK.outer, { len: 0.26, wid: 0.06, cup: 0.35, curl: -0.08, round: 0.9 }, { r0: 0.05 });
+    ring(parts, 11, 0.32, kind, INK.inner, { len: 0.2, wid: 0.055, cup: 0.35, curl: -0.05, round: 0.9 }, { r0: 0.04, y: 0.01, turn: 0.14 });
+    parts.push(part(SPHERE, place(0, 1.025, 0, 0.068, 0.045, 0.068), 'gold', INK.core, 0.4));
   } else if (kind === 'decision') {
-    ring(parts, 3, 0.25, 0.2, 1.2, kind, INK.outer, { r0: 0.02, thick: 0.03 });
-    ring(parts, 3, 0.24, 0.19, 1.28, kind, INK.inner, { r0: 0.015, turn: TAU / 6, thick: 0.03 });
+    // a tulip: six broad cupped petals closing into a cup
+    ring(parts, 3, 1.18, kind, INK.outer, { len: 0.27, wid: 0.2, cup: 0.9, curl: 0.15, round: 0.75, deep: 0.55 }, { r0: 0.015 });
+    ring(parts, 3, 1.3, kind, INK.inner, { len: 0.25, wid: 0.18, cup: 0.9, curl: 0.12, round: 0.75, deep: 0.55 }, { r0: 0.01, turn: TAU / 6 });
   } else if (kind === 'task') {
-    ring(parts, 4, 0.23, 0.26, 0.5, kind, INK.outer);
-    ring(parts, 4, 0.19, 0.22, 0.8, kind, INK.inner, { y: 0.01, turn: TAU / 8 });
-    parts.push(part(SPHERE, place(0, 1.04, 0, 0.05, 0.05, 0.05), 'dark', INK.core));
+    // a poppy: four wide crinkled petals, a dark heart and a ring of stamens
+    ring(parts, 4, 0.22, kind, INK.outer, { len: 0.25, wid: 0.3, cup: 0.22, curl: 0.06, round: 1, wave: 0.14, deep: 0.55 });
+    ring(parts, 4, 0.5, kind, INK.inner, { len: 0.2, wid: 0.25, cup: 0.3, curl: 0.06, round: 1, wave: 0.12, deep: 0.55 }, { y: 0.01, turn: TAU / 8 });
+    parts.push(part(SPHERE, place(0, 1.045, 0, 0.042, 0.04, 0.042), 'dark', INK.core, 0.1));
+    dots(parts, 14, 0.065, 0.011, 'dark', INK.core, { y: 1.05, lift: 0.01 });
   } else if (kind === 'checkpoint') {
+    // a bellflower: three bells nodding from short arching stalks, each mouth flaring into five points
+    parts.push(part(TUBE, place(0, 1.0, 0, 0.012, 0.12, 0.012), 'green', INK.green));
     for (let i = 0; i < 3; i++) {
       const a = i * 2.1 + 0.4;
-      const x = Math.cos(a) * 0.11;
-      const z = Math.sin(a) * 0.11;
-      parts.push(part(CONE, place(x, 0.9 - i * 0.03, z, 0.085, 0.17, 0.085), kind, i === 1 ? INK.inner : INK.outer));
+      const hang = M()
+        .makeRotationY(-a)
+        .multiply(M().makeTranslation(0.15, 0.98 - i * 0.06, 0))
+        .multiply(M().makeRotationZ(-0.35));
+      parts.push(part(TUBE, M().makeRotationY(-a).multiply(place(0.075, 1.0 - i * 0.03, 0, 0.007, 0.16, 0.007, -1.1)), 'green', INK.green));
+      parts.push(part(CONE, hang.clone().multiply(place(0, -0.1, 0, 0.105, 0.22, 0.105)), kind, i === 1 ? INK.inner : INK.outer, 0.45));
+      ring(parts, 5, -0.55, kind, i === 1 ? INK.inner : INK.outer, { len: 0.08, wid: 0.08, cup: -0.3, round: 0.2, deep: 0.1 }, { base: hang.clone().multiply(M().makeTranslation(0, -0.205, 0)), r0: 0.085 });
+      dots(parts, 1, 0.001, 0.018, 'pale', INK.core, { base: hang, y: -0.19 });
     }
   } else if (kind === 'artifact') {
+    // a sunflower: two rings of golden rays round a broad seed disc, the whole head turned to look out
     const head = [];
-    ring(head, 16, 0.19, 0.065, 0.08, kind, INK.outer, { r0: 0.13 });
-    head.push(part(TUBE, place(0, 1.0, 0, 0.15, 0.05, 0.15), 'brown', INK.core));
-    // a sunflower looks out, not up
+    const disc = { base: M().makeTranslation(0, 1, 0) };
+    ring(head, 18, 0.05, kind, INK.outer, { len: 0.19, wid: 0.07, cup: 0.3, curl: -0.08, round: 0.4 }, { ...disc, r0: 0.12 });
+    ring(head, 14, 0.18, kind, INK.inner, { len: 0.16, wid: 0.07, cup: 0.3, curl: -0.05, round: 0.4 }, { ...disc, r0: 0.11, y: 0.008, turn: 0.11 });
+    head.push(part(SPHERE, place(0, 1.0, 0, 0.14, 0.035, 0.14), 'brown', INK.core, 0.5));
+    dots(head, 26, 0.12, 0.012, 'dark', INK.core, { y: 1.026, lift: 0.012 });
     const tip = M().makeTranslation(0, 1, 0).multiply(M().makeRotationX(0.85)).multiply(M().makeTranslation(0, -1, 0.04));
     for (const g of head) parts.push(g.applyMatrix4(tip));
   } else if (kind === 'action') {
-    ring(parts, 5, 0.2, 0.19, 0.6, kind, INK.outer);
-    ring(parts, 4, 0.15, 0.15, 1.0, kind, INK.inner, { y: 0.02, turn: 0.5 });
-    ring(parts, 3, 0.1, 0.11, 1.3, kind, INK.outer, { y: 0.035, turn: 1.1 });
+    // a rose: rings of rounded petals, each tighter, more upright and more cupped than the last
+    const rings = [
+      [5, 0.5, 0.17, 0.17, 0.5, 0],
+      [5, 0.85, 0.14, 0.14, 0.7, 0.01],
+      [4, 1.15, 0.11, 0.12, 0.9, 0.02],
+      [3, 1.4, 0.08, 0.1, 1.1, 0.03],
+    ];
+    rings.forEach(([count, tilt, len, wid, cup, y], k) => ring(parts, count, tilt, kind, k % 2 ? INK.inner : INK.outer, { len, wid, cup, curl: 0.18, round: 1, deep: 0.5 }, { y, turn: k * 0.7 }));
   }
   const merged = mergeGeometries(parts);
   for (const g of parts) g.dispose();
   return merged;
+}
+
+/** The pinned core: a stone lantern, its window lit from inside. */
+function lanternGeometry() {
+  const stone = [
+    part(TUBE, place(0, 0.04, 0, 0.24, 0.08, 0.24), 'stone', INK.green, 0.3),
+    part(TAPER, place(0, 0.36, 0, 0.08, 0.56, 0.08), 'stone', INK.inner, 0.3),
+    part(TUBE, place(0, 0.66, 0, 0.21, 0.05, 0.21), 'stone', INK.green, 0.2),
+    part(TUBE, place(0, 0.79, 0, 0.13, 0.21, 0.13), 'flame', INK.core, 0.0),
+    part(CONE, place(0, 0.98, 0, 0.3, 0.2, 0.3), 'stone', INK.outer, 0.3),
+    part(SPHERE, place(0, 1.1, 0, 0.05, 0.05, 0.05), 'stone', INK.inner, 0.2),
+  ];
+  const lantern = mergeGeometries(stone);
+  for (const g of stone) g.dispose();
+  return lantern;
+}
+
+/** A month's marker beside the path: a weathered post with a plank across it. */
+function signGeometry() {
+  const wood = [
+    part(TUBE, place(0, 0.62, 0, 0.045, 1.24, 0.045), 'wood', INK.green, 0.35),
+    part(TUBE, place(0, 1.06, 0.06, 0.34, 0.04, 0.12, 0, Math.PI / 2), 'plank', INK.outer, 0.15),
+    part(TUBE, place(0, 1.27, 0, 0.06, 0.04, 0.06), 'wood', INK.inner, 0.2),
+  ];
+  const sign = mergeGeometries(wood);
+  for (const g of wood) g.dispose();
+  return sign;
 }
 
 const vertex = /* glsl */ `
@@ -210,7 +325,7 @@ void main() {
   // a slow nod in the wind, more at the head than the foot
   float up = max(w.y - foot.y, 0.0);
   float sway = sin(uTime * 1.5 + foot.x * 0.61 + foot.z * 0.47) + 0.5 * sin(uTime * 2.7 + foot.z * 0.9);
-  // (stone does not nod)
+  // (stone and wood do not nod)
   if (aState > 2.5) sway = 0.0;
   w.x += sway * 0.03 * up * up;
   w.z += sway * 0.018 * up * up;
@@ -236,10 +351,11 @@ in float vFocus;
 layout(location = 0) out vec4 outC;
 void main() {
   vec3 N = normalize(vN);
-  if (dot(N, uCamPos - vWorld) < 0.0) N = -N;
-  // in the light or out of it, and nothing between, as the wanderer is drawn
+  vec3 V = normalize(uCamPos - vWorld);
+  if (dot(N, V) < 0.0) N = -N;
+  // in the light or out of it, with a short soft turn between, as a painted figure is
   float open = smoothstep(0.35, 0.6, openAt(vWorld.xz));
-  float lit = smoothstep(0.0, 0.035, dot(N, uSunDir) + 0.06) * open;
+  float lit = smoothstep(-0.02, 0.09, dot(N, uSunDir) + 0.06) * open;
   vec3 litPaint = vLit;
   vec3 shadePaint = vShade;
   if (vState > 0.5 && vState < 1.5) {
@@ -251,10 +367,68 @@ void main() {
   float grey = dot(uSkyColor, vec3(0.333));
   vec3 sky = mix(uSkyColor, vec3(grey), 0.8) * 1.15 + 0.2;
   vec3 col = mix(shadePaint * sky, litPaint * sun, lit);
+  // thin petals glow where the low sun comes through them from behind
+  float through = pow(max(dot(-V, uSunDir), 0.0), 3.0) * (1.0 - lit) * open;
+  col += litPaint * uSunColor * 0.32 * through * step(vInk, 0.12);
+  // and catch a little of the sky along their edges
+  float rim = pow(1.0 - abs(dot(N, V)), 3.0);
+  col += litPaint * uSkyColor * 0.18 * rim;
   // unsettled work breathes
   if (vState > 1.5 && vState < 2.5) col *= 1.0 + 0.22 * sin(uTime * 2.6 + vWorld.x);
   col *= 1.0 + 0.3 * vFocus;
   outC = vec4(applyFog(col, vWorld), vInk);
+}
+`;
+
+// ---- light in the garden: lantern glow and fireflies ------------------------------------------------------------
+// (camera-facing quads, as the valley's own seed fluff is drawn: point sprites do not reach this frame)
+const glowVertex = /* glsl */ `
+uniform float uTime;
+uniform vec3 uSunDir;
+in vec4 aHome;
+in vec2 aInfo;
+out vec2 vCorner;
+out float vKind;
+out float vBright;
+void main() {
+  vec3 p = aHome.xyz;
+  float seed = aHome.w;
+  float dusk = 1.0 - smoothstep(0.04, 0.32, uSunDir.y);
+  if (aInfo.y > 0.5) {
+    // a firefly wanders round its home, blinking slowly, and only once the light goes
+    float t = uTime * (0.25 + 0.2 * fract(seed * 7.3)) + seed * 40.0;
+    p += vec3(sin(t) * 0.9 + sin(t * 2.3) * 0.25, sin(t * 1.7) * 0.35, cos(t * 0.8) * 0.9);
+    float blink = smoothstep(0.35, 1.0, sin(uTime * (1.1 + fract(seed * 3.1)) + seed * 17.0));
+    vBright = dusk * (0.45 + 0.55 * blink);
+  } else {
+    // a lantern's window: always lit, and plainly so as the sun goes down
+    vBright = 0.35 + 0.65 * dusk + 0.05 * sin(uTime * 9.0 + seed * 30.0);
+  }
+  vKind = aInfo.y;
+  vCorner = position.xy;
+  vec3 right = vec3(viewMatrix[0][0], viewMatrix[1][0], viewMatrix[2][0]);
+  vec3 up = vec3(viewMatrix[0][1], viewMatrix[1][1], viewMatrix[2][1]);
+  float size = vBright < 0.01 ? 0.0 : aInfo.x;
+  vec3 c = (modelMatrix * vec4(p, 1.0)).xyz;
+  // (brought a little towards the eye, so the stone round a lantern's window does not hide the glow's heart)
+  c += normalize(cameraPosition - c) * (aInfo.y > 0.5 ? 0.0 : 0.35);
+  vec3 w = c + (right * position.x + up * position.y) * size;
+  gl_Position = projectionMatrix * viewMatrix * vec4(w, 1.0);
+}
+`;
+const glowFragment = /* glsl */ `
+precision highp float;
+in vec2 vCorner;
+in float vKind;
+in float vBright;
+layout(location = 0) out vec4 outC;
+void main() {
+  float r = dot(vCorner, vCorner);
+  if (r > 1.0) discard;
+  float core = exp(-r * 18.0);
+  float halo = exp(-r * 3.0) * (1.0 - r);
+  vec3 warm = vKind > 0.5 ? vec3(0.8, 1.0, 0.4) : vec3(1.0, 0.66, 0.3);
+  outC = vec4(warm * (core * 4.0 + halo * 1.1) * vBright, 0.0);
 }
 `;
 
@@ -294,15 +468,18 @@ function layOut(records, heightAt) {
     r.z = p.z - p.tx * off;
     const name = month(r.created);
     if (name !== last) {
-      marks.push({ s: Math.max(2, r.s - STEP / 2), text: i ? name : `Today · ${name}` });
+      marks.push({ s: Math.max(2, r.s - STEP / 2), text: i ? name : `Today · ${name}`, post: true });
       last = name;
     }
   });
-  if (line.length) marks.push({ s: Math.min(pathLength(), HEAD + line.length * STEP + 2), text: 'The first record' });
+  if (line.length) marks.push({ s: Math.min(pathLength(), HEAD + line.length * STEP + 2), text: 'The first record', post: true });
   for (const r of records) r.y = heightAt(r.x, r.z);
   for (const m of marks) {
     const p = pathAt(m.s);
-    Object.assign(m, { x: p.x, z: p.z, y: heightAt(p.x, p.z) });
+    // the signpost stands on the path's outer side, clear of the flowers
+    const px = p.x + p.ox * 3.6;
+    const pz = p.z + p.oz * 3.6;
+    Object.assign(m, { x: p.x, z: p.z, y: heightAt(p.x, p.z), px, pz, py: heightAt(px, pz), ox: p.ox, oz: p.oz });
   }
   return { marks, line };
 }
@@ -361,6 +538,82 @@ export function createGarden({ snapshot, field, scene, canvas, goTo }) {
     meshes.push(mesh);
   }
 
+  // the months' signposts beside the path, on its outer side
+  const signs = marks.filter((m) => m.post);
+  if (signs.length) {
+    const material = new THREE.ShaderMaterial({
+      glslVersion: THREE.GLSL3,
+      side: THREE.DoubleSide,
+      uniforms: { ...field.uniforms, uFocus: { value: -1 } },
+      vertexShader: vertex,
+      fragmentShader: fragment,
+    });
+    const geometry = signGeometry();
+    geometry.setAttribute('aState', new THREE.InstancedBufferAttribute(new Float32Array(signs.length).fill(3), 1));
+    const mesh = new THREE.InstancedMesh(geometry, material, signs.length);
+    signs.forEach((m, i) => {
+      dummy.position.set(m.px, m.py - 0.05, m.pz);
+      // (its face turned to the path)
+      dummy.rotation.set(0, Math.atan2(-m.ox, -m.oz), 0);
+      dummy.scale.setScalar(1);
+      dummy.updateMatrix();
+      mesh.setMatrixAt(i, dummy.matrix);
+    });
+    mesh.frustumCulled = false;
+    scene.add(mesh);
+  }
+
+  // lantern windows that glow, and fireflies over the flowers as the light goes
+  const glow = { uTime: field.uniforms.uTime, uSunDir: field.uniforms.uSunDir };
+  {
+    const home = [];
+    const info = [];
+    let k = 0;
+    for (const r of records.filter((x) => x.pinned)) {
+      // (just in front of the window, so its glow is not hidden inside the stone)
+      home.push(r.x, r.y + 0.79 * r.tall, r.z, (k++ * 0.618) % 1);
+      info.push(0.85, 0);
+    }
+    const homes = records.filter((x) => !x.pinned);
+    const flies = Math.min(420, 60 + homes.length);
+    for (let i = 0; i < flies && homes.length; i++) {
+      // (spread evenly over every flower, so each stretch of the path has its own)
+      const r = homes[Math.floor((i * homes.length) / flies) % homes.length];
+      const a = i * 2.39996;
+      home.push(r.x + Math.cos(a) * 1.2, r.y + 0.5 + ((i * 0.37) % 1.2), r.z + Math.sin(a) * 1.2, (i * 0.754877) % 1);
+      info.push(0.3, 1);
+    }
+    if (home.length) {
+      const g = new THREE.InstancedBufferGeometry();
+      g.setAttribute('position', new THREE.Float32BufferAttribute([-1, -1, 0, 1, -1, 0, 1, 1, 0, -1, 1, 0], 3));
+      g.setIndex([0, 1, 2, 0, 2, 3]);
+      g.setAttribute('aHome', new THREE.InstancedBufferAttribute(new Float32Array(home), 4));
+      g.setAttribute('aInfo', new THREE.InstancedBufferAttribute(new Float32Array(info), 2));
+      g.instanceCount = home.length / 4;
+      const lights = new THREE.Mesh(
+        g,
+        new THREE.ShaderMaterial({
+          glslVersion: THREE.GLSL3,
+          uniforms: glow,
+          vertexShader: glowVertex,
+          fragmentShader: glowFragment,
+          transparent: true,
+          depthWrite: false,
+          // light adds to the picture, and leaves its alpha (the paint finish and the ink read it) alone
+          blending: THREE.CustomBlending,
+          blendEquation: THREE.AddEquation,
+          blendSrc: THREE.OneFactor,
+          blendDst: THREE.OneFactor,
+          blendSrcAlpha: THREE.ZeroFactor,
+          blendDstAlpha: THREE.OneFactor,
+        }),
+      );
+      lights.frustumCulled = false;
+      lights.renderOrder = 7;
+      scene.add(lights);
+    }
+  }
+
   // ---- what is said on the page ---------------------------------------------------------------------------------
   const n = records.length;
   $('count').textContent = !n ? 'Read-only · no records yet' : n < snapshot.total ? `Read-only · ${n} of ${snapshot.total} records` : `Read-only · ${n} ${n === 1 ? 'record' : 'records'}`;
@@ -370,7 +623,7 @@ export function createGarden({ snapshot, field, scene, canvas, goTo }) {
     el.className = 'label bed';
     el.textContent = m.text;
     labels.appendChild(el);
-    return { el, at: new THREE.Vector3(m.x, m.y + 2.3, m.z) };
+    return { el, at: m.post ? new THREE.Vector3(m.px, m.py + 1.75, m.pz) : new THREE.Vector3(m.x, m.y + 2.3, m.z) };
   });
   const era = $('era');
   const focusLabel = document.createElement('div');
