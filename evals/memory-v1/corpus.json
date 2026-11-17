@@ -1,0 +1,53 @@
+{
+  "version": 1,
+  "id": "mother-synthetic-memory-v1",
+  "records": [
+    {"key":"pet", "scenario":"pet", "shared":true, "revisions":[
+      {"title":"Mira's pet", "content":"Mira's cat is named Bramble. This was a mistaken transcription.", "status":"active"},
+      {"title":"Mira's pet", "content":"Correction: Mira's cat is named Comet, adopted in 2022. Bramble was a transcription error.", "status":"active"}
+    ]},
+    {"key":"project", "scenario":"project", "shared":true, "revisions":[
+      {"title":"Lighthouse project", "content":"The Lighthouse project is a local tide observation notebook. Its language is Rust and its milestone is offline chart export.", "status":"active"}
+    ]},
+    {"key":"food", "scenario":"food", "shared":true, "revisions":[
+      {"title":"林岚的饮食偏好", "content":"林岚喜欢茉莉花茶，不喝咖啡。她的午餐偏好是素食面条。", "status":"active"}
+    ]},
+    {"key":"snow", "scenario":"snow", "shared":true, "revisions":[
+      {"title":"葵の冬の予定", "content":"葵は二月に白馬でスノーボードをする予定です。宿泊先は青い森ロッジです。", "status":"active"}
+    ]},
+    {"key":"destination", "scenario":"trip", "shared":true, "revisions":[
+      {"title":"Alia's trip destination", "content":"Alia chose the fictional town of Cedar Bay for the spring trip.", "status":"active"}
+    ]},
+    {"key":"departure", "scenario":"trip", "shared":true, "revisions":[
+      {"title":"Alia's trip departure", "content":"Alia's spring trip leaves on 12 April 2027. Booking is still undecided.", "status":"active"}
+    ]},
+    {"key":"old_preference", "scenario":"retraction", "shared":true, "revisions":[
+      {"title":"Obsolete lantern preference", "content":"Mira prefers violet lanterns. Obsolete codeword violet-lantern.", "status":"active"},
+      {"title":"Obsolete lantern preference", "content":"Withdrawn: the violet-lantern preference was never confirmed.", "status":"retracted"}
+    ]},
+    {"key":"private", "scenario":"privacy", "shared":false, "revisions":[
+      {"title":"Private fictional detail", "content":"The fictional private vault codeword is glass-orchid. This fixture is not shared.", "status":"active"}
+    ]},
+    {"key":"noise_cat", "scenario":"noise", "shared":true, "revisions":[
+      {"title":"Photo task", "content":"Resize the cat photo later. This task contains no owner pet identity.", "status":"active", "kind":"checkpoint"}
+    ]},
+    {"key":"noise_release", "scenario":"noise", "shared":true, "revisions":[
+      {"title":"Lighthouse build task", "content":"Lighthouse build succeeded. Review the compiler output tomorrow.", "status":"active", "kind":"checkpoint"}
+    ]},
+    {"key":"noise_person", "scenario":"noise", "shared":true, "revisions":[
+      {"title":"Another person's pet", "content":"Niko's dog is called Comet. This is a different person and animal from Mira's cat.", "status":"active"}
+    ]},
+    {"key":"noise_tea", "scenario":"noise", "shared":true, "revisions":[
+      {"title":"Cafe menu task", "content":"咖啡店菜单需要排版。这是项目任务，不是林岚的饮食偏好。", "status":"active", "kind":"checkpoint"}
+    ]},
+    {"key":"budget_one", "scenario":"bounds", "shared":true, "revisions":[{"title":"Synthetic volume one", "content":"noise_budget task note one.", "status":"active", "kind":"checkpoint"}]},
+    {"key":"budget_two", "scenario":"bounds", "shared":true, "revisions":[{"title":"Synthetic volume two", "content":"noise_budget task note two.", "status":"active", "kind":"checkpoint"}]},
+    {"key":"budget_three", "scenario":"bounds", "shared":true, "revisions":[{"title":"Synthetic volume three", "content":"noise_budget task note three.", "status":"active", "kind":"checkpoint"}]},
+    {"key":"budget_four", "scenario":"bounds", "shared":true, "revisions":[{"title":"Synthetic volume four", "content":"noise_budget task note four.", "status":"active", "kind":"checkpoint"}]},
+    {"key":"budget_five", "scenario":"bounds", "shared":true, "revisions":[{"title":"Synthetic volume five", "content":"noise_budget task note five.", "status":"active", "kind":"checkpoint"}]},
+    {"key":"budget_six", "scenario":"bounds", "shared":true, "revisions":[{"title":"Synthetic volume six", "content":"noise_budget task note six.", "status":"active", "kind":"checkpoint"}]},
+    {"key":"long_note", "scenario":"bounds", "shared":true, "revisions":[
+      {"title":"Synthetic bounded preview", "content":"Preview fixture: the first paragraph is navigation only. The full source is required to verify the saved detail. Silver bell boats cross the quiet lake at sunrise. Silver bell boats cross the quiet lake at sunrise. Silver bell boats cross the quiet lake at sunrise. Silver bell boats cross the quiet lake at sunrise. Silver bell boats cross the quiet lake at sunrise. Silver bell boats cross the quiet lake at sunrise. Silver bell boats cross the quiet lake at sunrise. Silver bell boats cross the quiet lake at sunrise. Silver bell boats cross the quiet lake at sunrise. Silver bell boats cross the quiet lake at sunrise. The final source detail is copper-compass.", "status":"active"}
+    ]}
+  ]
+}
