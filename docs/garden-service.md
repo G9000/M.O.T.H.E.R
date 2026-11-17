@@ -14,6 +14,29 @@ The executable is `target/release/mother.exe` on Windows or `target/release/moth
 
 Keep the database, endpoint descriptor and credentials outside the repository in an owner-private local directory. The endpoint directory must already exist. Unix requires mode `0700`; ancestors must prevent untrusted replacement. Windows verifies directory ownership, DACLs and the parent chain. Symlinks, reparse boundaries and hard-linked database aliases cannot establish a serving endpoint. Create a dedicated private directory rather than weakening these checks.
 
+On Windows, an AppContainer or capability SID is not trusted because of its
+prefix, length or association with a sandbox. Only the current process user,
+SYSTEM and Administrators receive the existing trusted-principal treatment.
+An unknown principal's ancestor allow ACE is rejected when it grants child
+deletion, directory deletion, DACL/owner changes, or generic write/full access.
+Read, traverse and synchronize rights on an ancestor do not trigger that check.
+The endpoint directory itself stays owner-only, including its future contents;
+an untrusted read grant there is rejected even when it would be harmless on an
+ancestor. Ancestor inherit-only ACEs and Creator Owner inheritance keep their
+existing semantics. Deny ACEs are not used to excuse a dangerous allow ACE, and
+unsupported ACE forms fail closed.
+
+Admission errors retain `MIGRATION_FENCED`. For a rejected allow ACE they identify
+the private-directory/ancestor relationship, ancestor depth and access mask,
+without echoing private paths, identity SIDs, credentials or security descriptors.
+Missing, null or unreadable DACLs also fail closed; a null DACL never becomes an
+SDK panic. These checks inspect permissions and do not repair or rewrite ACLs.
+They are conservative snapshot checks, not a complete Windows effective-access
+calculator or a guarantee against every filesystem race. If a parent really
+permits untrusted replacement, Mother refuses admission; safely supporting such
+a parent requires a separate anchored-access design. A child exclusion or an
+unknown-SID whitelist is not an equivalent protection.
+
 ## Provision and start
 
 For a new native workspace, supply your own persona and provision each harness before starting the owner. This example grants canonical reads and reviewed capture to one companion; graph authority remains independent.

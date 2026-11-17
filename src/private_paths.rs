@@ -76,7 +76,7 @@ fn windows_directory(path: &Path) -> Result<()> {
     use std::os::windows::fs::MetadataExt;
     use windows_permissions::{
         LocalBox, Sid,
-        constants::{AceFlags, AceType, SeObjectType, SecurityInformation},
+        constants::{SeObjectType, SecurityInformation},
     };
     let current = windows_permissions::utilities::current_process_sid().map_err(|_| denied())?;
     let owner = current.as_ref();
@@ -97,58 +97,108 @@ fn windows_directory(path: &Path) -> Result<()> {
             SecurityInformation::Owner | SecurityInformation::Dacl,
         )
         .map_err(|_| denied())?;
-        if ordinal == 0
-            && descriptor
-                .owner()
-                .is_none_or(|sid| sid != owner && sid != system.as_ref() && sid != admins.as_ref())
-        {
-            return Err(denied());
+        windows_descriptor(
+            &descriptor,
+            &[owner, system.as_ref(), admins.as_ref()],
+            creator.as_ref(),
+            ordinal,
+        )?;
+    }
+    Ok(())
+}
+
+#[cfg(windows)]
+fn windows_descriptor(
+    descriptor: &windows_permissions::SecurityDescriptor,
+    trusted: &[&windows_permissions::Sid; 3],
+    creator: &windows_permissions::Sid,
+    ordinal: usize,
+) -> Result<()> {
+    use windows_permissions::constants::{AceFlags, AceType, SecurityInformation};
+    if ordinal == 0 && descriptor.owner().is_none_or(|sid| !trusted.contains(&sid)) {
+        return Err(windows_acl_denied(
+            ordinal,
+            "the owner is not a trusted principal",
+            None,
+        ));
+    }
+    // windows-permissions 0.2.4 panics on a present NULL DACL. A read-only
+    // conversion either rejects it or emits NO_ACCESS_CONTROL, before we borrow
+    // the ACL. Missing, malformed and unrestricted descriptors all fail closed.
+    let text = windows_permissions::wrappers::ConvertSecurityDescriptorToStringSecurityDescriptor(
+        descriptor,
+        SecurityInformation::Dacl,
+    )
+    .map_err(|_| windows_acl_denied(ordinal, "the DACL is missing, null or unreadable", None))?;
+    if text
+        .to_str()
+        .is_none_or(|value| !value.starts_with("D:") || value.contains("NO_ACCESS_CONTROL"))
+    {
+        return Err(windows_acl_denied(
+            ordinal,
+            "the DACL is missing, null or unreadable",
+            None,
+        ));
+    }
+    let acl = descriptor.dacl().ok_or_else(|| {
+        windows_acl_denied(ordinal, "the DACL is missing, null or unreadable", None)
+    })?;
+    for index in 0..acl.len() {
+        let ace = acl.get_ace(index).ok_or_else(denied)?;
+        if ordinal > 0 && ace.flags().contains(AceFlags::InheritOnly) {
+            continue;
         }
-        let acl = descriptor.dacl().ok_or_else(denied)?;
-        for index in 0..acl.len() {
-            let ace = acl.get_ace(index).ok_or_else(denied)?;
-            if ordinal > 0 && ace.flags().contains(AceFlags::InheritOnly) {
-                continue;
-            }
-            match ace.ace_type() {
-                AceType::ACCESS_DENIED_ACE_TYPE => {}
-                AceType::ACCESS_ALLOWED_ACE_TYPE => {
-                    let sid = ace.sid().ok_or_else(denied)?;
-                    if sid == creator.as_ref() && ace.flags().contains(AceFlags::InheritOnly) {
-                        continue;
-                    }
-                    if sid == owner || sid == system.as_ref() || sid == admins.as_ref() {
-                        continue;
-                    }
-                    // Packaged and sandboxed apps (Codex, Store apps) are granted their own app-container
-                    // identity on profile folders such as AppData, and re-grant it while they run. Such a
-                    // grant on an ancestor is tolerated; on the directory itself it still is not.
-                    if ordinal > 0 && sandboxed_app(sid) {
-                        continue;
-                    }
-                    // Reject child deletion, ancestor replacement, ownership/DACL changes and generic writes.
-                    const REPLACE_BOUNDARY: u32 =
-                        0x40 | 0x10000 | 0x40000 | 0x80000 | 0x10000000 | 0x40000000;
-                    if ordinal == 0 || ace.mask().bits() & REPLACE_BOUNDARY != 0 {
-                        return Err(denied());
-                    }
+        match ace.ace_type() {
+            AceType::ACCESS_DENIED_ACE_TYPE => {}
+            AceType::ACCESS_ALLOWED_ACE_TYPE => {
+                let sid = ace.sid().ok_or_else(denied)?;
+                if sid == creator && ace.flags().contains(AceFlags::InheritOnly) {
+                    continue;
                 }
-                _ => return Err(denied()),
+                if trusted.contains(&sid) {
+                    continue;
+                }
+                // Reject child deletion, ancestor replacement, ownership/DACL changes and generic writes.
+                const REPLACE_BOUNDARY: u32 =
+                    0x40 | 0x10000 | 0x40000 | 0x80000 | 0x10000000 | 0x40000000;
+                if ordinal == 0 || ace.mask().bits() & REPLACE_BOUNDARY != 0 {
+                    let reason = if ordinal == 0 {
+                        "an allow entry names an untrusted identity in an owner-only private directory"
+                    } else {
+                        "an untrusted allow entry grants unsafe write or directory-replacement/control rights"
+                    };
+                    return Err(windows_acl_denied(ordinal, reason, Some(ace.mask().bits())));
+                }
+            }
+            _ => {
+                return Err(windows_acl_denied(
+                    ordinal,
+                    "an unsupported access-control entry cannot be validated",
+                    None,
+                ));
             }
         }
     }
     Ok(())
 }
 
-/// One sandboxed app's own identity (S-1-15-2-… app container or S-1-15-3-… capability), not a user or group.
 #[cfg(windows)]
-fn sandboxed_app(sid: &windows_permissions::Sid) -> bool {
-    const APP_PACKAGE_AUTHORITY: [u8; 6] = [0, 0, 0, 0, 0, 15];
-    // (one package's own identity is a long hash; short forms such as S-1-15-2-1, "all application
-    // packages", are groups that admit every app and stay refused)
-    *sid.id_authority() == APP_PACKAGE_AUTHORITY
-        && matches!(sid.sub_authority(0), Some(2 | 3))
-        && sid.sub_authority_count() >= 8
+fn windows_acl_denied(depth: usize, reason: &str, mask: Option<u32>) -> Error {
+    let location = if depth == 0 {
+        "private directory".to_owned()
+    } else {
+        format!("ancestor directory (depth {depth})")
+    };
+    let rights = mask
+        .map(|value| format!(" (access mask {value:#010x})"))
+        .unwrap_or_default();
+    // Shared domain errors must never echo private paths, SIDs or descriptors.
+    Error::domain(
+        "MIGRATION_FENCED",
+        format!(
+            "The {location} failed its security check: {reason}{rights}. Inspect its ACL; no automatic ACL repair is performed."
+        ),
+    )
 }
 
 #[cfg(test)]
@@ -175,52 +225,6 @@ mod tests {
         }
         owner_directory(dir.path()).unwrap();
     }
-    #[cfg(windows)]
-    #[test]
-    fn only_sandboxed_app_identities_are_tolerated() {
-        use windows_permissions::{LocalBox, Sid};
-        let is = |text: &str| sandboxed_app(&text.parse::<LocalBox<Sid>>().unwrap());
-        assert!(is(
-            "S-1-15-3-3557520199-3666692283-3112367039-3524159787-2791857073-3163583606-3692855932"
-        ));
-        assert!(is(
-            "S-1-15-2-2968813833-811790644-2202111208-3784096404-1081847329-2708967783-1438471679"
-        ));
-        // (Windows' own "all application packages" group, and ordinary users and groups, are not)
-        assert!(!is("S-1-15-2-1"));
-        assert!(!is("S-1-15-3-1"));
-        assert!(!is("S-1-5-32-545"));
-        assert!(!is("S-1-1-0"));
-    }
-    #[cfg(windows)]
-    #[test]
-    fn an_ancestor_grant_to_a_sandboxed_app_changes_nothing_but_a_broad_one_fences() {
-        let root =
-            tempfile::tempdir_in(std::fs::canonicalize(std::env::temp_dir()).unwrap()).unwrap();
-        let journal = root.path().join("journal");
-        fs::create_dir(&journal).unwrap();
-        let grant = |who: &str| {
-            let out = std::process::Command::new("icacls")
-                .arg(root.path())
-                .args(["/grant", &format!("{who}:(F)")])
-                .output()
-                .unwrap();
-            assert!(
-                out.status.success(),
-                "{}",
-                String::from_utf8_lossy(&out.stdout)
-            );
-        };
-        // (this machine's own temp folder may already fail the check; a sandbox grant must not change that)
-        let before = owner_directory(&journal).is_ok();
-        grant("*S-1-15-3-1024-1-2-3-4-5-6-7");
-        assert_eq!(owner_directory(&journal).is_ok(), before);
-        grant("*S-1-5-32-545");
-        assert_eq!(
-            owner_directory(&journal).unwrap_err().code(),
-            "MIGRATION_FENCED"
-        );
-    }
     #[cfg(unix)]
     #[test]
     fn broad_directory_permissions_do_not_admit_a_journal() {
@@ -231,3 +235,7 @@ mod tests {
         assert!(owner_directory(dir.path()).is_err());
     }
 }
+
+#[cfg(all(test, windows))]
+#[path = "private_paths/windows_tests.rs"]
+mod windows_tests;
