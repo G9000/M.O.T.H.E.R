@@ -158,6 +158,7 @@ fn safe_path(path: &Path) -> Result<()> {
                 }
             }
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+            Err(error) if error.kind() == std::io::ErrorKind::NotADirectory => return Err(fenced()),
             Err(error) => return Err(error.into()),
         }
     }
