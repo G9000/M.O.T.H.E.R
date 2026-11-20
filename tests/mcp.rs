@@ -134,7 +134,12 @@ struct Fixture {
 impl Fixture {
     fn new(soul: &str) -> Self {
         use mother::{access::ClientAccess, garden::store::GardenStore};
-        let dir = TempDir::new().unwrap();
+        let dir = TempDir::new_in(std::fs::canonicalize(std::env::temp_dir()).unwrap()).unwrap();
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            std::fs::set_permissions(dir.path(), std::fs::Permissions::from_mode(0o700)).unwrap();
+        }
         let database = dir.path().join("garden.redb");
         let store = GardenStore::initialize(
             &database,

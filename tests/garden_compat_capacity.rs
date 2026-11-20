@@ -39,7 +39,7 @@ fn capacity_bundle() -> Value {
 
 #[test]
 fn native_accepts_ten_thousand_and_first_record_and_full_backup_retains_them_all() {
-    let dir = tempfile::tempdir().unwrap();
+    let dir = tempfile::tempdir_in(std::fs::canonicalize(std::env::temp_dir()).unwrap()).unwrap();
     let bundle = capacity_bundle();
     let workspace = bundle["workspace"]["id"].as_str().unwrap();
     let generation = bundle["workspace"]["generation"].as_str().unwrap();

@@ -49,7 +49,7 @@ pub struct Fixture {
 }
 impl Fixture {
     pub fn new(corpus: &Corpus) -> EvalResult<Self> {
-        let dir = tempfile::tempdir()?;
+        let dir = tempfile::tempdir_in(std::fs::canonicalize(std::env::temp_dir())?)?;
         let clock = Arc::new(FixedClock(Mutex::new("2026-01-01T00:00:00Z".parse()?)));
         let store = GardenStore::initialize_with_clock(
             dir.path().join("synthetic.redb"),
