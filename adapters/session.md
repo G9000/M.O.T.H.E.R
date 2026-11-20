@@ -11,3 +11,5 @@ Use these as supported workspace/session guidance in each harness connected to M
 7. If the context service is unavailable, say so. Keep any local draft explicitly pending. Do not invent remembered context or silently create another authoritative memory store.
 
 Capabilities: read; memory:write; decision:write; task:write; checkpoint:write; artifact:write; action:write. Tools enforce the granted subset. No credentials transfer through a handoff.
+
+For Claude Code, owners can opt into [SessionEnd capture and historical backfill](../docs/claude-code-capture.md) with a distinct read-and-propose client. Candidates remain in the owner review inbox.

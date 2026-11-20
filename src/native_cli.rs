@@ -15,6 +15,13 @@ struct Cli {
 }
 #[derive(Debug, Subcommand)]
 enum Command {
+    /// Capture selected Claude Code conversation items for owner review.
+    Capture {
+        #[arg(long)]
+        policy: PathBuf,
+        #[command(subcommand)]
+        command: crate::capture_cli::CaptureCommand,
+    },
     /// Native storage, local owner service and explicit cutover inspection.
     Garden {
         #[command(subcommand)]
@@ -34,6 +41,7 @@ pub async fn run() -> Result<()> {
             println!();
             Ok(())
         }
+        Some(Command::Capture { policy, command }) => crate::capture_cli::run(policy, command),
         Some(Command::Mcp { config }) => crate::mcp::serve(&config).await,
         Some(Command::Garden {
             command:

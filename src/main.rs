@@ -1,3 +1,4 @@
+mod capture_cli;
 #[path = "native_cli.rs"]
 mod cli;
 mod cutover_cli;

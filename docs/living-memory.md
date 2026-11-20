@@ -12,6 +12,8 @@ The active agent calls `mother_propose_memory` once per candidate. It can propos
 
 The harness chooses and interprets the candidate; M.O.T.H.E.R keeps its provenance and review outcome. Selection, proposal admission, canonical approval, semantic indexing and actual recall in another host are separate steps. Approval makes a record eligible for authorized retrieval; it does not guarantee vectors or prompt inclusion. Each harness retains its own native memory, and sharing does not require adopting the workspace persona.
 
+Claude Code also supports [opt-in capture and resumable backfill](claude-code-capture.md) from one owner-selected local transcript directory. It submits to the same inbox.
+
 Stop the native owner service before opening its database with an owner command. Run `mother garden v1-inbox --db <garden.redb>` for v1 proposals or `mother garden inbox --db <garden.redb>` for graph batches. When input and output are terminals these commands open native owner review; piped invocations list proposals as JSON. A separately reviewed request can use `mother garden review --db ... --request ...` (add `--graph` for graph proposals). Restart the service after review. IPC exposes no approval operation. The former setup dashboard and generic `mother inbox` command are removed. See [native review](garden-compatibility.md) and [service operation](garden-service.md).
 
 For interactive v1 review:
