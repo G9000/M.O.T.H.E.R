@@ -358,12 +358,26 @@ pub struct LocalService {
     database_path: PathBuf,
     _owner_lease: File,
     search: NativeSearch,
+    recall_profiles: crate::recall_profiles::RecallProfiles,
 }
 impl LocalService {
     /// Exclusively bind an existing native workspace to an owner-private descriptor.
     /// # Errors
     /// Rejects another database owner, unsafe paths and unrelated existing descriptors.
     pub fn bind(database_path: &Path, endpoint_path: &Path) -> Result<Self> {
+        Self::bind_with_recall_profiles(
+            database_path,
+            endpoint_path,
+            crate::recall_profiles::RecallProfiles::default(),
+        )
+    }
+
+    /// Bind the local owner using an explicitly loaded recall profile policy.
+    pub fn bind_with_recall_profiles(
+        database_path: &Path,
+        endpoint_path: &Path,
+        recall_profiles: crate::recall_profiles::RecallProfiles,
+    ) -> Result<Self> {
         crate::garden::migrate::check_destination(database_path)?;
         let parent = private_parent(endpoint_path)?;
         let service_id = Uuid::new_v4().to_string();
@@ -439,6 +453,7 @@ impl LocalService {
             database_path: canonical_db,
             _owner_lease: owner_lease,
             search: NativeSearch::from_environment(),
+            recall_profiles,
         })
     }
     /// Return the public descriptor, including native v1 availability.
@@ -595,6 +610,9 @@ impl LocalService {
             }
             if name == "mother_search_context" {
                 return self.search.search(&self.store, auth, args);
+            }
+            if name == "mother_get_context" {
+                return self.store.v1_context(auth, args, &self.recall_profiles);
             }
             return self.store.v1_call(auth, name, args);
         }

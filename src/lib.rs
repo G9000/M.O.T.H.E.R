@@ -12,5 +12,6 @@ pub mod limits;
 mod pins;
 mod portability;
 mod private_paths;
+pub mod recall_profiles;
 pub mod search;
 pub mod service;

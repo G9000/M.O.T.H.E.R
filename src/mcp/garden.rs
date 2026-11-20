@@ -8,6 +8,7 @@ use mother::{
         store::GardenStore,
         v1_search::NativeSearch,
     },
+    recall_profiles::RecallProfiles,
 };
 use rmcp::{
     ErrorData, RoleServer, ServerHandler, ServiceExt,
@@ -19,7 +20,7 @@ use rmcp::{
 };
 use serde_json::{Value, json};
 use std::{
-    path::Path,
+    path::{Path, PathBuf},
     sync::{Arc, Mutex},
 };
 
@@ -41,6 +42,7 @@ struct GraphServer {
     tools: Vec<Tool>,
     v1_enabled: bool,
     search: Arc<NativeSearch>,
+    recall_profiles: Arc<RecallProfiles>,
     // Serialize this host's opens. No database handle is retained while the owner reviews.
     gate: Arc<Mutex<()>>,
 }
@@ -75,6 +77,7 @@ impl ServerHandler for GraphServer {
         let config = self.config.clone();
         let gate = self.gate.clone();
         let search = Arc::clone(&self.search);
+        let recall_profiles = Arc::clone(&self.recall_profiles);
         let name = request.name.clone();
         let result = tokio::task::spawn_blocking(move || {
             let _guard = gate
@@ -86,6 +89,7 @@ impl ServerHandler for GraphServer {
                 &store,
                 &config,
                 &search,
+                &recall_profiles,
                 &request.name,
                 Value::Object(request.arguments.unwrap_or_default()),
             )
@@ -115,6 +119,7 @@ fn dispatch(
     store: &GardenStore,
     config: &GardenClientConfig,
     search: &NativeSearch,
+    recall_profiles: &RecallProfiles,
     name: &str,
     args: Value,
 ) -> Result<Value> {
@@ -147,6 +152,9 @@ fn dispatch(
         }
         if name == "mother_search_context" {
             return search.search(store, &auth, args);
+        }
+        if name == "mother_get_context" {
+            return store.v1_context(&auth, args, recall_profiles);
         }
         return store.v1_call(&auth, name, args);
     }
@@ -261,10 +269,15 @@ pub(super) fn advertised_context_tools() -> Result<Vec<Tool>> {
 }
 
 /// Start the explicitly configured native runtime with independently authorized views.
-pub async fn serve(config_path: &Path) -> Result<()> {
+pub async fn serve(config_path: &Path, recall_profiles: Option<PathBuf>) -> Result<()> {
     let path = config_path.to_owned();
     let server = tokio::task::spawn_blocking(move || -> Result<GraphServer> {
         let config = load_garden_config(&path)?;
+        let recall_profiles = recall_profiles
+            .as_deref()
+            .map(RecallProfiles::load)
+            .transpose()?
+            .unwrap_or_default();
         let store = GardenStore::open_active(&config.database_path)?;
         config.authorize(&store)?;
         let v1_enabled = store.v1_initialized()?;
@@ -285,6 +298,7 @@ pub async fn serve(config_path: &Path) -> Result<()> {
             },
             v1_enabled,
             search: Arc::new(NativeSearch::from_environment()),
+            recall_profiles: Arc::new(recall_profiles),
             gate: Arc::new(Mutex::new(())),
         })
     })

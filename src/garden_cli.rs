@@ -56,6 +56,9 @@ pub(crate) enum GardenCommand {
         db: PathBuf,
         #[arg(long)]
         endpoint: PathBuf,
+        /// Owner-private recall profile policy used by all bridges to this owner.
+        #[arg(long)]
+        recall_profiles: Option<PathBuf>,
     },
     /// Bind an existing native credential to the running local owner.
     ServiceConfig {
@@ -204,6 +207,9 @@ pub(crate) enum GardenCommand {
     Mcp {
         #[arg(long)]
         config: PathBuf,
+        /// Owner-private recall profile policy for a direct native connection.
+        #[arg(long)]
+        recall_profiles: Option<PathBuf>,
     },
 }
 
@@ -339,7 +345,11 @@ pub(crate) fn execute_garden(command: GardenCommand) -> Result<()> {
                 print_json(store.v1_review_proposal(request)?)
             }
         }
-        GardenCommand::Service { db, endpoint } => crate::cutover_cli::service(db, endpoint),
+        GardenCommand::Service {
+            db,
+            endpoint,
+            recall_profiles,
+        } => crate::cutover_cli::service(db, endpoint, recall_profiles),
         GardenCommand::ServiceConfig {
             config,
             endpoint,

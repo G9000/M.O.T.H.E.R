@@ -4,6 +4,7 @@ use mother::{
     config::{create_private_file, read_json},
     error::Result,
     garden::{config::load_garden_config, migrate},
+    recall_profiles::RecallProfiles,
     service::{LocalClient, LocalService, ServiceClientConfig, ServiceInfo},
 };
 use serde_json::json;
@@ -39,8 +40,14 @@ pub enum MigrationCommand {
 fn absolute(path: &Path) -> Result<PathBuf> {
     Ok(std::path::absolute(path)?)
 }
-pub fn service(db: PathBuf, endpoint: PathBuf) -> Result<()> {
-    let service = LocalService::bind(&absolute(&db)?, &absolute(&endpoint)?)?;
+pub fn service(db: PathBuf, endpoint: PathBuf, recall_profiles: Option<PathBuf>) -> Result<()> {
+    let profiles = recall_profiles
+        .as_deref()
+        .map(RecallProfiles::load)
+        .transpose()?
+        .unwrap_or_default();
+    let service =
+        LocalService::bind_with_recall_profiles(&absolute(&db)?, &absolute(&endpoint)?, profiles)?;
     println!("{}", serde_json::to_string(service.info())?);
     std::io::stdout().flush()?;
     service.run()

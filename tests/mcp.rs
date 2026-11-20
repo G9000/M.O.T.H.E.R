@@ -15,6 +15,9 @@ mod capabilities;
 #[path = "mcp/pinned_budget.rs"]
 mod pinned_budget;
 
+#[path = "mcp/recall_profiles.rs"]
+mod recall_profiles;
+
 struct Client {
     child: Child,
     stdin: ChildStdin,
@@ -27,10 +30,23 @@ impl Client {
         Self::connect_with_model_dir(config, &config.parent().unwrap().join("missing-model"))
     }
     fn connect_with_model_dir(config: &Path, model_dir: &Path) -> Self {
+        Self::connect_with_options(config, model_dir, None)
+    }
+
+    fn connect_with_options(
+        config: &Path,
+        model_dir: &Path,
+        recall_profiles: Option<&Path>,
+    ) -> Self {
         let mut child = Command::new(env!("CARGO_BIN_EXE_mother"))
             .arg("mcp")
             .arg("--config")
             .arg(config)
+            .args(
+                recall_profiles
+                    .into_iter()
+                    .flat_map(|path| [std::ffi::OsStr::new("--recall-profiles"), path.as_os_str()]),
+            )
             .env("MOTHER_MODEL_DIR", model_dir)
             .current_dir(config.parent().unwrap())
             .stdin(Stdio::piped())

@@ -1,6 +1,18 @@
 use super::*;
 
 #[test]
+fn missing_profile_policy_reports_unavailability_without_legacy_fallback() {
+    let fixture = Fixture::new("Synthetic persona");
+    let mut client = Client::connect(&fixture.a_config);
+    let reply = client.result("mother_get_context", json!({"profile":"unconfigured"}));
+    assert_eq!(reply["isError"], true);
+    assert_eq!(
+        reply["structuredContent"]["error"]["code"],
+        "RECALL_PROFILE_UNAVAILABLE"
+    );
+}
+
+#[test]
 fn twelve_pins_remain_readable_over_stdio_with_complete_record_readback() {
     let fixture = Fixture::new(&"Synthetic persona. ".repeat(280));
     let mut client = Client::connect(&fixture.a_config);

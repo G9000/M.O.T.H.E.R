@@ -92,6 +92,7 @@ impl Response {
                     "OPERATION_REUSED" => "OPERATION_REUSED",
                     "GENERATION_MISMATCH" => "GENERATION_MISMATCH",
                     "RESTART_REQUIRED" => "RESTART_REQUIRED",
+                    "RECALL_PROFILE_UNAVAILABLE" => "RECALL_PROFILE_UNAVAILABLE",
                     "STALE_GENERATION" => "STALE_GENERATION",
                     "RESOURCE_LIMIT" => "RESOURCE_LIMIT",
                     "REFERENCE_NOT_FOUND" => "REFERENCE_NOT_FOUND",

@@ -517,8 +517,15 @@ impl GardenStore {
         rebuild(&tx).map_err(graph)?;
         tx.commit().map_err(unavailable)
     }
-    /// Dispatch the unchanged v1 tool contracts against native canonical tables.
+    /// Dispatch v1 tools against native canonical tables without an owner profile policy.
     pub fn v1_call(&self, auth: &Auth, tool: &str, args: Value) -> Result<Value> {
+        if tool == "mother_get_context" {
+            return self.v1_context(
+                auth,
+                args,
+                &crate::recall_profiles::RecallProfiles::default(),
+            );
+        }
         if tool == "mother_search_context" {
             static SEARCH: std::sync::OnceLock<learned::NativeSearch> = std::sync::OnceLock::new();
             return SEARCH
@@ -562,9 +569,6 @@ impl GardenStore {
                 p.access.require(id)?;
                 record(&tx, id)?
             }
-            "mother_get_context" => {
-                context(&tx, &auth.client_id, &p.access, args, self.clock.as_ref())?
-            }
             "mother_get_record_history" => {
                 if p.access.mode == AccessMode::Shared {
                     return Err(Error::domain(
@@ -596,6 +600,28 @@ impl GardenStore {
             }
             _ => return Err(invalid("Unknown v1 tool")),
         };
+        p.access.scrub(&mut result);
+        Ok(result)
+    }
+    /// Read a v1 context snapshot after applying the current grant and optional owner profile.
+    pub fn v1_context(
+        &self,
+        auth: &Auth,
+        args: Value,
+        profiles: &crate::recall_profiles::RecallProfiles,
+    ) -> Result<Value> {
+        let tx = self.db.begin_read().map_err(unavailable)?;
+        let workspace = metadata(&tx, "workspace")?;
+        let p = principal(&tx, auth, "read")?;
+        let mut result = context(
+            &tx,
+            &auth.client_id,
+            &p.access,
+            args,
+            workspace,
+            profiles,
+            self.clock.as_ref(),
+        )?;
         p.access.scrub(&mut result);
         Ok(result)
     }
@@ -1389,12 +1415,45 @@ fn context(
     client: &str,
     access: &ClientAccess,
     query: Value,
+    workspace: Value,
+    profiles: &crate::recall_profiles::RecallProfiles,
     clock: &dyn super::Clock,
 ) -> Result<Value> {
     contracts::strict(
         &query,
-        &["query", "kind", "limit", "updatedSince", "updatedBefore"],
+        &[
+            "query",
+            "kind",
+            "limit",
+            "updatedSince",
+            "updatedBefore",
+            "profile",
+        ],
     )?;
+    let profile = query
+        .get("profile")
+        .map(|_| string(&query, "profile"))
+        .transpose()?;
+    let eligible = profile
+        .map(|name| profiles.pins(name, string(&workspace, "id")?))
+        .transpose()?;
+    let mut pins = tx
+        .values(PINS)?
+        .into_iter()
+        .filter(|p| p["recordId"].as_str().is_some_and(|id| access.allows(id)))
+        .collect::<Vec<_>>();
+    let mut excluded_pins = std::collections::HashSet::new();
+    if let Some(eligible) = eligible {
+        pins.retain(|pin| {
+            let id = pin["recordId"].as_str().unwrap_or_default();
+            if eligible.contains(id) {
+                return true;
+            }
+            excluded_pins.insert(id.to_owned());
+            false
+        });
+    }
+    let visible = |id: &str| access.allows(id) && !excluded_pins.contains(id);
     let (since, before) = contracts::time_window(&query)?;
     let q = query
         .get("query")
@@ -1415,7 +1474,11 @@ fn context(
     } else {
         20
     };
-    let all = visible_records(tx, access)?;
+    let all: Vec<_> = tx
+        .values(RECORDS)?
+        .into_iter()
+        .filter(|r| r["id"].as_str().is_some_and(visible))
+        .collect();
     let mut by_kind = counts();
     let mut recallable_kind = counts();
     let mut recallable_total = 0;
@@ -1540,12 +1603,7 @@ fn context(
     }
     let selection = json!({"query":q,"kind":kind,"updatedSince":since,"updatedBefore":before,"order":if balanced {"balanced"} else {"recent"},"matchingRecords":total,"returnedRecords":records.len(),"omittedRecords":total-records.len(),"returnedByKind":returned,"omittedByKind":omitted});
     let work_summary = json!({"total":work_total,"returned":work.len(),"omitted":work_total-work.len(),"scope":"Workspace-wide tasks in doing/blocked and actions in pending/unknown. Checkpoint next steps and open questions are not counted as unsettled task/action records."});
-    let mut result = json!({"workspace":metadata(tx,"workspace")?,"access":access.metadata(),"capturedAt":clock.now().to_rfc3339_opts(SecondsFormat::Millis,true),"inventory":inventory,"selection":selection,"summary":summary,"omitted":total-records.len(),"records":records,"unsettledWork":work,"unsettledWorkSummary":work_summary,"unsettledWorkTruncated":work_total>20,"note":"Inventory counts cover all canonical record categories, independently of this request's query/kind filters and preview limit. Zero memory-category records is not an empty workspace when other categories contain records. Unreviewed inbox proposals are excluded. Excerpts are navigation, not complete records; retrieve IDs before relying on details or editing. Unsettled work counts only the task/action states described in unsettledWorkSummary. A handoff does not pause running jobs."});
-    let mut pins = tx
-        .values(PINS)?
-        .into_iter()
-        .filter(|p| p["recordId"].as_str().is_some_and(|id| access.allows(id)))
-        .collect::<Vec<_>>();
+    let mut result = json!({"workspace":workspace,"access":access.metadata(),"capturedAt":clock.now().to_rfc3339_opts(SecondsFormat::Millis,true),"inventory":inventory,"selection":selection,"summary":summary,"omitted":total-records.len(),"records":records,"unsettledWork":work,"unsettledWorkSummary":work_summary,"unsettledWorkTruncated":work_total>20,"note":"Inventory counts cover all canonical record categories, independently of this request's query/kind filters and preview limit. Zero memory-category records is not an empty workspace when other categories contain records. Unreviewed inbox proposals are excluded. Excerpts are navigation, not complete records; retrieve IDs before relying on details or editing. Unsettled work counts only the task/action states described in unsettledWorkSummary. A handoff does not pause running jobs."});
     pins.sort_by(|a, b| {
         a["pinnedAt"]
             .as_str()
@@ -1568,9 +1626,7 @@ fn context(
     let mut assignments = tx
         .values(ASSIGNMENTS)?
         .into_iter()
-        .filter(|a| {
-            a["assignee"] == client && a["recordId"].as_str().is_some_and(|id| access.allows(id))
-        })
+        .filter(|a| a["assignee"] == client && a["recordId"].as_str().is_some_and(visible))
         .collect::<Vec<_>>();
     assignments.sort_by(|a, b| {
         a["assignedAt"]
@@ -1607,6 +1663,16 @@ fn context(
         );
         result["note"] = json!(
             "Inventory, selection and unsettled-work counts cover only this client's granted canonical records. Unreviewed inbox proposals are excluded. Excerpts are navigation; retrieve full records before relying on them. A handoff does not pause running jobs."
+        );
+    }
+    if let Some(profile) = profile {
+        result["selection"]["profile"] = json!(profile);
+        result["selection"]["scope"] = json!("profiled_granted_records");
+        result["unsettledWorkSummary"]["scope"] = json!(
+            "Visible tasks in doing/blocked and actions in pending/unknown under the current grant and recall profile."
+        );
+        result["note"] = json!(
+            "Inventory and selection counts cover the current grant and recall profile. Excerpts are navigation; retrieve full records before relying on them. A handoff does not pause running jobs."
         );
     }
     Ok(result)

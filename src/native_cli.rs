@@ -31,6 +31,9 @@ enum Command {
     Mcp {
         #[arg(long)]
         config: PathBuf,
+        /// Owner-private recall profile policy for a direct native connection.
+        #[arg(long)]
+        recall_profiles: Option<PathBuf>,
     },
 }
 
@@ -42,13 +45,17 @@ pub async fn run() -> Result<()> {
             Ok(())
         }
         Some(Command::Capture { policy, command }) => crate::capture_cli::run(policy, command),
-        Some(Command::Mcp { config }) => crate::mcp::serve(&config).await,
+        Some(Command::Mcp {
+            config,
+            recall_profiles,
+        }) => crate::mcp::serve(&config, recall_profiles).await,
         Some(Command::Garden {
             command:
                 crate::garden_cli::DeferredGardenCommand(crate::garden_cli::GardenCommand::Mcp {
                     config,
+                    recall_profiles,
                 }),
-        }) => crate::mcp::serve_garden(&config).await,
+        }) => crate::mcp::serve(&config, recall_profiles).await,
         Some(Command::Garden { command }) => crate::garden_cli::execute_garden(command.0),
     }
 }

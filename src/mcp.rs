@@ -7,7 +7,7 @@ mod service;
 use mother::error::{Error, Result};
 use rmcp::model::Tool;
 use serde_json::{Value, json};
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 const UNCONFIRMED: &str = "The operation could not be confirmed. Reconcile its receipt before retrying with the same operation ID.";
 
@@ -37,17 +37,17 @@ fn advertised_tools() -> Result<Vec<Tool>> {
     Ok(serde_json::from_value(Value::Array(tools))?)
 }
 
-pub async fn serve_garden(config_path: &Path) -> Result<()> {
-    serve(config_path).await
-}
-
 /// Select only an explicitly configured native transport. Unsupported
 /// credentials never open a backend or implicitly convert a configuration.
-pub async fn serve(config_path: &Path) -> Result<()> {
+pub async fn serve(config_path: &Path, recall_profiles: Option<PathBuf>) -> Result<()> {
     let selected = mother::config::read_json(config_path, 16_384)?;
     match selected["backend"].as_str() {
-        Some("garden_service") => service::serve(config_path).await,
-        Some("garden_redb") => garden::serve(config_path).await,
+        Some("garden_service") if recall_profiles.is_none() => service::serve(config_path).await,
+        Some("garden_service") => Err(Error::domain(
+            "INVALID_INPUT",
+            "Configure recall profiles on the local owner service, not its MCP bridge.",
+        )),
+        Some("garden_redb") => garden::serve(config_path, recall_profiles).await,
         _ => Err(Error::domain(
             "LEGACY_UNAVAILABLE",
             "SQLite credentials are no longer supported. Use explicitly provisioned native garden credentials; existing data is unchanged.",

@@ -5,6 +5,13 @@
     "inputSchema": {
       "type": "object",
       "properties": {
+        "profile": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 40,
+          "pattern": "^[a-z][a-z0-9-]{0,39}$",
+          "description": "Optional owner-configured recall profile name. Selects eligible pinned records within the current grant throughout this context response. An unavailable profile returns an explicit error."
+        },
         "query": {
           "type": "string",
           "maxLength": 200

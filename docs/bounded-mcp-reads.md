@@ -1,6 +1,6 @@
 # Bounded MCP reads
 
-The native direct MCP server and local-owner stdio bridge apply the same output limits. Storage, receipts, grants and advertised tool schemas are unchanged.
+The native direct MCP server and local-owner stdio bridge apply the same output limits. Opt-in [contextual recall profiles](contextual-recall-profiles.md) select eligible pins before context counts, previews and output limits are applied.
 
 - Context, search and history-list navigation JSON must fit 12 KiB in compact UTF-8 serialization, including escaping. Whole previews are omitted until it fits. The response updates returned/omitted counts and supplies `responseBudget` with the byte limit and number omitted for that reason. Search coverage metadata remains intact.
 - Unfiltered balanced context removes previews from the most represented category first, keeping the surviving previews in their existing display order. Recent checkpoints cannot consume every preview slot simply because older personal memories sort later.
