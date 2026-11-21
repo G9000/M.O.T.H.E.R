@@ -10,6 +10,7 @@ pub mod gardening;
 mod handoffs;
 mod inbox;
 pub mod limits;
+pub mod media;
 mod pins;
 mod portability;
 mod private_paths;

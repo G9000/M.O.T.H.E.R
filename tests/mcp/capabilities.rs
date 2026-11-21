@@ -16,6 +16,8 @@ fn capability_discovery_is_persona_independent_and_does_not_enable_graph_tools()
     assert_eq!(before["v1"]["available"], true);
     let future: Value =
         serde_json::from_str(include_str!("../../contracts/garden-tools-v2.json")).unwrap();
+    let media: Value =
+        serde_json::from_str(include_str!("../../contracts/media-tools.json")).unwrap();
     assert_eq!(
         before["garden"]["definedTools"],
         Value::Array(
@@ -23,10 +25,12 @@ fn capability_discovery_is_persona_independent_and_does_not_enable_graph_tools()
                 .as_array()
                 .unwrap()
                 .iter()
+                .chain(media["tools"].as_array().unwrap())
                 .map(|tool| tool["name"].clone())
                 .collect()
         )
     );
+    assert_eq!(before["garden"]["availableTools"], json!([]));
     assert!(serde_json::to_vec(&before).unwrap().len() < 4096);
     assert!(before.get("persona").is_none());
     assert_ne!(

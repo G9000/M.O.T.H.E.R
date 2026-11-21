@@ -136,10 +136,28 @@ fn is_read(name: &str) -> bool {
             | "mother_garden_get_proposal"
             | "mother_garden_get_receipt"
             | "mother_garden_changes"
+            | "mother_garden_media_list"
     )
 }
 
-pub(super) fn result(name: &str, value: Value) -> CallToolResult {
+pub(super) fn result(name: &str, mut value: Value) -> CallToolResult {
+    if name == "mother_garden_media_get" {
+        let (Some(data), Some(kind)) = (
+            value
+                .as_object_mut()
+                .and_then(|object| object.remove("data"))
+                .and_then(|data| data.as_str().map(str::to_owned)),
+            value["mediaType"].as_str().map(str::to_owned),
+        ) else {
+            return size_error();
+        };
+        let mut reply = CallToolResult::success(vec![
+            rmcp::model::ContentBlock::image(data, kind),
+            rmcp::model::ContentBlock::text(value.to_string()),
+        ]);
+        reply.structured_content = Some(value);
+        return reply;
+    }
     let collection = match name {
         "mother_get_context" | "mother_search_context" => Some("records"),
         "mother_get_record_history" if value["revisions"].is_array() => Some("revisions"),

@@ -697,7 +697,7 @@ fn prepare_grant(
             || scopes.iter().any(|s| {
                 !matches!(
                     s.as_str(),
-                    "read" | "context:propose" | "garden:read" | "garden:propose"
+                    "read" | "context:propose" | "garden:read" | "garden:propose" | "media:meta"
                 )
             }))
     {
@@ -706,6 +706,7 @@ fn prepare_grant(
             "Shared grants cannot receive canonical writes or full graph visibility.",
         ));
     }
+    super::media::validate_scopes(scopes, access.mode == AccessMode::Shared).map_err(invalid)?;
     let mut bytes = [0; 32];
     rand::rng().fill_bytes(&mut bytes);
     let token = bytes.iter().map(|b| format!("{b:02x}")).collect::<String>();

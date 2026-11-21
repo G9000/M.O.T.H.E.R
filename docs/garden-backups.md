@@ -27,6 +27,8 @@ Derived query indexes are rebuilt from canonical revisions. Vector data, paginat
 
 ## Artifact bytes
 
+Images have their own owner commands, provenance and verification; see [visual memory](visual-memory.md). Bundles include media assets, append-only acquisition records and derivative links, and restore validates them with the blobs they describe. Bundles written before media support omit those sections and still restore.
+
 Blob ingestion is an owner operation. `GardenStore::put_blob_file` reads the file path explicitly supplied by the owner; MCP drafts cannot request a filesystem read. Bytes are hashed and stored in 1 MiB chunks inside the database transaction.
 
 A backup includes ingested blob metadata and bytes. Every artifact source referenced by current or historical graph records, write receipts, pending proposals or reviews must have matching bytes, size and SHA-256. A missing historical or pending-only artifact causes backup or restore to fail. URI sources remain pointers: backup never fetches a URI or treats arbitrary opaque extension text as an artifact reference.

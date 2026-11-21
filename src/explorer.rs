@@ -8,6 +8,7 @@ use rand::RngCore;
 use serde_json::json;
 use std::{
     borrow::Cow,
+    collections::BTreeMap,
     io::{Read, Write},
     net::{Ipv4Addr, TcpListener, TcpStream},
     path::Path,
@@ -61,6 +62,19 @@ fn asset(path: &str) -> Option<(&'static str, &'static [u8])> {
     })
 }
 
+const HTML: &str = "text/html; charset=utf-8";
+const GALLERY_HTML: &[u8] = include_bytes!("../assets/media-gallery/index.html");
+const GALLERY_JS: &[u8] = include_bytes!("../assets/media-gallery/gallery.js");
+/// Total image bytes one gallery snapshot may hold in memory.
+const GALLERY_BYTES: u64 = 256 * 1024 * 1024;
+
+/// One owner snapshot of attached images, loaded before the database is released.
+#[derive(Debug, Default)]
+struct Gallery {
+    listing: Vec<u8>,
+    images: BTreeMap<String, (&'static str, Vec<u8>)>,
+}
+
 fn secret() -> String {
     let mut bytes = [0; 32];
     rand::rng().fill_bytes(&mut bytes);
@@ -90,6 +104,7 @@ struct Site {
     launch: Mutex<Option<String>>,
     session: Mutex<Option<String>>,
     snapshot: Vec<u8>,
+    gallery: Option<Gallery>,
 }
 impl Site {
     fn new(port: u16, launch: String, snapshot: Vec<u8>) -> Self {
@@ -100,7 +115,54 @@ impl Site {
             launch: Mutex::new(Some(launch)),
             session: Mutex::new(None),
             snapshot,
+            gallery: None,
         }
+    }
+    fn with_gallery(port: u16, launch: String, gallery: Gallery) -> Self {
+        let mut site = Self::new(port, launch, gallery.listing.clone());
+        site.gallery = Some(gallery);
+        site
+    }
+    fn signed_in(&self, bearer: Option<&str>) -> bool {
+        let session = self.session.lock().unwrap_or_else(|e| e.into_inner());
+        matches(session.as_deref(), bearer)
+    }
+    /// Gallery routes; `None` falls through to the shared session and snapshot routes.
+    fn gallery_reply(&self, method: &str, path: &str, bearer: Option<&str>) -> Option<Reply> {
+        let gallery = self.gallery.as_ref()?;
+        let page = |kind, body: &'static [u8]| Reply {
+            status: 200,
+            kind,
+            body: Cow::Borrowed(body),
+        };
+        Some(match (method, path) {
+            ("GET", "/") => page(HTML, GALLERY_HTML),
+            ("GET", "/gallery.js") => page(JS, GALLERY_JS),
+            ("GET", "/api/media") if self.signed_in(bearer) => Reply {
+                status: 200,
+                kind: JSON,
+                body: Cow::Owned(gallery.listing.clone()),
+            },
+            ("GET", path) if path.starts_with("/api/media") => {
+                if !self.signed_in(bearer) {
+                    return Some(Reply::refuse(
+                        401,
+                        "Open the gallery from the link in your terminal.",
+                    ));
+                }
+                let sha = path.strip_prefix("/api/media/").unwrap_or_default();
+                match gallery.images.get(sha) {
+                    Some((kind, bytes)) => Reply {
+                        status: 200,
+                        kind,
+                        body: Cow::Owned(bytes.clone()),
+                    },
+                    None => Reply::refuse(404, "Not found."),
+                }
+            }
+            ("GET", _) if asset(path).is_some() => Reply::refuse(404, "Not found."),
+            _ => return None,
+        })
     }
 
     fn respond(&self, head: &str) -> Reply {
@@ -131,6 +193,9 @@ impl Site {
         let bearer = header("authorization").and_then(|value| value.strip_prefix("Bearer "));
         // (the page reads its own drawing options, such as ?quality=low, from the address)
         let path = path.split_once('?').map_or(path, |(path, _)| path);
+        if let Some(reply) = self.gallery_reply(method, path, bearer) {
+            return reply;
+        }
         match (method, path) {
             ("GET", path) if asset(path).is_some() => {
                 let (kind, body) = asset(path).expect("checked above");
@@ -240,18 +305,83 @@ fn open_browser(url: &str) {
     }
 }
 
+/// Snapshot attached images. Derivatives are shown first; an original carrying
+/// embedded location or device data is withheld unless the owner asks for originals.
+fn gallery(store: &GardenStore, originals: bool) -> Result<Gallery> {
+    let list = store
+        .media_owner_list(None)
+        .map_err(mother::garden::config::domain_error)?;
+    let mut gallery = Gallery::default();
+    let (mut shown, mut withheld, mut total, mut truncated) = (Vec::new(), 0u64, 0u64, false);
+    for entry in list["assets"].as_array().into_iter().flatten() {
+        let asset = &entry["asset"];
+        let uses = entry["uses"].as_array().map_or(0, Vec::len);
+        if uses == 0 {
+            continue;
+        }
+        let clean = asset["embeddedMetadata"]
+            .as_array()
+            .is_some_and(Vec::is_empty);
+        let (variant, sha) = match entry["derivatives"][0].as_str() {
+            Some(derivative) => ("derivative", derivative),
+            None if clean || originals => {
+                ("original", asset["sha256"].as_str().unwrap_or_default())
+            }
+            None => {
+                withheld += 1;
+                continue;
+            }
+        };
+        let Some(kind) = mother::media::MEDIA_TYPES
+            .iter()
+            .find(|t| **t == asset["mediaType"])
+        else {
+            continue;
+        };
+        let bytes = store
+            .media_owner_bytes(sha)
+            .map_err(mother::garden::config::domain_error)?;
+        total += bytes.len() as u64;
+        if total > GALLERY_BYTES {
+            truncated = true;
+            break;
+        }
+        gallery.images.insert(sha.to_owned(), (kind, bytes));
+        shown.push(
+            json!({"sha256":sha,"originalSha256":asset["sha256"],"variant":variant,
+            "mediaType":kind,"width":asset["width"],"height":asset["height"],
+            "acquisitions":entry["acquisitions"],"uses":uses}),
+        );
+    }
+    gallery.listing = serde_json::to_vec(
+        &json!({"images":shown,"withheld":withheld,"truncated":truncated,"readOnly":true}),
+    )?;
+    Ok(gallery)
+}
+
 /// Read one snapshot, release the database, then serve it on loopback until interrupted.
-pub(crate) fn run(db: &Path, limit: usize, open: bool) -> Result<()> {
-    let view = GardenStore::open_active(db)?.v1_garden_view(limit)?;
+pub(crate) fn run(db: &Path, limit: usize, open: bool, media: Option<bool>) -> Result<()> {
     let listener = TcpListener::bind((Ipv4Addr::LOCALHOST, 0))?;
     let port = listener.local_addr()?.port();
     let launch = secret();
     let url = format!("http://127.0.0.1:{port}/#{launch}");
-    let site = Arc::new(Site::new(port, launch, serde_json::to_vec(&view)?));
-    println!(
-        "{}",
-        json!({"url": url, "shown": view["shown"], "total": view["total"], "readOnly": true})
-    );
+    let site = if let Some(originals) = media {
+        let gallery = gallery(&GardenStore::open_active(db)?, originals)?;
+        let listing: serde_json::Value = serde_json::from_slice(&gallery.listing)?;
+        println!(
+            "{}",
+            json!({"url": url, "images": listing["images"].as_array().map_or(0, Vec::len),
+                "withheld": listing["withheld"], "readOnly": true})
+        );
+        Arc::new(Site::with_gallery(port, launch, gallery))
+    } else {
+        let view = GardenStore::open_active(db)?.v1_garden_view(limit)?;
+        println!(
+            "{}",
+            json!({"url": url, "shown": view["shown"], "total": view["total"], "readOnly": true})
+        );
+        Arc::new(Site::new(port, launch, serde_json::to_vec(&view)?))
+    };
     std::io::stdout().flush()?;
     eprintln!(
         "The link works once. The garden is a snapshot taken just now; press Ctrl+C to close it."
@@ -304,6 +434,118 @@ mod tests {
         assert_eq!(reply.status, 200);
         let body: serde_json::Value = serde_json::from_slice(&reply.body).unwrap();
         body["session"].as_str().unwrap().to_owned()
+    }
+
+    #[test]
+    fn gallery_withholds_originals_with_embedded_metadata_unless_asked() {
+        use mother::garden::{
+            access::GardenAccess,
+            contracts::BatchRequest,
+            media_tools::{
+                AcquisitionInput, AttachRequest, AttachSource, IngestOptions, MediaOrigin,
+            },
+        };
+        let dir = tempfile::tempdir().unwrap();
+        let (ws, generation) = (
+            uuid::Uuid::new_v4().to_string(),
+            uuid::Uuid::new_v4().to_string(),
+        );
+        let store = GardenStore::initialize(dir.path().join("g.redb"), &ws, &generation).unwrap();
+        let writer = store
+            .grant(
+                "writer",
+                &["garden:read".into(), "garden:write".into()],
+                &mother::access::ClientAccess::default(),
+                &GardenAccess::All {},
+            )
+            .unwrap();
+        let batch: BatchRequest = serde_json::from_value(json!({"version":2,"workspaceId":ws,"generation":generation,
+            "operationId":uuid::Uuid::new_v4().to_string(),"requiredExtensions":{},"items":[
+            {"itemKey":"p","mutation":"create","expectedRevision":0,"draft":{"kind":"entity","entityType":"test:place","displayName":"Synthetic","aliases":[],"extensions":{}}},
+            {"itemKey":"m","mutation":"create","expectedRevision":0,"draft":{"kind":"assertion","subject":{"refType":"item","kind":"entity","itemKey":"p"},"predicate":"test:seen","object":{"type":"value","value":{"type":"boolean","value":true}},"validTime":{"validFrom":null,"validUntil":null,"sourceTimezone":null,"precision":"unknown"},"observedTime":{"at":null,"sourceTimezone":null,"precision":"unknown"},"evidence":[],"confidence":null,"extensions":{}}}]})).unwrap();
+        let memory = store.apply(&writer, &batch).unwrap().receipt.results[1]
+            .reference
+            .id
+            .clone();
+        // A JPEG whose EXIF block carries a GPS pointer.
+        let mut jpeg = vec![0xFF, 0xD8, 0xFF, 0xE1, 0, 30];
+        jpeg.extend_from_slice(&[
+            b'E', b'x', b'i', b'f', 0, 0, b'I', b'I', b'*', 0, 8, 0, 0, 0, 1, 0, 0x25, 0x88, 2, 0,
+            1, 0, 0, 0, 0, 0, 0, 0,
+        ]);
+        jpeg.extend_from_slice(&[0xFF, 0xDA, 0, 8, 1, 1, 0, 0, 0x3F, 0, 0x12, 0xFF, 0xD9]);
+        let path = dir.path().join("gps.jpg");
+        std::fs::write(&path, &jpeg).unwrap();
+        store
+            .media_attach(&AttachRequest {
+                source: AttachSource::File {
+                    path: &path,
+                    input: AcquisitionInput::new(MediaOrigin::Captured),
+                    options: IngestOptions::default(),
+                },
+                target: memory,
+                expected_revision: 1,
+                note: None,
+            })
+            .unwrap();
+        let hidden: serde_json::Value =
+            serde_json::from_slice(&gallery(&store, false).unwrap().listing).unwrap();
+        assert_eq!(
+            (
+                hidden["images"].as_array().unwrap().len(),
+                hidden["withheld"].as_u64()
+            ),
+            (0, Some(1))
+        );
+        let shown = gallery(&store, true).unwrap();
+        assert_eq!(shown.images.len(), 1);
+        assert_eq!(shown.images.values().next().unwrap().1, jpeg);
+    }
+
+    #[test]
+    fn gallery_images_need_the_single_session_and_stay_local() {
+        let gallery = Gallery {
+            listing: b"{\"images\":[]}".to_vec(),
+            images: BTreeMap::from([("ab".repeat(32), ("image/png", vec![1, 2, 3]))]),
+        };
+        let site = Site::with_gallery(4100, "launch-token".into(), gallery);
+        let page = site.respond(&request("GET", "/", &[]));
+        assert_eq!(page.body.as_ref(), GALLERY_HTML);
+        assert_eq!(site.respond(&request("GET", "/gallery.js", &[])).kind, JS);
+        assert_eq!(
+            site.respond(&request("GET", "/assets/index.js", &[]))
+                .status,
+            404,
+            "the 3D explorer is not served in gallery mode"
+        );
+        let image = format!("/api/media/{}", "ab".repeat(32));
+        assert_eq!(site.respond(&request("GET", &image, &[])).status, 401);
+        assert_eq!(site.respond(&request("GET", "/api/media", &[])).status, 401);
+        let token = session(&site);
+        let bearer = format!("Authorization: Bearer {token}");
+        let reply = site.respond(&request("GET", &image, &[&bearer]));
+        assert_eq!((reply.status, reply.kind), (200, "image/png"));
+        assert_eq!(reply.body.as_ref(), [1, 2, 3]);
+        assert_eq!(
+            site.respond(&request("GET", "/api/media/unknown", &[&bearer]))
+                .status,
+            404
+        );
+        assert_eq!(
+            site.respond(&request("GET", "/api/media", &[&bearer]))
+                .body
+                .as_ref(),
+            b"{\"images\":[]}"
+        );
+        assert_eq!(
+            site.respond(&request(
+                "GET",
+                &image,
+                &[&bearer, "Origin: https://elsewhere.example"]
+            ))
+            .status,
+            403
+        );
     }
 
     #[test]

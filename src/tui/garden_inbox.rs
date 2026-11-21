@@ -12,6 +12,9 @@ use mother::{
             OutcomeStatus, bounded_json,
         },
         inbox::validate_reviewed_items,
+        media_tools::{
+            AcquisitionInput, AttachmentReview, IngestOptions, MediaOrigin, PENDING_URI,
+        },
         store::GardenStore,
     },
 };
@@ -30,6 +33,8 @@ enum Page {
     Edit,
     ConfirmApprove,
     ConfirmDismiss,
+    AttachPath,
+    ConfirmAttach,
 }
 
 pub(super) struct Inbox {
@@ -50,6 +55,10 @@ pub(super) struct Inbox {
     pending: Option<Value>,
     blocked: bool,
     message: String,
+    attach_path: String,
+    accept_description: bool,
+    strip_metadata: bool,
+    target_media: Vec<String>,
 }
 impl Inbox {
     fn empty(path: PathBuf) -> Self {
@@ -71,6 +80,10 @@ impl Inbox {
             pending: None,
             blocked: false,
             message: "Graph proposals stay outside canonical recall until approved.".into(),
+            attach_path: String::new(),
+            accept_description: false,
+            strip_metadata: true,
+            target_media: vec![],
         }
     }
     pub(super) fn open(path: PathBuf) -> Result<Self> {
@@ -132,6 +145,97 @@ impl Inbox {
         self.message =
             "Review every original and reviewed item, evidence and revision before approval."
                 .into();
+    }
+    /// The pending attachment item of the open proposal, if it awaits an original image.
+    fn pending_attachment(&self) -> Option<&Value> {
+        self.proposal["request"]["items"]
+            .as_array()?
+            .iter()
+            .find(|item| item["draft"]["source"]["uri"] == PENDING_URI)
+            .map(|item| &item["draft"]["extensions"]["mother.media:pending"]["payload"])
+    }
+    fn load_target_media(&mut self) {
+        let target = self
+            .pending_attachment()
+            .and_then(|p| p["target"]["id"].as_str())
+            .map(str::to_owned);
+        self.target_media = match target.map(|id| {
+            GardenStore::open_active(&self.path)
+                .and_then(|store| store.media_owner_list(Some(&id)).map_err(domain_error))
+        }) {
+            Some(Ok(list)) => list["assets"]
+                .as_array()
+                .into_iter()
+                .flatten()
+                .map(|entry| {
+                    let asset = &entry["asset"];
+                    format!(
+                        "  {}…  {}  {} bytes  {}x{}  embedded: {}",
+                        asset["sha256"]
+                            .as_str()
+                            .unwrap_or("")
+                            .get(..12)
+                            .unwrap_or(""),
+                        asset["mediaType"].as_str().unwrap_or("?"),
+                        asset["sizeBytes"],
+                        asset["width"],
+                        asset["height"],
+                        asset["embeddedMetadata"]
+                    )
+                })
+                .collect(),
+            Some(Err(error)) => vec![format!("  Attachments unavailable: {error}")],
+            None => vec![],
+        };
+    }
+    fn commit_attachment(&mut self) {
+        let request = json!({"version":2,"workspaceId":self.workspace["id"],
+            "generation":self.workspace["generation"],"operationId":uuid::Uuid::new_v4().to_string(),
+            "proposalId":self.proposal["id"],"expectedRevision":self.proposal["revision"],"action":"approve"});
+        let path = PathBuf::from(self.attach_path.trim());
+        let mut input = AcquisitionInput::new(MediaOrigin::Uploaded);
+        input.original_filename = path
+            .file_name()
+            .and_then(|name| name.to_str())
+            .map(str::to_owned);
+        let result = GardenStore::open_active(&self.path).and_then(|store| {
+            store
+                .review_attachment(
+                    request,
+                    &AttachmentReview {
+                        path: &path,
+                        input,
+                        options: IngestOptions {
+                            strip_metadata: self.strip_metadata,
+                            ..IngestOptions::default()
+                        },
+                        accept_description: self.accept_description,
+                    },
+                )
+                .map_err(domain_error)
+        });
+        match result {
+            Ok((_, ingest)) => {
+                self.page = Page::List;
+                self.reset_page();
+                let text = format!(
+                    "Image {} attached and proposal approved in one transaction.",
+                    ingest.sha256.get(..12).unwrap_or(&ingest.sha256)
+                );
+                self.message = match self.reload() {
+                    Ok(()) => text,
+                    Err(error) => format!("{text} Refresh failed: {error}"),
+                };
+            }
+            Err(error) if error.code() == "STORE_UNAVAILABLE" => {
+                self.page = Page::Review;
+                self.message = "Result uncertain. Return to the inbox and reopen this proposal to check its status before retrying.".into();
+            }
+            Err(error) => {
+                self.page = Page::Review;
+                self.message = format!("Attachment not applied; nothing was stored: {error}");
+            }
+        }
     }
     fn validate_candidate(&self) -> Result<()> {
         let original: BatchRequest = serde_json::from_value(self.proposal["request"].clone())?;
@@ -276,6 +380,22 @@ impl Inbox {
                     self.page = Page::Edit;
                     self.scroll = 0;
                 }
+                KeyCode::Char('a') if !self.blocked && self.pending_attachment().is_some() => {
+                    self.message =
+                        "This proposal awaits the original image. Press f to choose the file."
+                            .into();
+                }
+                KeyCode::Char('f')
+                    if !self.blocked
+                        && self.proposal["status"] == "pending"
+                        && self.pending_attachment().is_some() =>
+                {
+                    self.editor.clear();
+                    self.cursor = 0;
+                    self.load_target_media();
+                    self.page = Page::AttachPath;
+                    self.scroll = 0;
+                }
                 KeyCode::Char('a') if !self.blocked => match self.validate_candidate() {
                     Ok(()) => {
                         self.page = Page::ConfirmApprove;
@@ -314,6 +434,29 @@ impl Inbox {
                     }
                 }
                 _ => self.edit(key),
+            },
+            Page::AttachPath => match key.code {
+                KeyCode::Esc => {
+                    self.page = Page::Review;
+                    self.scroll = 0;
+                }
+                KeyCode::Enter if !self.editor.trim().is_empty() => {
+                    self.attach_path = self.editor.trim().to_owned();
+                    self.page = Page::ConfirmAttach;
+                    self.scroll = 0;
+                }
+                KeyCode::Enter => {}
+                _ => self.edit(key),
+            },
+            Page::ConfirmAttach => match key.code {
+                KeyCode::Esc => {
+                    self.page = Page::Review;
+                    self.scroll = 0;
+                }
+                KeyCode::Char('x') => self.accept_description = !self.accept_description,
+                KeyCode::Char('s') => self.strip_metadata = !self.strip_metadata,
+                KeyCode::Enter => self.commit_attachment(),
+                _ => self.scroll_key(key.code),
             },
             Page::ConfirmApprove | Page::ConfirmDismiss => match key.code {
                 KeyCode::Esc => {
@@ -382,7 +525,7 @@ impl Inbox {
         }
     }
     pub(super) fn paste(&mut self, text: &str) {
-        if self.page == Page::Edit && self.pending.is_none() {
+        if matches!(self.page, Page::Edit | Page::AttachPath) && self.pending.is_none() {
             self.insert(text);
         }
     }
@@ -422,6 +565,40 @@ impl Inbox {
             lines.push(editor);
             return lines.join("\n");
         }
+        if matches!(self.page, Page::AttachPath | Page::ConfirmAttach) {
+            let pending = self.pending_attachment().cloned().unwrap_or(Value::Null);
+            lines.push(format!(
+                "Attach the original image to assertion {} (expected revision {}).",
+                pending["target"]["id"], pending["expectedRevision"]
+            ));
+            lines.push(format!(
+                "Proposer {} described it as: {}",
+                self.proposal["proposer"], pending["description"]
+            ));
+            lines.push("Images already attached to this assertion:".into());
+            if self.target_media.is_empty() {
+                lines.push("  (none)".into());
+            }
+            lines.extend(self.target_media.iter().cloned());
+            if self.page == Page::AttachPath {
+                lines.push("Type or paste the path of the original file on this computer. Enter continues; Esc returns.".into());
+                let mut editor = self.editor.clone();
+                editor.insert(self.cursor, '▏');
+                lines.push(editor);
+            } else {
+                lines.push(format!("File: {}", self.attach_path));
+                lines.push(format!(
+                    "s  store a copy without location/device metadata: {}",
+                    if self.strip_metadata { "yes" } else { "no" }
+                ));
+                lines.push(format!(
+                    "x  keep the proposer's description as an attributed interpretation: {}",
+                    if self.accept_description { "yes" } else { "no" }
+                ));
+                lines.push("Enter stores the original unchanged, links it and approves in one transaction; Esc returns.".into());
+            }
+            return lines.join("\n");
+        }
         if self.page == Page::ConfirmApprove {
             lines.push("Confirm approval of ALL reviewed items below: Enter approves atomically; Esc returns.".into());
         } else if self.page == Page::ConfirmDismiss {
@@ -432,6 +609,8 @@ impl Inbox {
                     "Resolved proposal   ↑↓ / PgUp PgDn scroll   Esc inbox"
                 } else if self.blocked {
                     "Approval blocked   d dismiss proposal   ↑↓ / PgUp PgDn scroll   Esc inbox"
+                } else if self.pending_attachment().is_some() {
+                    "f attach the original file   d dismiss   ↑↓ / PgUp PgDn scroll   Esc inbox"
                 } else {
                     "a approve   e edit/add items   d dismiss   ↑↓ / PgUp PgDn scroll   Esc inbox"
                 }

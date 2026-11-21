@@ -302,3 +302,38 @@ fn lost_approval_response_reconciles_the_saved_operation_without_second_commit()
     assert_eq!(store.review_proposal(request).unwrap().receipt, receipt);
     assert_eq!(store.audit(&auth).unwrap().sequence, 1);
 }
+
+#[test]
+fn pending_attachment_asks_for_the_original_file_instead_of_approving() {
+    let mut inbox = fixture();
+    let target = uuid::Uuid::new_v4().to_string();
+    inbox.open_proposal(json!({"id":uuid::Uuid::new_v4().to_string(),"revision":1,
+        "status":"pending","generation":inbox.workspace["generation"],"proposer":"synthetic-agent",
+        "request":{"version":2,"workspaceId":inbox.workspace["id"],"generation":inbox.workspace["generation"],
+        "operationId":uuid::Uuid::new_v4().to_string(),"requiredExtensions":{},"items":[
+          {"itemKey":"photo","expectedRevision":0,"mutation":"create","draft":{"kind":"evidence",
+          "source":{"type":"uri","uri":PENDING_URI},"excerpt":null,
+          "observedTime":{"at":null,"sourceTimezone":null,"precision":"unknown"},
+          "extensions":{"mother.media:pending":{"schemaVersion":1,"payload":{
+            "target":{"kind":"assertion","id":target},"expectedRevision":1,
+            "description":"A synthetic harbour"}}}}}]}}));
+    assert!(inbox.body().contains("f attach the original file"));
+    let key = |code| KeyEvent::new(code, KeyModifiers::NONE);
+    inbox.input(key(KeyCode::Char('a'))).unwrap();
+    assert_eq!(inbox.page, Page::Review);
+    assert!(inbox.message.contains("awaits the original image"));
+    inbox.input(key(KeyCode::Char('f'))).unwrap();
+    assert_eq!(inbox.page, Page::AttachPath);
+    inbox.paste("C:/synthetic/harbour.png");
+    inbox.input(key(KeyCode::Enter)).unwrap();
+    assert_eq!(inbox.page, Page::ConfirmAttach);
+    let body = inbox.body();
+    assert!(body.contains(&target) && body.contains("A synthetic harbour"));
+    assert!(body.contains("C:/synthetic/harbour.png"));
+    assert!(body.contains("location/device metadata: yes"));
+    inbox.input(key(KeyCode::Char('x'))).unwrap();
+    assert!(inbox.body().contains("attributed interpretation: yes"));
+    inbox.input(key(KeyCode::Esc)).unwrap();
+    assert_eq!(inbox.page, Page::Review);
+    assert!(inbox.pending.is_none(), "no review request was prepared");
+}

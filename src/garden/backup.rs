@@ -1,7 +1,7 @@
 //! Streaming, credential-free Garden bundles and atomic fresh-file restoration.
 use super::{
     CURRENT, GardenStore, META, RECEIPTS, REPLACEMENTS, Result, compat, decode, encode, failure,
-    history, inbox, indexes, state_read, state_write, storage_error, validate_identity,
+    history, inbox, indexes, media, state_read, state_write, storage_error, validate_identity,
 };
 use crate::{
     contracts,
@@ -25,8 +25,9 @@ const FORMAT: u32 = 1;
 const MAX_ROW: usize = 4 * 1024 * 1024;
 const CHUNK_TARGET: usize = 8 * 1024 * 1024;
 const BLOB_CHUNK: usize = 1024 * 1024;
-const BLOBS: TableDefinition<&str, &[u8]> = TableDefinition::new("garden_blob_metadata");
-const BLOB_BYTES: TableDefinition<(&str, u64), &[u8]> = TableDefinition::new("garden_blob_chunks");
+pub(super) const BLOBS: TableDefinition<&str, &[u8]> = TableDefinition::new("garden_blob_metadata");
+pub(super) const BLOB_BYTES: TableDefinition<(&str, u64), &[u8]> =
+    TableDefinition::new("garden_blob_chunks");
 const INBOX: TableDefinition<&str, &[u8]> = TableDefinition::new("garden_inbox");
 const REVIEWS: TableDefinition<&str, &[u8]> = TableDefinition::new("garden_review_operations");
 const FAMILIES: TableDefinition<&str, &[u8]> = TableDefinition::new("garden_operation_families");
@@ -119,7 +120,14 @@ fn unhex(text: &str) -> Result<Vec<u8>> {
 fn byte_tables() -> Vec<TableDefinition<'static, &'static str, &'static [u8]>> {
     let mut tables = vec![META, CURRENT, RECEIPTS, INBOX, REVIEWS, FAMILIES, BLOBS];
     tables.extend(compat::backup_tables().iter().copied());
+    tables.extend(MEDIA_TABLES);
     tables
+}
+/// Media sections added after format 1 shipped; bundles written earlier omit them.
+const MEDIA_TABLES: [TableDefinition<'static, &'static str, &'static [u8]>; 3] =
+    [media::ASSETS, media::ACQUISITIONS, media::DERIVATIVES];
+fn optional_section(name: &str) -> bool {
+    MEDIA_TABLES.iter().any(|t| t.name() == name)
 }
 fn sections() -> BTreeSet<String> {
     byte_tables()
@@ -295,10 +303,18 @@ impl GardenStore {
     /// Stream owner-supplied bytes into one content-addressed database transaction.
     /// # Errors
     /// Rejects empty input, read failures, conflicting content addresses or storage failure.
-    pub fn put_blob(&self, mut reader: impl Read) -> Result<BlobInfo> {
+    pub fn put_blob(&self, reader: impl Read) -> Result<BlobInfo> {
         let mut tx = self.db.begin_write().map_err(storage_error)?;
         tx.set_durability(Durability::Immediate)
             .map_err(storage_error)?;
+        let info = put_blob_tx(&tx, reader)?;
+        tx.commit().map_err(storage_error)?;
+        Ok(info)
+    }
+}
+/// Stage content-addressed chunks inside a caller-owned write transaction.
+pub(super) fn put_blob_tx(tx: &redb::WriteTransaction, mut reader: impl Read) -> Result<BlobInfo> {
+    {
         let temporary = Uuid::new_v4().to_string();
         let mut hash = Sha256::new();
         let mut size = 0u64;
@@ -359,9 +375,10 @@ impl GardenStore {
             .map_err(storage_error)?
             .insert(info.sha256.as_str(), encode(&info)?.as_slice())
             .map_err(storage_error)?;
-        tx.commit().map_err(storage_error)?;
         Ok(info)
     }
+}
+impl GardenStore {
     /// Read a file only from the trusted owner API, never from graph/MCP inputs.
     /// # Errors
     /// Propagates file access and blob transaction errors.
@@ -401,6 +418,7 @@ impl GardenStore {
             return Err(bad("Unknown canonical multimap table"));
         }
         validate_blobs(&tx)?;
+        media::validate(&tx)?;
         create_bundle_dir(out)?;
         let owner = Uuid::new_v4().to_string();
         let marker = out.join(".mother-backup-owner");
@@ -606,14 +624,17 @@ fn read_manifest(bundle: &Path) -> Result<Manifest> {
     validate_identity(&manifest.workspace_id, &manifest.generation)?;
     if manifest.format != FORMAT
         || manifest.required_extensions != BTreeMap::from([("mother:full-garden".into(), 1)])
-        || manifest.sections.keys().cloned().collect::<BTreeSet<_>>() != sections()
+        || !manifest.sections.keys().all(|s| sections().contains(s))
+        || !sections()
+            .iter()
+            .all(|s| optional_section(s) || manifest.sections.contains_key(s))
     {
         return Err(bad(
             "Unsupported backup format, required extension or canonical section",
         ));
     }
     let mut files = BTreeSet::from(["manifest.json".to_owned()]);
-    let mut totals: BTreeMap<_, u64> = sections().into_iter().map(|s| (s, 0)).collect();
+    let mut totals: BTreeMap<_, u64> = manifest.sections.keys().map(|s| (s.clone(), 0)).collect();
     for (index, chunk) in manifest.chunks.iter().enumerate() {
         if chunk.file != format!("chunk-{index:08}.jsonl")
             || !files.insert(chunk.file.clone())
@@ -820,6 +841,7 @@ fn restore_staging(
         inbox::audit_read(&read)?;
         compat::validate_restored(&read).map_err(storage_error)?;
         validate_blobs(&read)?;
+        media::validate(&read)?;
     }
     hook(BackupRestoreStage::Committed);
     Ok((store, report(&manifest)))

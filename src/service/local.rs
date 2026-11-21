@@ -594,7 +594,20 @@ impl LocalService {
                     "capabilities":if graph_available {vec!["garden.entities.v2","garden.assertions.v2","garden.proposals.v2","garden.query.v2","garden.changes.v2"]} else {vec![]},
                     "definedCapabilities":["garden.entities.v2","garden.assertions.v2","garden.query.v2","garden.changes.v2","garden.proposals.v2"],
                     "definedTools":GRAPH_TOOLS,
-                    "reason":if !graph_available {"native_context_only_current_grant"} else if self.info.v1_available {"native_v1_compatibility_with_independent_graph_authority"} else {"graph_only_prototype_without_v1_compatibility_or_migration"}}}));
+                    "reason":if !graph_available {"native_context_only_current_grant"} else if self.info.v1_available {"native_v1_compatibility_with_independent_graph_authority"} else {"graph_only_prototype_without_v1_compatibility_or_migration"}}}))
+            .map(|mut value| {
+                crate::garden::media_tools::add_capabilities(
+                    &mut value,
+                    &self.store.media_tools(auth).unwrap_or_default(),
+                );
+                value
+            });
+        }
+        if name == crate::garden::media_tools::LIST_TOOL {
+            return self.store.media_list(auth, &args).map_err(domain_error);
+        }
+        if name == crate::garden::media_tools::GET_TOOL {
+            return self.store.media_get(auth, &args).map_err(domain_error);
         }
         if !GRAPH_TOOLS.contains(&name) {
             if !self.info.v1_available {

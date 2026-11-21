@@ -38,6 +38,8 @@ pub(crate) mod changes;
 pub(crate) mod compat;
 #[path = "inbox.rs"]
 pub(crate) mod inbox;
+#[path = "media.rs"]
+pub(crate) mod media;
 #[path = "migration_state.rs"]
 mod migration_state;
 #[path = "pager.rs"]
@@ -229,6 +231,7 @@ impl GardenStore {
         indexes::initialize(&tx)?;
         inbox::initialize(&tx)?;
         pager::initialize(&tx)?;
+        media::initialize(&tx)?;
         tx.commit().map_err(storage_error)?;
         Ok(Self { db, clock })
     }
@@ -261,12 +264,17 @@ impl GardenStore {
                 .is_none();
             (needs_inbox, needs_query)
         };
-        if needs_inbox || needs_query || pager::needs_initialize(&db)? {
+        if needs_inbox
+            || needs_query
+            || pager::needs_initialize(&db)?
+            || media::needs_initialize(&db)?
+        {
             let mut tx = db.begin_write().map_err(storage_error)?;
             tx.set_durability(Durability::Immediate)
                 .map_err(storage_error)?;
             inbox::initialize(&tx)?;
             pager::initialize(&tx)?;
+            media::initialize(&tx)?;
             if needs_query {
                 indexes::upgrade(&tx)?;
             }
@@ -558,6 +566,9 @@ impl GardenStore {
                         .any(|old| old.item_key == item.item_key)
                 }),
             });
+        }
+        for record in &records {
+            media::check_canonical(tx, record, &current)?;
         }
         let created: BTreeSet<_> = request
             .items
@@ -1371,6 +1382,8 @@ fn prepare_grant(
             "Explicit graph scopes and a valid client are required",
         ));
     }
+    media::validate_scopes(scopes, access.mode == AccessMode::Shared)
+        .map_err(|message| failure(GardenErrorCode::InvalidInput, message))?;
     access
         .validate()
         .map_err(|_| failure(GardenErrorCode::InvalidInput, "Invalid client access"))?;

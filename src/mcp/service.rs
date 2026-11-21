@@ -82,7 +82,13 @@ pub(super) async fn serve(path: &Path) -> Result<()> {
         Ok(Bridge {
             client,
             tools: if graph_available {
-                garden::advertised_tools(enabled)?
+                let granted: Vec<&str> = available["garden"]["availableTools"]
+                    .as_array()
+                    .ok_or_else(input_error)?
+                    .iter()
+                    .filter_map(Value::as_str)
+                    .collect();
+                garden::with_media(garden::advertised_tools(enabled)?, &granted)?
             } else if enabled {
                 garden::advertised_context_tools()?
             } else {

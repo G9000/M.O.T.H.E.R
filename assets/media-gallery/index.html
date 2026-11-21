@@ -1,0 +1,30 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="referrer" content="no-referrer">
+<title>Garden images</title>
+<style>
+  :root { color-scheme: light dark; --bg: #f6f4ef; --fg: #1f2421; --muted: #5d665f; --card: #ffffff; --line: #d9d5cb; }
+  @media (prefers-color-scheme: dark) { :root { --bg: #171a18; --fg: #e8e6e1; --muted: #a3aaa4; --card: #222622; --line: #343a35; } }
+  body { margin: 0; background: var(--bg); color: var(--fg); font: 15px/1.5 system-ui, sans-serif; }
+  header { padding: 20px 16px 8px; max-width: 1100px; margin: 0 auto; }
+  h1 { font-size: 20px; margin: 0 0 4px; }
+  p { margin: 0; color: var(--muted); }
+  main { display: grid; gap: 16px; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); padding: 16px; max-width: 1100px; margin: 0 auto; }
+  figure { margin: 0; background: var(--card); border: 1px solid var(--line); border-radius: 8px; overflow: hidden; }
+  img { display: block; width: 100%; height: 220px; object-fit: contain; background: var(--line); }
+  figcaption { padding: 10px 12px; font-size: 13px; color: var(--muted); overflow-wrap: anywhere; }
+  figcaption strong { color: var(--fg); font-weight: 600; }
+</style>
+</head>
+<body>
+<header>
+  <h1>Garden images</h1>
+  <p id="status">Opening a private local snapshot…</p>
+</header>
+<main id="images"></main>
+<script src="/gallery.js"></script>
+</body>
+</html>
