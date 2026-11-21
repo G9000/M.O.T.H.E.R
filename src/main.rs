@@ -6,6 +6,7 @@ mod explorer;
 mod garden_cli;
 mod mcp;
 mod relationships;
+mod tending;
 mod tui;
 
 #[tokio::main]

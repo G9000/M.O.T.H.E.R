@@ -6,6 +6,7 @@ pub mod contracts;
 pub mod embedding;
 pub mod error;
 pub mod garden;
+pub mod gardening;
 mod handoffs;
 mod inbox;
 pub mod limits;

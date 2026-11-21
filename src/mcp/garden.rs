@@ -137,7 +137,7 @@ fn dispatch(
             Err(error) => return Err(domain_error(error)),
         };
         return Ok(
-            json!({"version":1,"v1":{"available":v1_enabled,"contractVersion":1},
+            json!({"version":1,"v1":{"available":v1_enabled,"contractVersion":1,"gardeningEvidenceReview":1},
             "workspace":identity,"garden":{"contractVersion":2,"available":graph_available,"status":"prototype",
             "optionalVectorProfile":mother::search::embedding_profile(),"vectorPreparation":"explicit_local_sdk_or_owner_cli",
             "capabilities":if graph_available {vec!["garden.entities.v2","garden.assertions.v2","garden.proposals.v2","garden.query.v2","garden.changes.v2"]} else {vec![]},

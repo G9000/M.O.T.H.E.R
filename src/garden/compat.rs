@@ -587,6 +587,11 @@ impl GardenStore {
                     .or(tx.get(INBOX_OPERATIONS, &k)?)
                     .ok_or_else(not_found)?;
                 let mut r = op["receipt"].clone();
+                if r.get("proposal").is_some_and(Value::is_object)
+                    && gardening_review_blocked(&tx, &r["proposal"])?
+                {
+                    redact_gardening_proposal(&mut r["proposal"]);
+                }
                 p.access.receipt(&auth.client_id, &mut r)?;
                 r
             }
@@ -1804,6 +1809,10 @@ fn duplicate(tx: &impl View, draft: &Value, access: &ClientAccess) -> Result<Opt
 }
 fn full_proposal(tx: &impl View, mut p: Value, access: &ClientAccess) -> Result<Value> {
     let w = metadata(tx, "workspace")?;
+    if gardening_review_blocked(tx, &p)? {
+        redact_gardening_proposal(&mut p);
+        return Ok(p);
+    }
     let current = p["targetId"]
         .as_str()
         .map(|id| record(tx, id))
@@ -1836,6 +1845,74 @@ fn full_proposal(tx: &impl View, mut p: Value, access: &ClientAccess) -> Result<
     }
     p["similarRecordIds"] = json!(similar);
     Ok(p)
+}
+
+fn redact_gardening_proposal(proposal: &mut Value) {
+    proposal["conflict"] = json!(true);
+    proposal["source"] = json!("Memory Gardening evidence is no longer current or authorized.");
+    proposal["record"] = json!({"kind":"memory","status":"active","basis":"model_inference",
+        "title":"Memory Gardening evidence unavailable",
+        "content":"The bound evidence cannot be reviewed under current source access and revisions.",
+        "references":[],"sources":[]});
+    for field in ["before", "currentRecord", "duplicateRecordId", "receipt"] {
+        proposal[field] = Value::Null;
+    }
+    proposal["similarRecordIds"] = json!([]);
+}
+
+fn gardening_evidence(
+    tx: &impl View,
+    proposal: &Value,
+    candidate: &Value,
+    proposer: &Principal,
+) -> Result<()> {
+    let Some(bindings) = crate::gardening::bindings(string(proposal, "source")?)? else {
+        return Ok(());
+    };
+    let stale = || {
+        Error::domain(
+            "CONFLICT",
+            "Memory Gardening evidence is no longer current or authorized.",
+        )
+    };
+    let target = proposal.get("targetId").unwrap_or(&proposal["id"]);
+    if !target.is_null()
+        || proposal["expectedRevision"] != 0
+        || candidate["kind"] != "memory"
+        || candidate["basis"] != "model_inference"
+        || candidate["status"] != "active"
+        || !proposer.scopes.iter().any(|scope| scope == "read")
+    {
+        return Err(stale());
+    }
+    let refs = candidate["references"].as_array().ok_or_else(stale)?;
+    for (id, revision) in bindings {
+        if !proposer.access.allows(id) || !refs.iter().any(|reference| reference == id) {
+            return Err(stale());
+        }
+        let Some(source) = tx.get(RECORDS, id)? else {
+            return Err(stale());
+        };
+        if source["revision"].as_u64() != Some(revision) || !recallable(&source) {
+            return Err(stale());
+        }
+    }
+    Ok(())
+}
+
+fn gardening_review_blocked(tx: &impl View, proposal: &Value) -> Result<bool> {
+    if crate::gardening::bindings(string(proposal, "source")?)?.is_none() {
+        return Ok(false);
+    }
+    let Some(value) = tx.get(PRINCIPALS, string(proposal, "actor")?)? else {
+        return Ok(true);
+    };
+    let proposer: Principal = serde_json::from_value(value)?;
+    match gardening_evidence(tx, proposal, &proposal["record"], &proposer) {
+        Ok(()) => Ok(false),
+        Err(error) if error.code() == "CONFLICT" => Ok(true),
+        Err(error) => Err(error),
+    }
 }
 fn persist_inbox_operation(
     tx: &redb::WriteTransaction,
@@ -1877,9 +1954,13 @@ fn propose(
     }
     p.access.references(&v["record"])?;
     if let Some(mut r) = prior(tx, &auth.client_id, &v, "v1_propose")? {
+        if gardening_review_blocked(tx, &r["proposal"])? {
+            redact_gardening_proposal(&mut r["proposal"]);
+        }
         p.access.receipt(&auth.client_id, &mut r)?;
         return Ok(r);
     }
+    gardening_evidence(tx, &v, &v["record"], &p)?;
     let before = v["id"].as_str().map(|id| record(tx, id)).transpose()?;
     if let Some(r) = &before {
         if r["revision"] != v["expectedRevision"] {
@@ -1985,6 +2066,7 @@ impl GardenStore {
                 proposer.access.require(id)?;
             }
             proposer.access.references(&draft)?;
+            gardening_evidence(&tx, &p, &draft, &proposer)?;
             if p["targetId"].is_null()
                 && duplicate(&tx, &draft, &ClientAccess::default())?.is_some()
             {

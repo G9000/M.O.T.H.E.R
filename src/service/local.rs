@@ -586,7 +586,7 @@ impl LocalService {
                 return Err(invalid());
             }
             return Ok(json!({"version":1,"workspace":identity,
-                "v1":{"available":self.info.v1_available,"contractVersion":1},
+                "v1":{"available":self.info.v1_available,"contractVersion":1,"gardeningEvidenceReview":1},
                 "garden":{"contractVersion":2,"available":graph_available,"status":"prototype",
                     "optionalVectorProfile":crate::search::embedding_profile(),
                     "vectorPreparation":"explicit_local_sdk_or_owner_cli",

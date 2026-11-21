@@ -45,6 +45,8 @@ pub(crate) enum GardenCommand {
     Relationships(crate::relationships::Browse),
     /// Submit a directed relationship for native owner review.
     SuggestLink(crate::relationships::Suggest),
+    /// Review a bounded authorized slice for non-destructive gardening suggestions.
+    Tend(crate::tending::Tend),
     /// Apply an explicitly reviewed owner request; this operation is never exposed through MCP.
     Review {
         #[arg(long)]
@@ -340,6 +342,7 @@ pub(crate) fn execute_garden(command: GardenCommand) -> Result<()> {
     match command {
         GardenCommand::Relationships(args) => crate::relationships::browse(args),
         GardenCommand::SuggestLink(args) => crate::relationships::suggest(args),
+        GardenCommand::Tend(args) => crate::tending::run(args),
         GardenCommand::Review { db, request, graph } => {
             let store = GardenStore::open_active(absolute(&db)?)?;
             let request = read_json(&absolute(&request)?, 2_097_152)?;

@@ -16,6 +16,8 @@ Claude Code also supports [opt-in capture and resumable backfill](claude-code-ca
 
 For a private, dated letter written from the witnessing agent's perspective, use the [Witness Journal skill](witness-journal.md). Drafts enter the inbox only when you ask to submit them.
 
+Use [Memory Gardening](memory-gardening.md) to find records worth revisiting and submit linked annotations for the same owner review.
+
 Stop the native owner service before opening its database with an owner command. Run `mother garden v1-inbox --db <garden.redb>` for v1 proposals or `mother garden inbox --db <garden.redb>` for graph batches. When input and output are terminals these commands open native owner review; piped invocations list proposals as JSON. A separately reviewed request can use `mother garden review --db ... --request ...` (add `--graph` for graph proposals). Restart the service after review. IPC exposes no approval operation. The former setup dashboard and generic `mother inbox` command are removed. See [native review](garden-compatibility.md) and [service operation](garden-service.md).
 
 For interactive v1 review:
