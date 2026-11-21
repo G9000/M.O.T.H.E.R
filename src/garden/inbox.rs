@@ -218,7 +218,7 @@ fn proposal_by_operation(
             .value(),
     )
 }
-fn owner_principal() -> Principal {
+pub(super) fn owner_principal() -> Principal {
     Principal {
         token_hash: String::new(),
         scopes: vec!["garden:read".into(), "garden:write".into()],
@@ -470,6 +470,7 @@ impl GardenStore {
             proposal
         } else {
             validate_original_current(&tx, &principal, request)?;
+            super::media::check_proposal(&tx, &principal, request)?;
             let id = Uuid::new_v4().to_string();
             let admission = no_commit_receipt(
                 &request.operation_id,
@@ -637,8 +638,32 @@ impl GardenStore {
     pub fn review_with_hook(
         &self,
         value: Value,
-        mut hook: impl FnMut(CommitStage),
+        hook: impl FnMut(CommitStage),
     ) -> Result<OutcomeResponse> {
+        self.review_inner(value, hook, None)
+            .map(|(outcome, _)| outcome)
+    }
+    /// Owner-only: approve a pending attachment proposal with the original file. Ingest,
+    /// evidence, the assertion link and the proposal's closing receipt commit together.
+    /// # Errors
+    /// Any failure commits nothing and leaves the proposal pending.
+    pub fn review_attachment(
+        &self,
+        value: Value,
+        attachment: &super::media::AttachmentReview<'_>,
+    ) -> Result<(OutcomeResponse, super::media::IngestReport)> {
+        let (outcome, report) = self.review_inner(value, |_| {}, Some(attachment))?;
+        Ok((
+            outcome,
+            report.ok_or_else(|| storage_error("attachment ingest missing"))?,
+        ))
+    }
+    fn review_inner(
+        &self,
+        value: Value,
+        mut hook: impl FnMut(CommitStage),
+        attachment: Option<&super::media::AttachmentReview<'_>>,
+    ) -> Result<(OutcomeResponse, Option<super::media::IngestReport>)> {
         bounded_json(&value)?;
         let request: ReviewRequest = serde_json::from_value(value).map_err(|_| {
             failure(
@@ -687,7 +712,13 @@ impl GardenStore {
             .transpose()?;
         let owner = owner_principal();
         if let Some(prior) = prior {
-            if prior.request != request {
+            let mut comparable = prior.request.clone();
+            if attachment.is_some() {
+                comparable
+                    .reviewed_items
+                    .clone_from(&request.reviewed_items);
+            }
+            if comparable != request {
                 return Err(reused());
             }
             return bounded_outcome(OutcomeResponse {
@@ -699,7 +730,8 @@ impl GardenStore {
                 visible_records: prior.records,
                 payload_omitted: false,
                 visibility_epoch: epoch(&state, &owner),
-            });
+            })
+            .map(|outcome| (outcome, None));
         }
         let mut proposal: Proposal = decode(
             tx.open_table(PROPOSALS)
@@ -717,11 +749,92 @@ impl GardenStore {
                 "Proposal revision or pending status changed",
             ));
         }
-        let reviewed = request
+        let mut owned = request
             .reviewed_items
-            .as_deref()
-            .unwrap_or(&proposal.original.items);
-        validate_reviewed_items(&proposal.original, reviewed)?;
+            .clone()
+            .unwrap_or_else(|| proposal.original.items.clone());
+        validate_reviewed_items(&proposal.original, &owned)?;
+        let mut pending = Vec::new();
+        for (index, item) in owned.iter().enumerate() {
+            if let Some(found) = super::media::pending_item(item)? {
+                pending.push((index, found));
+            }
+        }
+        let mut request = request;
+        let mut ingest = None;
+        if let Some(attachment) = attachment {
+            let [(index, found)] = pending.as_slice() else {
+                return Err(failure(
+                    GardenErrorCode::InvalidInput,
+                    "Attachment review needs exactly one pending attachment",
+                ));
+            };
+            if request.action != ReviewAction::Approve {
+                return Err(failure(
+                    GardenErrorCode::InvalidInput,
+                    "Attachment review approves; dismiss through the ordinary review",
+                ));
+            }
+            for key in ["mother.media.link", "mother.media.description"] {
+                if owned.iter().any(|item| item.item_key == key) {
+                    return Err(failure(
+                        GardenErrorCode::InvalidInput,
+                        "Reserved media itemKey already used",
+                    ));
+                }
+            }
+            let now = self
+                .clock
+                .now()
+                .to_rfc3339_opts(chrono::SecondsFormat::Nanos, true);
+            let mut input = attachment.input.clone();
+            if input.event_time.is_none() {
+                input.event_time.clone_from(&found.event_time);
+            }
+            let report = super::media::ingest_file_tx(
+                &tx,
+                attachment.path,
+                &input,
+                attachment.options,
+                &now,
+            )?;
+            let key = owned[*index].item_key.clone();
+            owned[*index].draft = Some(super::media::evidence_draft(
+                &tx,
+                &report.sha256,
+                Some(&report.acquisition_id),
+                None,
+                input.event_time.as_ref(),
+            )?);
+            owned.push(super::media::link_item(
+                &tx,
+                "mother.media.link",
+                &found.target.id,
+                found.expected_revision,
+                &key,
+            )?);
+            if attachment.accept_description
+                && let Some(description) = &found.description
+            {
+                owned.push(super::media::description_item(
+                    &tx,
+                    "mother.media.description",
+                    &found.target.id,
+                    &key,
+                    description,
+                    &proposal.proposer,
+                )?);
+            }
+            validate_reviewed_items(&proposal.original, &owned)?;
+            request.reviewed_items = Some(owned.clone());
+            ingest = Some(report);
+        } else if request.action == ReviewAction::Approve && !pending.is_empty() {
+            return Err(failure(
+                GardenErrorCode::InvalidInput,
+                "This proposal awaits the owner's original image; complete it as an attachment review",
+            ));
+        }
+        let reviewed = owned.as_slice();
         hook(CommitStage::BeforeWrite);
         let mut receipt = no_commit_receipt(
             &request.operation_id,
@@ -798,7 +911,8 @@ impl GardenStore {
                     persist_batch(&tx, &key, &prepared)?;
                 }
                 Err(error)
-                    if error.code != GardenErrorCode::StoreUnavailable
+                    if attachment.is_none()
+                        && error.code != GardenErrorCode::StoreUnavailable
                         && error.code != GardenErrorCode::RestartRequired =>
                 {
                     receipt.status = OutcomeStatus::Blocked;
@@ -841,7 +955,7 @@ impl GardenStore {
         hook(CommitStage::BeforeCommit);
         tx.commit().map_err(storage_error)?;
         hook(CommitStage::Committed);
-        Ok(response)
+        Ok((response, ingest))
     }
 }
 fn claim_operation_review(

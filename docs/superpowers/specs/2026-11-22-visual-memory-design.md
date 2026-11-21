@@ -1,8 +1,25 @@
 # Visual memory design
 
-Status: proposed. This document plans first-class image support for the native
-redb Garden. It changes no code, grants, settings or stored data. Tracked in
-[issues #8–#16](https://github.com/G9000/M.O.T.H.E.R/issues?q=is%3Aissue+%22Visual+memory%3A%22).
+Status: implemented for M1–M9 (tracked in
+[issues #8–#16](https://github.com/G9000/M.O.T.H.E.R/issues?q=is%3Aissue+%22Visual+memory%3A%22));
+M10 and M11 remain deferred. The owner and harness guide is
+[visual memory](../../visual-memory.md). The build differs from this plan where noted:
+
+- A pending attachment uses the existing URI source locator with
+  `urn:mother:media:pending` plus a `mother.media:pending` extension, so the v2 wire
+  schema in `contracts/garden-tools-v2.json` is unchanged. The canonical writer
+  refuses the marker; only an owner attachment review replaces it.
+- The media tools live in their own catalogue, `contracts/media-tools.json`.
+- A third scope, `media:originals`, gates originals. Without a derivative, an
+  original is served by default only when no embedded metadata was found.
+- An interpretation's subject is the subject entity of the assertion the image
+  supports. There is no separate image entity.
+- The terminal UI lists a target's existing attachments in the attachment-review
+  step. `garden media list --record` covers any assertion.
+- The explorer shows images through a separate `--media` gallery mode, not
+  inside the 3D garden.
+- Derivatives come from lossless container rewriting for JPEG, PNG, WebP and GIF.
+  HEIC, HEIF and AVIF metadata is reported but not removed.
 
 Principle: preserve the original bytes as evidence, then build attributed,
 searchable interpretations around them. An interpretation never replaces or

@@ -1,0 +1,116 @@
+{
+  "contractVersion": 1,
+  "status": "implemented",
+  "notes": [
+    "Media tools are advertised only to credentials holding the named scopes.",
+    "media:meta requires garden:read; media:bytes requires media:meta; media:originals requires media:bytes.",
+    "Only assets cited by evidence currently visible to the credential are disclosed.",
+    "Returning an image sends it to the host and usually its model provider. Host handling of image results varies."
+  ],
+  "tools": [
+    {
+      "name": "mother_garden_media_list",
+      "description": "List image metadata, provenance and uses for assets cited by evidence you can see. Requires media:meta. No image bytes are returned.",
+      "inputSchema": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "type": "object",
+        "properties": {
+          "version": { "const": 2 },
+          "workspaceId": { "type": "string", "format": "uuid" },
+          "generation": { "type": "string", "format": "uuid" },
+          "sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+          "after": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+          "limit": { "type": "integer", "minimum": 1, "maximum": 50 }
+        },
+        "required": ["version", "workspaceId", "generation"],
+        "additionalProperties": false
+      },
+      "outputSchema": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "type": "object",
+        "oneOf": [
+          {
+            "type": "object",
+            "properties": {
+              "version": { "const": 2 },
+              "workspaceId": { "type": "string" },
+              "generation": { "type": "string" },
+              "assets": { "type": "array", "maxItems": 50, "items": { "type": "object" } },
+              "nextCursor": { "type": ["string", "null"] },
+              "coverage": {
+                "type": "object",
+                "properties": {
+                  "complete": { "type": "boolean" },
+                  "scanned": { "type": "integer", "minimum": 0 }
+                },
+                "required": ["complete", "scanned"]
+              }
+            },
+            "required": ["version", "workspaceId", "generation", "assets", "nextCursor", "coverage"]
+          },
+          {
+            "type": "object",
+            "properties": { "error": { "type": "object" } },
+            "required": ["error"]
+          }
+        ]
+      },
+      "annotations": {
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false
+      }
+    },
+    {
+      "name": "mother_garden_media_get",
+      "description": "Return one authorized image (at most 2 MiB) as image content. Requires media:bytes. A metadata-stripped derivative is preferred; the original needs media:originals and variant original. The image is disclosed to your host.",
+      "inputSchema": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "type": "object",
+        "properties": {
+          "version": { "const": 2 },
+          "workspaceId": { "type": "string", "format": "uuid" },
+          "generation": { "type": "string", "format": "uuid" },
+          "sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+          "variant": { "enum": ["auto", "original", "derivative"] }
+        },
+        "required": ["version", "workspaceId", "generation", "sha256"],
+        "additionalProperties": false
+      },
+      "outputSchema": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "type": "object",
+        "oneOf": [
+          {
+            "type": "object",
+            "properties": {
+              "version": { "const": 2 },
+              "workspaceId": { "type": "string" },
+              "generation": { "type": "string" },
+              "sha256": { "type": "string" },
+              "originalSha256": { "type": "string" },
+              "variant": { "enum": ["original", "derivative"] },
+              "mediaType": { "type": "string" },
+              "sizeBytes": { "type": "integer", "minimum": 1 },
+              "width": { "type": ["integer", "null"] },
+              "height": { "type": ["integer", "null"] }
+            },
+            "required": ["version", "sha256", "originalSha256", "variant", "mediaType", "sizeBytes"]
+          },
+          {
+            "type": "object",
+            "properties": { "error": { "type": "object" } },
+            "required": ["error"]
+          }
+        ]
+      },
+      "annotations": {
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false
+      }
+    }
+  ]
+}

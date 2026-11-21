@@ -47,6 +47,8 @@ pub(crate) enum GardenCommand {
     Timeline(crate::timeline::Timeline),
     /// Submit a directed relationship for native owner review.
     SuggestLink(crate::relationships::Suggest),
+    /// Store, attach, verify and export owner images as evidence.
+    Media(crate::media_cli::Media),
     /// Review a bounded authorized slice for non-destructive gardening suggestions.
     Tend(crate::tending::Tend),
     /// Apply an explicitly reviewed owner request; this operation is never exposed through MCP.
@@ -210,6 +212,12 @@ pub(crate) enum GardenCommand {
         /// Also open the one-time link in the default browser.
         #[arg(long)]
         open: bool,
+        /// Show attached images instead of the 3D garden; stripped copies are preferred.
+        #[arg(long)]
+        media: bool,
+        /// With --media, also show originals that carry location or device metadata.
+        #[arg(long, requires = "media")]
+        originals: bool,
     },
     /// Serve graph MCP tools using graph-only private credentials.
     Mcp {
@@ -345,6 +353,7 @@ pub(crate) fn execute_garden(command: GardenCommand) -> Result<()> {
         GardenCommand::Relationships(args) => crate::relationships::browse(args),
         GardenCommand::Timeline(args) => crate::timeline::run(args),
         GardenCommand::SuggestLink(args) => crate::relationships::suggest(args),
+        GardenCommand::Media(args) => crate::media_cli::run(args),
         GardenCommand::Tend(args) => crate::tending::run(args),
         GardenCommand::Review { db, request, graph } => {
             let store = GardenStore::open_active(absolute(&db)?)?;
@@ -544,9 +553,18 @@ pub(crate) fn execute_garden(command: GardenCommand) -> Result<()> {
             print_json(serde_json::to_value(report)?)
         }
         GardenCommand::Inbox { db } => run_graph_inbox(absolute(&db)?),
-        GardenCommand::Explore { db, limit, open } => {
-            crate::explorer::run(&absolute(&db)?, usize::from(limit), open)
-        }
+        GardenCommand::Explore {
+            db,
+            limit,
+            open,
+            media,
+            originals,
+        } => crate::explorer::run(
+            &absolute(&db)?,
+            usize::from(limit),
+            open,
+            media.then_some(originals),
+        ),
         GardenCommand::Mcp { .. } => unreachable!("Graph MCP is dispatched asynchronously"),
     }
 }

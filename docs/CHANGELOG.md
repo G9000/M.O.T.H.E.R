@@ -1,5 +1,9 @@
 # Documentation changes
 
+## 22 November 2026
+
+- Added the [visual memory guide](visual-memory.md): image provenance, owner attachment, stripped derivatives, verification, the `--media` explorer gallery, reviewed attach-from-conversation, attributed interpretations and the separately scoped media MCP tools. Linked it from the backup guide and marked the [visual memory spec](superpowers/specs/2026-11-22-visual-memory-design.md) implemented, noting where the build differs from the plan. Checked with synthetic images only.
+
 ## 16 November 2026
 
 - Added the [memory garden explorer guide](garden-explorer.md) for the new read-only `mother garden explore` command, and noted in the memory garden design note that a first version now exists. Checked with synthetic gardens only; no real workspace was opened. The guide now describes the walkable painted valley (Patch's Painted valley, MIT code and CC0 art) that replaced the first meadow page, its source in `web/garden/` and how the embedded page is rebuilt. A later pass the next day made the place the garden's own: one hill whose spiral path is the timeline of records, first-person only, with the borrowed valley, village, wanderer and physics removed.

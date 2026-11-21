@@ -17,7 +17,7 @@ const INCOMING: TableDefinition<&str, u8> = TableDefinition::new("garden_incomin
 const PREDICATE: TableDefinition<&str, u8> = TableDefinition::new("garden_predicate");
 const VALID_TIME: TableDefinition<&str, u8> = TableDefinition::new("garden_valid_time");
 const EVIDENCE: TableDefinition<&str, u8> = TableDefinition::new("garden_evidence");
-const SOURCES: TableDefinition<&str, u8> = TableDefinition::new("garden_sources");
+pub(crate) const SOURCES: TableDefinition<&str, u8> = TableDefinition::new("garden_sources");
 const NAMESPACES: TableDefinition<&str, u8> = TableDefinition::new("garden_namespaces");
 const TABLES: [TableDefinition<&str, u8>; 8] = [
     IDS, OUTGOING, INCOMING, PREDICATE, VALID_TIME, EVIDENCE, SOURCES, NAMESPACES,

@@ -1,5 +1,6 @@
 //! Explicit native transport with separate graph and optional v1 compatibility authority.
 use super::{UNCONFIRMED, input_error};
+use mother::garden::media_tools::{GET_TOOL, LIST_TOOL};
 use mother::{
     error::{Error, Result},
     garden::{
@@ -136,15 +137,24 @@ fn dispatch(
             }
             Err(error) => return Err(domain_error(error)),
         };
-        return Ok(
-            json!({"version":1,"v1":{"available":v1_enabled,"contractVersion":1,"gardeningEvidenceReview":1},
+        let mut value = json!({"version":1,"v1":{"available":v1_enabled,"contractVersion":1,"gardeningEvidenceReview":1},
             "workspace":identity,"garden":{"contractVersion":2,"available":graph_available,"status":"prototype",
             "optionalVectorProfile":mother::search::embedding_profile(),"vectorPreparation":"explicit_local_sdk_or_owner_cli",
             "capabilities":if graph_available {vec!["garden.entities.v2","garden.assertions.v2","garden.proposals.v2","garden.query.v2","garden.changes.v2"]} else {vec![]},
             "availableTools":if graph_available {TOOLS.as_slice()} else {&[]},"definedCapabilities":["garden.entities.v2","garden.assertions.v2","garden.query.v2","garden.changes.v2","garden.proposals.v2"],
             "definedTools":["mother_garden_get","mother_garden_query","mother_garden_apply","mother_garden_propose","mother_garden_get_proposal","mother_garden_get_receipt","mother_garden_changes"],
-            "reason":if !graph_available {"native_context_only_current_grant"} else if v1_enabled {"native_v1_compatibility_with_independent_graph_authority"} else {"graph_only_prototype_without_v1_compatibility_or_migration"}}}),
+            "reason":if !graph_available {"native_context_only_current_grant"} else if v1_enabled {"native_v1_compatibility_with_independent_graph_authority"} else {"graph_only_prototype_without_v1_compatibility_or_migration"}}});
+        mother::garden::media_tools::add_capabilities(
+            &mut value,
+            &store.media_tools(&auth).map_err(domain_error)?,
         );
+        return Ok(value);
+    }
+    if name == LIST_TOOL {
+        return store.media_list(&auth, &args).map_err(domain_error);
+    }
+    if name == GET_TOOL {
+        return store.media_get(&auth, &args).map_err(domain_error);
     }
     if !TOOLS.contains(&name) {
         if !store.v1_initialized()? {
@@ -257,6 +267,19 @@ pub(super) fn advertised_tools(v1_enabled: bool) -> Result<Vec<Tool>> {
     Ok(tools)
 }
 
+/// Append the separately catalogued media tools that the credential currently holds.
+pub(super) fn with_media(mut tools: Vec<Tool>, granted: &[&str]) -> Result<Vec<Tool>> {
+    let catalog: Value = serde_json::from_str(include_str!("../../contracts/media-tools.json"))?;
+    for tool in catalog["tools"].as_array().ok_or_else(input_error)? {
+        if tool["name"]
+            .as_str()
+            .is_some_and(|name| granted.contains(&name))
+        {
+            tools.push(serde_json::from_value(tool.clone())?);
+        }
+    }
+    Ok(tools)
+}
 pub(super) fn advertised_context_tools() -> Result<Vec<Tool>> {
     let mut tools = super::advertised_tools()?;
     if let Some(capabilities) = tools
@@ -289,10 +312,11 @@ pub async fn serve(config_path: &Path, recall_profiles: Option<PathBuf>) -> Resu
             }
             Err(error) => return Err(domain_error(error)),
         };
+        let media = store.media_tools(&config.auth()).map_err(domain_error)?;
         Ok(GraphServer {
             config,
             tools: if graph_available {
-                advertised_tools(v1_enabled)?
+                with_media(advertised_tools(v1_enabled)?, &media)?
             } else {
                 advertised_context_tools()?
             },
