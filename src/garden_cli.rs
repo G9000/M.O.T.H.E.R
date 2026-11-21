@@ -41,6 +41,10 @@ impl clap::Subcommand for DeferredGardenCommand {
 }
 #[derive(Debug, Subcommand)]
 pub(crate) enum GardenCommand {
+    /// Browse a bounded, authorized graph neighborhood.
+    Relationships(crate::relationships::Browse),
+    /// Submit a directed relationship for native owner review.
+    SuggestLink(crate::relationships::Suggest),
     /// Apply an explicitly reviewed owner request; this operation is never exposed through MCP.
     Review {
         #[arg(long)]
@@ -334,6 +338,8 @@ pub(crate) fn execute_garden(command: GardenCommand) -> Result<()> {
         mother::garden::migrate::check_destination(&absolute(path)?)?;
     }
     match command {
+        GardenCommand::Relationships(args) => crate::relationships::browse(args),
+        GardenCommand::SuggestLink(args) => crate::relationships::suggest(args),
         GardenCommand::Review { db, request, graph } => {
             let store = GardenStore::open_active(absolute(&db)?)?;
             let request = read_json(&absolute(&request)?, 2_097_152)?;

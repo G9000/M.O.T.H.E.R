@@ -7,6 +7,8 @@ review. Admission stores the original attributed proposal separately from
 canonical records, history and indexes. Pending content is never established
 memory. Extraction, selection and interpretation remain in each harness.
 
+The [Living Memory Graph](living-memory-graph.md) gives owners a bounded relationship viewer and a command that submits one directed link to this same review inbox.
+
 ## Explicit graph setup
 
 Graph and v1 views can share one native database with independent grants. For a new graph-only workspace use explicit private paths; stop the owner service before direct administration and restart it afterward:

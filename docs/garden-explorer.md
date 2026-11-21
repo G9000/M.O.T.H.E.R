@@ -28,6 +28,8 @@ Like the other owner commands that take `--db`, it opens the database directly, 
 
 The database must have the v1 view enabled (`garden compat-init`). Graph-only objects, proposals waiting in the inbox, the owner persona and credentials are not part of the snapshot.
 
+Use the [Living Memory Graph](living-memory-graph.md) to follow directed relationships and review source evidence for an authorized graph representation of a memory.
+
 ## Walking
 
 - Click the picture to walk: the mouse looks, `W A S D` move, Shift runs, Space jumps. Esc gives the mouse back.

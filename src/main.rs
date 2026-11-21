@@ -5,6 +5,7 @@ mod cutover_cli;
 mod explorer;
 mod garden_cli;
 mod mcp;
+mod relationships;
 mod tui;
 
 #[tokio::main]
