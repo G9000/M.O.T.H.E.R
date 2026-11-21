@@ -15,7 +15,7 @@ The default ingest cap is 64 MiB per file; `--max-bytes` changes it. Recordings 
 
 Recordings larger than 64 MiB (`--stage-above` changes the threshold) are staged. Mother hashes the file first, then writes its chunks under that hash in transactions of 16 MiB each. One final transaction publishes the stored bytes together with the asset, its acquisition and, for `attach` or an attachment review, the evidence link. Until that commit, nothing refers to the staged chunks, and a failed publish discards them. To store a long recording, raise `--max-bytes` as well.
 
-If a staged ingest is interrupted, `garden media verify` reports it as `interrupted_stage`. Backups refuse until you run:
+If a staged ingest is interrupted, run the same `add`, `attach` or `complete` command again with the same file to resume it. Mother compares every chunk the interrupted stage already wrote with the file. It continues only if they all match, and reports the reused count as `resumedChunks`; otherwise it discards the stage and starts over. Until it resumes, `garden media verify` reports the stage as `interrupted_stage`, and backups refuse. To discard the stage instead, run:
 
 ```powershell
 mother garden media cleanup --db "C:\private-data\garden.redb"

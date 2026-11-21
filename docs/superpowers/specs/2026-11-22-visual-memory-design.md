@@ -22,7 +22,9 @@ Status: implemented for M1–M11 (tracked in
 - Recordings (M10) are streamed into the existing blob store under the owner's
   size cap. Above a staging threshold (default 64 MiB), chunks are written
   under the final hash in bounded transactions and published in one final
-  transaction ([#22](https://github.com/G9000/M.O.T.H.E.R/issues/22)). The blob
+  transaction ([#22](https://github.com/G9000/M.O.T.H.E.R/issues/22)). An interrupted stage resumes
+  when the same bytes are ingested again, after every staged chunk is checked
+  ([#25](https://github.com/G9000/M.O.T.H.E.R/issues/25)). The blob
   layout and backup format are unchanged. Audio of at most 2 MiB is returned over
   MCP as audio content; video never is.
 
