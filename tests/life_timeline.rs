@@ -139,7 +139,13 @@ fn timeline(config: &Path, subcommand: &str, args: &[&str]) -> Value {
 
 #[test]
 fn timeline_uses_current_grants_and_real_dated_revisions() {
-    let directory = tempfile::tempdir().unwrap();
+    let temp_root = std::fs::canonicalize(std::env::temp_dir()).unwrap();
+    let directory = tempfile::tempdir_in(temp_root).unwrap();
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(directory.path(), std::fs::Permissions::from_mode(0o700)).unwrap();
+    }
     let db = directory.path().join("garden.redb");
     let time = Arc::new(SyntheticClock(Mutex::new(
         "2025-03-03T10:00:00Z".parse().unwrap(),
