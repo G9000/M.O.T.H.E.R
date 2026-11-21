@@ -1,17 +1,17 @@
 # Visual memory
 
-Mother keeps images as evidence alongside graph memories. The original bytes are stored unchanged and verified by SHA-256. Captions, descriptions and OCR are separate, attributed claims about an image. They never replace it. The design and its decisions are in [the visual memory spec](superpowers/specs/2026-11-22-visual-memory-design.md).
+Mother keeps images, audio and video as evidence alongside graph memories. The original bytes are stored unchanged and verified by SHA-256. Captions, descriptions, OCR and transcripts are separate, attributed claims about the media. They never replace it. The design and its decisions are in [the visual memory spec](superpowers/specs/2026-11-22-visual-memory-design.md).
 
 Everything here works on the native redb Garden's v2 graph. The v1 `artifact` record type and its text-only media types are unchanged.
 
 ## What is stored
 
-- **Asset.** One row per unique SHA-256, holding the media type, pixel dimensions and any embedded metadata found. The type comes from the bytes themselves, never from a declared value. Accepted formats are JPEG, PNG, WebP, GIF, HEIC/HEIF and AVIF. The bytes live in the existing content-addressed blob tables, inside the same database transaction as everything else.
+- **Asset.** One row per unique SHA-256, holding the media type, pixel dimensions and any embedded metadata found. The type comes from the bytes themselves, never from a declared value. Accepted image formats are JPEG, PNG, WebP, GIF, HEIC/HEIF and AVIF. Accepted video formats are MP4, QuickTime, WebM, Matroska and AVI, and accepted audio formats are MP3, M4A, WAV, Ogg and FLAC. The bytes live in the existing content-addressed blob tables, inside the same database transaction as everything else.
 - **Acquisition.** An append-only record written every time the owner adds a file. It holds the original filename, when it was added, an optional event time and its precision, a source note, and the origin: `captured`, `uploaded`, `imported`, `screenshot` or `ai_generated`. Adding the same bytes twice reuses the asset and appends a second acquisition. Neither record is overwritten.
-- **Derivative.** An optional copy with location, device, timestamp, XMP, IPTC and comment metadata removed, linked to its original. The original's hash never changes. Derivatives are supported for JPEG, PNG, WebP and GIF. HEIC, HEIF and AVIF are reported but not rewritten. Removing EXIF also removes JPEG orientation.
+- **Derivative.** An optional copy with location, device, timestamp, XMP, IPTC and comment metadata removed, linked to its original. The original's hash never changes. Derivatives are supported for JPEG, PNG, WebP and GIF. Removing EXIF also removes JPEG orientation. HEIC, HEIF, AVIF and all recordings are never rewritten: their metadata is reported, and asking to strip it stores the original unchanged with `derivativeUnsupported: true` in the report.
 - **Use.** An evidence record whose source is the asset. It is linked to an assertion by giving that assertion a new revision. Many assertions can cite one asset without copying it. Per-use context is in the `mother.media:use` extension.
 
-The default ingest cap is 64 MiB per file; `--max-bytes` changes it.
+The default ingest cap is 64 MiB per file; `--max-bytes` changes it. Recordings are streamed into the store rather than read into memory. Their metadata comes from the first and last 4 MiB of the file: location (`gps`), `device`, `tags`, `id3`, `xmp`, `text` and `picture`. An MP4 or QuickTime file whose movie header lies outside both ends is reported as `unscanned`, so nothing about it is ruled out. A file that changes while it is being read is rejected.
 
 ## Owner commands
 
@@ -61,7 +61,7 @@ To browse attached images locally:
 mother garden explore --db "C:\private-data\garden.redb" --media
 ```
 
-The gallery uses the same single-use loopback link as the explorer, and it never calls out. It shows stripped derivatives where they exist. Originals that carry location or device metadata are withheld unless you add `--originals`.
+The gallery uses the same single-use loopback link as the explorer, and it never calls out. It shows stripped derivatives where they exist and plays audio and video. Originals that carry embedded metadata are withheld unless you add `--originals`. A snapshot holds at most 256 MiB, and larger recordings are left out of it.
 
 ## Attaching a photo from a conversation
 
@@ -82,7 +82,7 @@ Ordinary approval of a pending attachment is refused without blocking the propos
 
 ## Interpretations
 
-A caption, description or OCR result is an assertion with predicate `mother.media:caption`, `mother.media:description` or `mother.media:ocr_text`. It holds a string value, and its evidence must be image evidence. It needs the `mother.media:interpretation` extension (schema version 1):
+A caption, description, OCR result or transcript is an assertion with predicate `mother.media:caption`, `mother.media:description`, `mother.media:ocr_text` or `mother.media:transcript`. It holds a string value, and its evidence must be media evidence. It needs the `mother.media:interpretation` extension (schema version 1):
 
 ```json
 {"producer":{"kind":"model","name":"<model or person>"},"method":"caption","producedAt":"2026-11-22T10:00:00Z"}
@@ -97,7 +97,7 @@ Two tools are catalogued in `contracts/media-tools.json`. They are advertised on
 | Tool | Scope | Returns |
 | --- | --- | --- |
 | `mother_garden_media_list` | `media:meta` (needs `garden:read`) | Paged metadata, acquisitions, derivatives and visible uses. No bytes. |
-| `mother_garden_media_get` | `media:bytes` (needs `media:meta`) | One image of at most 2 MiB, as MCP image content. |
+| `mother_garden_media_get` | `media:bytes` (needs `media:meta`) | One image or audio recording of at most 2 MiB, as MCP image or audio content. Video is never returned. |
 
 - Only assets cited by evidence the credential can currently see are disclosed. Hidden assets are absent from listings and counts.
 - `media_get` serves the stripped derivative by default. Without a derivative, it serves an original only when no embedded metadata was found. Otherwise the original requires `variant: "original"` and the additional `media:originals` scope.

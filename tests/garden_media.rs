@@ -895,3 +895,137 @@ fn media_export_lists_unreadable_bytes_instead_of_fabricating_them() {
         serde_json::from_slice(&std::fs::read(out.join("manifest.json")).unwrap()).unwrap();
     assert!(manifest["assets"][0]["file"].is_null());
 }
+
+/// Synthetic MP4: ftyp, a large mdat, and a trailing moov carrying a location atom.
+fn mp4(payload: usize) -> Vec<u8> {
+    let mut b = vec![0, 0, 0, 16];
+    b.extend_from_slice(b"ftypisom");
+    b.extend_from_slice(&[0, 0, 2, 0]);
+    b.extend_from_slice(&((payload + 8) as u32).to_be_bytes());
+    b.extend_from_slice(b"mdat");
+    b.extend((0..payload).map(|i| (i % 251) as u8));
+    let moov = b"udta\xA9xyz+12.3456+045.6789/";
+    b.extend_from_slice(&((moov.len() + 8) as u32).to_be_bytes());
+    b.extend_from_slice(b"moov");
+    b.extend_from_slice(moov);
+    b
+}
+fn mp3(frames: usize) -> Vec<u8> {
+    let mut b = Vec::new();
+    for _ in 0..frames {
+        b.extend_from_slice(&[0xFF, 0xFB, 0x90, 0x00]);
+        b.extend_from_slice(&[0x55; 413]);
+    }
+    b
+}
+
+#[test]
+fn recordings_stream_into_the_store_and_keep_their_metadata_report() {
+    let f = Fixture::new();
+    let (_, memory) = f.memory();
+    // Larger than both 4 MiB scan windows: the location atom is only in the tail.
+    let video = mp4(9 * 1024 * 1024);
+    let path = f.file("clip.mp4", &video);
+    let attached = f.attach(&path, &memory, 1, true);
+    let ingest = &attached["ingest"];
+    assert_eq!(ingest["sha256"], sha(&video).as_str());
+    assert_eq!(ingest["mediaType"], "video/mp4");
+    assert_eq!(ingest["embeddedMetadata"], json!(["gps"]));
+    assert_eq!(ingest["derivative"], Value::Null);
+    assert_eq!(
+        ingest["derivativeUnsupported"], true,
+        "recordings are never rewritten"
+    );
+    let out = f.dir.path().join("clip-copy.mp4");
+    f.store
+        .media_export(ingest["sha256"].as_str().unwrap(), &out)
+        .unwrap();
+    assert_eq!(std::fs::read(&out).unwrap(), video);
+    let capped = f.file("small-cap.mp4", &mp4(4096));
+    assert_eq!(
+        f.store
+            .media_add(
+                &capped,
+                &AcquisitionInput::new(MediaOrigin::Captured),
+                IngestOptions {
+                    max_bytes: 1024,
+                    strip_metadata: false,
+                },
+            )
+            .unwrap_err()
+            .code,
+        GardenErrorCode::LimitExceeded
+    );
+    let mut declared = AcquisitionInput::new(MediaOrigin::Captured);
+    declared.declared_media_type = Some("audio/mpeg".into());
+    assert!(
+        f.store
+            .media_add(&path, &declared, IngestOptions::default())
+            .is_err()
+    );
+    let bundle = f.dir.path().join("with-video");
+    f.store.backup_to(&bundle).unwrap();
+    let restored = GardenStore::restore_backup(&bundle, &f.dir.path().join("video.redb")).unwrap();
+    assert_eq!(restored.media_verify().unwrap()["ok"], true);
+    let exported = f.dir.path().join("recordings-export");
+    f.store.media_export_all(&exported).unwrap();
+    assert!(exported.join(format!("{}.mp4", sha(&video))).exists());
+}
+
+#[test]
+fn audio_is_returned_over_mcp_and_video_is_not() {
+    let f = Fixture::new();
+    let (_, memory) = f.memory();
+    let audio = mp3(4);
+    let clip = f.attach(&f.file("voice.mp3", &audio), &memory, 1, false);
+    let (_, second) = f.memory();
+    let video = f.attach(&f.file("clean.mp4", &mp4(64)), &second, 1, false);
+    let reader = f.grant(
+        "listener",
+        &[
+            "garden:read",
+            "media:meta",
+            "media:bytes",
+            "media:originals",
+        ],
+        GardenAccess::All {},
+    );
+    let got = f
+        .store
+        .media_get(&reader, &f.args(json!({"sha256":clip["ingest"]["sha256"]})))
+        .unwrap();
+    assert_eq!(got["mediaType"], "audio/mpeg");
+    assert_eq!(got["data"], mother::media::base64(&audio));
+    assert_eq!(
+        f.store
+            .media_get(
+                &reader,
+                &f.args(json!({"sha256":video["ingest"]["sha256"],"variant":"original"}))
+            )
+            .unwrap_err()
+            .code,
+        GardenErrorCode::Forbidden
+    );
+    let listed = f.store.media_list(&reader, &f.args(json!({}))).unwrap();
+    assert_eq!(listed["assets"].as_array().unwrap().len(), 2);
+}
+
+#[test]
+fn transcripts_are_attributed_interpretations_of_recordings() {
+    let f = Fixture::new();
+    let (person, memory) = f.memory();
+    let clip = f.attach(&f.file("note.mp3", &mp3(2)), &memory, 1, false);
+    let evidence = clip["outcome"]["receipt"]["results"][0]["reference"]["id"].clone();
+    let batch = f.batch(json!([{"itemKey":"t","mutation":"create","expectedRevision":0,"draft":{"kind":"assertion",
+        "subject":{"refType":"existing","kind":"entity","id":person},"predicate":"mother.media:transcript",
+        "object":{"type":"value","value":{"type":"string","value":"A synthetic spoken note"}},
+        "validTime":{"validFrom":null,"validUntil":null,"sourceTimezone":null,"precision":"unknown"},
+        "observedTime":{"at":null,"sourceTimezone":null,"precision":"unknown"},
+        "evidence":[{"refType":"existing","kind":"evidence","id":evidence}],"confidence":null,
+        "extensions":{"mother.media:interpretation":{"schemaVersion":1,"payload":{
+            "producer":{"kind":"model","name":"synthetic-speech"},"method":"transcription"}}}}}]));
+    assert_eq!(
+        f.store.apply(&f.writer, &batch).unwrap().receipt.status,
+        OutcomeStatus::Applied
+    );
+}

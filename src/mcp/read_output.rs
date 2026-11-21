@@ -151,8 +151,13 @@ pub(super) fn result(name: &str, mut value: Value) -> CallToolResult {
         ) else {
             return size_error();
         };
+        let block = if kind.starts_with("audio/") {
+            rmcp::model::ContentBlock::audio(data, kind)
+        } else {
+            rmcp::model::ContentBlock::image(data, kind)
+        };
         let mut reply = CallToolResult::success(vec![
-            rmcp::model::ContentBlock::image(data, kind),
+            block,
             rmcp::model::ContentBlock::text(value.to_string()),
         ]);
         reply.structured_content = Some(value);

@@ -1,9 +1,9 @@
-//! Pure, bounded image inspection: format sniffing, dimensions, embedded metadata
-//! discovery and lossless metadata removal. Nothing here decodes pixels, touches the
-//! filesystem or contacts a network service.
+//! Pure, bounded media inspection: format sniffing, image dimensions, embedded
+//! metadata discovery and lossless image metadata removal. Nothing here decodes
+//! pixels or samples, touches the filesystem or contacts a network service.
 
-/// Image formats accepted as first-class visual evidence.
-pub const MEDIA_TYPES: [&str; 7] = [
+/// Image, audio and video formats accepted as first-class evidence.
+pub const MEDIA_TYPES: [&str; 17] = [
     "image/jpeg",
     "image/png",
     "image/webp",
@@ -11,7 +11,24 @@ pub const MEDIA_TYPES: [&str; 7] = [
     "image/heic",
     "image/heif",
     "image/avif",
+    "video/mp4",
+    "video/quicktime",
+    "video/webm",
+    "video/x-matroska",
+    "video/x-msvideo",
+    "audio/mp4",
+    "audio/mpeg",
+    "audio/wav",
+    "audio/ogg",
+    "audio/flac",
 ];
+/// Bytes read from each end of a recording to classify its embedded metadata.
+pub const SCAN_BYTES: usize = 4 * 1024 * 1024;
+
+/// Audio and video are recordings: streamed, never rewritten, inspected from both ends.
+pub fn is_recording(media_type: &str) -> bool {
+    media_type.starts_with("audio/") || media_type.starts_with("video/")
+}
 
 /// Facts derived from the bytes themselves; a declared type is never trusted.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -83,15 +100,160 @@ pub fn sniff(bytes: &[u8]) -> Option<&'static str> {
         if has(&[b"mif1", b"msf1"]) {
             return Some("image/heif");
         }
+        if has(&[b"qt  "]) {
+            return Some("video/quicktime");
+        }
+        if has(&[b"M4A ", b"M4B ", b"M4P ", b"F4A "]) {
+            return Some("audio/mp4");
+        }
+        if has(&[
+            b"isom", b"iso2", b"iso4", b"iso5", b"iso6", b"mp41", b"mp42", b"avc1", b"M4V ",
+            b"3gp4", b"3gp5", b"3g2a", b"dash", b"f4v ",
+        ]) {
+            return Some("video/mp4");
+        }
+    }
+    if bytes.starts_with(&[0x1A, 0x45, 0xDF, 0xA3]) {
+        let head = &bytes[..bytes.len().min(64)];
+        return Some(if head.windows(4).any(|w| w == b"webm") {
+            "video/webm"
+        } else {
+            "video/x-matroska"
+        });
+    }
+    if bytes.len() >= 12 && &bytes[..4] == b"RIFF" {
+        match &bytes[8..12] {
+            b"WAVE" => return Some("audio/wav"),
+            b"AVI " => return Some("video/x-msvideo"),
+            _ => {}
+        }
+    }
+    if bytes.starts_with(b"OggS") {
+        return Some("audio/ogg");
+    }
+    if bytes.starts_with(b"fLaC") {
+        return Some("audio/flac");
+    }
+    if bytes.starts_with(b"ID3") {
+        return Some("audio/mpeg");
+    }
+    // A bare MPEG audio frame: 11 sync bits, a defined version and a defined layer.
+    if bytes.len() >= 4
+        && bytes[0] == 0xFF
+        && bytes[1] & 0xE0 == 0xE0
+        && (bytes[1] >> 3) & 3 != 1
+        && (bytes[1] >> 1) & 3 != 0
+        && bytes[2] >> 4 != 0xF
+    {
+        return Some("audio/mpeg");
     }
     None
+}
+
+/// Classify a recording's embedded metadata from its first and last bytes.
+/// Callers pass at most [`SCAN_BYTES`] from each end; small files pass the whole file twice.
+/// # Errors
+/// Rejects bytes that are not a supported recording.
+pub fn inspect_recording(head: &[u8], tail: &[u8]) -> Result<Inspection> {
+    let media_type = sniff(head)
+        .filter(|t| is_recording(t))
+        .ok_or("Unsupported or unrecognized recording format")?;
+    let contains = |needle: &[u8]| {
+        head.windows(needle.len()).any(|w| w == needle)
+            || tail.windows(needle.len()).any(|w| w == needle)
+    };
+    let mut found = Vec::new();
+    match media_type {
+        "video/mp4" | "video/quicktime" | "audio/mp4" => {
+            if !contains(b"moov") {
+                // The movie header is beyond both scanned ends; nothing can be ruled out.
+                found.push("unscanned");
+            }
+            if contains(b"\xA9xyz") || contains(b"ISO6709") {
+                found.push("gps");
+            }
+            if contains(b"\xA9mak")
+                || contains(b"\xA9mod")
+                || contains(b"quicktime.make")
+                || contains(b"quicktime.model")
+            {
+                found.push("device");
+            }
+            if contains(b"ilst") || contains(b"\xA9nam") || contains(b"\xA9ART") {
+                found.push("tags");
+            }
+            if contains(b"XMP_") || contains(b"<x:xmpmeta") {
+                found.push("xmp");
+            }
+        }
+        "video/webm" | "video/x-matroska" => {
+            if contains(&[0x12, 0x54, 0xC3, 0x67]) {
+                found.push("tags");
+            }
+        }
+        "audio/wav" | "video/x-msvideo" => {
+            if contains(b"LIST") && contains(b"INFO") {
+                found.push("text");
+            }
+            if contains(b"bext") || contains(b"iXML") {
+                found.push("application");
+            }
+            if contains(b"_PMX") {
+                found.push("xmp");
+            }
+        }
+        "audio/mpeg" => {
+            if head.starts_with(b"ID3")
+                || tail.len() >= 128 && tail[tail.len() - 128..].starts_with(b"TAG")
+            {
+                found.push("id3");
+            }
+        }
+        "audio/ogg" => {
+            if contains(b"\x03vorbis") || contains(b"OpusTags") {
+                found.push("tags");
+            }
+        }
+        _ => {
+            // FLAC metadata blocks follow the marker: 1 flag/type byte, 24-bit length.
+            let mut at = 4;
+            while let Some(&header) = head.get(at) {
+                let length = head
+                    .get(at + 1..at + 4)
+                    .map(|l| usize::from(l[0]) << 16 | usize::from(l[1]) << 8 | usize::from(l[2]));
+                let Some(length) = length else { break };
+                match header & 0x7F {
+                    4 => found.push("tags"),
+                    6 => found.push("picture"),
+                    _ => {}
+                }
+                if header & 0x80 != 0 {
+                    break;
+                }
+                at += 4 + length;
+            }
+        }
+    }
+    found.sort_unstable();
+    found.dedup();
+    Ok(Inspection {
+        media_type,
+        width: None,
+        height: None,
+        embedded: found,
+        strippable: false,
+    })
 }
 
 /// Inspect supported image bytes without decoding pixels.
 /// # Errors
 /// Rejects unknown formats and structurally malformed containers.
 pub fn inspect(bytes: &[u8]) -> Result<Inspection> {
-    let media_type = sniff(bytes).ok_or("Unsupported or unrecognized image format")?;
+    let media_type = sniff(bytes).ok_or("Unsupported or unrecognized media format")?;
+    if is_recording(media_type) {
+        let scan = bytes.len().min(SCAN_BYTES);
+        return inspect_recording(&bytes[..scan], &bytes[bytes.len() - scan..]);
+    }
     let mut found = Vec::new();
     let (width, height, strippable) = match media_type {
         "image/jpeg" => {
@@ -146,7 +308,7 @@ pub fn strip(bytes: &[u8]) -> Result<Vec<u8>> {
         Some("image/gif") => {
             gif(bytes, &mut ignored, Some(&mut out))?;
         }
-        Some(_) => return Err("Metadata removal is not supported for HEIC, HEIF or AVIF"),
+        Some(_) => return Err("Metadata removal is not supported for this format"),
         None => return Err("Unsupported or unrecognized image format"),
     }
     Ok(out)
@@ -662,6 +824,69 @@ mod tests {
         assert_eq!(found.embedded, ["exif"]);
         assert_eq!((found.width, found.height), (Some(9), Some(11)));
         assert!(strip(heic).is_err());
+    }
+    #[test]
+    fn recordings_are_sniffed_and_their_metadata_reported() {
+        let ftyp = |brand: &[u8], rest: &[u8]| {
+            let mut b = vec![0, 0, 0, 16];
+            b.extend_from_slice(b"ftyp");
+            b.extend_from_slice(brand);
+            b.extend_from_slice(&[0, 0, 0, 0]);
+            b.extend_from_slice(rest);
+            b
+        };
+        let mp4 = ftyp(b"isom", b"\0\0\0\x10moovudta\xA9xyz+12.3+045.6/");
+        let found = inspect(&mp4).unwrap();
+        assert_eq!(found.media_type, "video/mp4");
+        assert_eq!(found.embedded, ["gps"]);
+        assert!(!found.strippable && found.width.is_none());
+        assert!(strip(&mp4).is_err());
+        assert_eq!(
+            inspect(&ftyp(b"qt  ", b"moov")).unwrap().media_type,
+            "video/quicktime"
+        );
+        assert_eq!(
+            inspect(&ftyp(b"M4A ", b"moov")).unwrap().media_type,
+            "audio/mp4"
+        );
+        assert_eq!(
+            inspect(&ftyp(b"mp42", b"mdat")).unwrap().embedded,
+            ["unscanned"]
+        );
+        // An image brand still wins inside an ISO-BMFF container.
+        assert_eq!(sniff(&ftyp(b"heic", b"")), Some("image/heic"));
+
+        let webm = b"\x1a\x45\xdf\xa3\x9f\x42\x82\x84webm\x12\x54\xc3\x67";
+        let found = inspect(webm).unwrap();
+        assert_eq!(
+            (found.media_type, found.embedded.as_slice()),
+            ("video/webm", &["tags"][..])
+        );
+        assert_eq!(
+            sniff(b"\x1a\x45\xdf\xa3\x9f\x42\x82\x88matroska"),
+            Some("video/x-matroska")
+        );
+        let wav = b"RIFF\x20\0\0\0WAVEfmt LIST\x04\0\0\0INFO";
+        assert_eq!(inspect(wav).unwrap().embedded, ["text"]);
+        assert_eq!(sniff(b"RIFF\x04\0\0\0AVI LIST"), Some("video/x-msvideo"));
+        assert_eq!(inspect(b"ID3\x04\0\0\0\0\0\0").unwrap().embedded, ["id3"]);
+        assert_eq!(sniff(&[0xFF, 0xFB, 0x90, 0x00]), Some("audio/mpeg"));
+        assert_eq!(sniff(&[0xFF, 0xD8, 0xFF, 0xE0]), Some("image/jpeg"));
+        assert_eq!(inspect(b"OggS\0\x02\x03vorbis").unwrap().embedded, ["tags"]);
+        // FLAC: STREAMINFO (34 bytes), then a final VORBIS_COMMENT block.
+        let mut flac = b"fLaC\x00\x00\x00\x22".to_vec();
+        flac.extend_from_slice(&[0; 34]);
+        flac.extend_from_slice(&[0x84, 0, 0, 2, b'h', b'i']);
+        let found = inspect(&flac).unwrap();
+        assert_eq!(
+            (found.media_type, found.embedded.as_slice()),
+            ("audio/flac", &["tags"][..])
+        );
+        // A clean head with tags only in the scanned tail is still reported.
+        let mut tail = vec![0u8; 200];
+        tail[72..75].copy_from_slice(b"TAG");
+        let found = inspect_recording(&[0xFF, 0xFB, 0x90, 0x00], &tail).unwrap();
+        assert_eq!(found.embedded, ["id3"]);
     }
     #[test]
     fn truncated_input_is_rejected() {

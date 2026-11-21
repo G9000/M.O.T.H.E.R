@@ -220,3 +220,66 @@ fn media_tools_are_advertised_by_scope_and_return_image_content() {
     assert!(got["structuredContent"].get("data").is_none());
     assert_eq!(got["structuredContent"]["variant"], "original");
 }
+
+#[test]
+fn audio_is_sent_as_an_audio_content_block() {
+    let dir = tempfile::tempdir_in(std::fs::canonicalize(std::env::temp_dir()).unwrap()).unwrap();
+    let database = dir.path().join("garden.redb");
+    let ws = uuid::Uuid::new_v4().to_string();
+    let generation = uuid::Uuid::new_v4().to_string();
+    let store = GardenStore::initialize(&database, &ws, &generation).unwrap();
+    let grant = |client: &str, scopes: &[&str]| {
+        store
+            .grant(
+                client,
+                &scopes.iter().map(|s| (*s).to_owned()).collect::<Vec<_>>(),
+                &ClientAccess {
+                    mode: AccessMode::Companion,
+                    subject: Some(format!("agent:{client}")),
+                    records: vec![],
+                },
+                &GardenAccess::All {},
+            )
+            .unwrap()
+    };
+    let writer = grant("writer", &["garden:read", "garden:write"]);
+    let listener = grant("listener", &["garden:read", "media:meta", "media:bytes"]);
+    let batch: BatchRequest = serde_json::from_value(json!({"version":2,"workspaceId":ws,"generation":generation,
+        "operationId":uuid::Uuid::new_v4().to_string(),"requiredExtensions":{},"items":[
+        {"itemKey":"p","mutation":"create","expectedRevision":0,"draft":{"kind":"entity","entityType":"test:person","displayName":"Synthetic Speaker","aliases":[],"extensions":{}}},
+        {"itemKey":"m","mutation":"create","expectedRevision":0,"draft":{"kind":"assertion","subject":{"refType":"item","kind":"entity","itemKey":"p"},"predicate":"test:said","object":{"type":"value","value":{"type":"boolean","value":true}},"validTime":{"validFrom":null,"validUntil":null,"sourceTimezone":null,"precision":"unknown"},"observedTime":{"at":null,"sourceTimezone":null,"precision":"unknown"},"evidence":[],"confidence":null,"extensions":{}}}]})).unwrap();
+    let memory = store.apply(&writer, &batch).unwrap().receipt.results[1]
+        .reference
+        .id
+        .clone();
+    let mut audio = Vec::new();
+    for _ in 0..3 {
+        audio.extend_from_slice(&[0xFF, 0xFB, 0x90, 0x00]);
+        audio.extend_from_slice(&[0x55; 413]);
+    }
+    let path = dir.path().join("voice.mp3");
+    std::fs::write(&path, &audio).unwrap();
+    let attached = store
+        .media_attach(&AttachRequest {
+            source: AttachSource::File {
+                path: &path,
+                input: AcquisitionInput::new(MediaOrigin::Captured),
+                options: IngestOptions::default(),
+            },
+            target: memory,
+            expected_revision: 1,
+            note: None,
+        })
+        .unwrap();
+    let config = config(dir.path(), &database, &listener);
+    drop(store);
+    let mut client = Client::connect(&config);
+    let got = client.result(
+        "mother_garden_media_get",
+        json!({"version":2,"workspaceId":ws,"generation":generation,"sha256":attached["ingest"]["sha256"]}),
+    );
+    assert_ne!(got["isError"], true, "{got}");
+    assert_eq!(got["content"][0]["type"], "audio");
+    assert_eq!(got["content"][0]["mimeType"], "audio/mpeg");
+    assert_eq!(got["content"][0]["data"], mother::media::base64(&audio));
+}

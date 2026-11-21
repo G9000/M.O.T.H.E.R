@@ -29,13 +29,20 @@ async function main() {
   const withheld = list.withheld
     ? ` ${list.withheld} with embedded location or device data are withheld (use --originals to show them).`
     : "";
-  status.textContent = `${list.images.length} attached images.${withheld}`;
+  const skipped = list.truncated ? " Some large recordings were left out of this snapshot." : "";
+  status.textContent = `${list.images.length} attached items.${withheld}${skipped}`;
   for (const image of list.images) {
     const reply = await fetch("/api/media/" + image.sha256, auth);
     if (!reply.ok) continue;
     const figure = document.createElement("figure");
-    const img = document.createElement("img");
-    img.alt = image.acquisitions[0]?.originalFilename ?? "Attached image";
+    const kind = image.mediaType.split("/")[0];
+    const img = document.createElement(kind === "image" ? "img" : kind);
+    if (kind === "image") {
+      img.alt = image.acquisitions[0]?.originalFilename ?? "Attached image";
+    } else {
+      img.controls = true;
+      img.preload = "metadata";
+    }
     img.src = URL.createObjectURL(await reply.blob());
     const caption = document.createElement("figcaption");
     const first = image.acquisitions[0] ?? {};

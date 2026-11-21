@@ -2,6 +2,8 @@
 
 ## 22 November 2026
 
+- Extended the [visual memory guide](visual-memory.md) to audio and video: accepted formats, streamed ingest, metadata reports, transcripts, gallery playback and the MCP audio and video rules. Marked M10 implemented in the spec.
+
 - Documented `garden media export-all` and `garden media import` in the [visual memory guide](visual-memory.md), and marked M11 implemented in the spec.
 
 - Added the [visual memory guide](visual-memory.md): image provenance, owner attachment, stripped derivatives, verification, the `--media` explorer gallery, reviewed attach-from-conversation, attributed interpretations and the separately scoped media MCP tools. Linked it from the backup guide and marked the [visual memory spec](superpowers/specs/2026-11-22-visual-memory-design.md) implemented, noting where the build differs from the plan. Checked with synthetic images only.
