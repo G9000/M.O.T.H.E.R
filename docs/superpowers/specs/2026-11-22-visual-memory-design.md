@@ -1,8 +1,7 @@
 # Visual memory design
 
-Status: implemented for M1–M9 and M11 (tracked in
-[issues #8–#16 and #18](https://github.com/G9000/M.O.T.H.E.R/issues?q=is%3Aissue+%22Visual+memory%3A%22));
-M10 remains deferred. The owner and harness guide is
+Status: implemented for M1–M11 (tracked in
+[issues #8–#16, #18 and #20](https://github.com/G9000/M.O.T.H.E.R/issues?q=is%3Aissue+%22Visual+memory%3A%22)). The owner and harness guide is
 [visual memory](../../visual-memory.md). The build differs from this plan where noted:
 
 - A pending attachment uses the existing URI source locator with
@@ -19,7 +18,10 @@ M10 remains deferred. The owner and harness guide is
 - The explorer shows images through a separate `--media` gallery mode, not
   inside the 3D garden.
 - Derivatives come from lossless container rewriting for JPEG, PNG, WebP and GIF.
-  HEIC, HEIF and AVIF metadata is reported but not removed.
+  HEIC, HEIF, AVIF and recording metadata is reported but not removed.
+- Recordings (M10) are streamed into the existing single-transaction blob store
+  under the owner's size cap, rather than staged across transactions. Audio of
+  at most 2 MiB is returned over MCP as audio content; video never is.
 
 Principle: preserve the original bytes as evidence, then build attributed,
 searchable interpretations around them. An interpretation never replaces or

@@ -30,7 +30,7 @@ const TEXT: &str = "text/plain; charset=utf-8";
 const JPEG: &str = "image/jpeg";
 const OGG: &str = "audio/ogg";
 /// Everything the page may load comes from this server; nothing may leave it.
-const POLICY: &str = "default-src 'none'; script-src 'self'; worker-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; media-src 'self'; connect-src 'self'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'";
+const POLICY: &str = "default-src 'none'; script-src 'self'; worker-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; media-src 'self' blob:; connect-src 'self'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'";
 
 macro_rules! asset {
     ($name:literal) => {
@@ -338,14 +338,15 @@ fn gallery(store: &GardenStore, originals: bool) -> Result<Gallery> {
         else {
             continue;
         };
+        let size = asset["sizeBytes"].as_u64().unwrap_or(u64::MAX);
+        if total.saturating_add(size) > GALLERY_BYTES {
+            truncated = true;
+            continue;
+        }
         let bytes = store
             .media_owner_bytes(sha)
             .map_err(mother::garden::config::domain_error)?;
         total += bytes.len() as u64;
-        if total > GALLERY_BYTES {
-            truncated = true;
-            break;
-        }
         gallery.images.insert(sha.to_owned(), (kind, bytes));
         shown.push(
             json!({"sha256":sha,"originalSha256":asset["sha256"],"variant":variant,

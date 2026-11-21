@@ -37,10 +37,11 @@ pub const PENDING_URI: &str = "urn:mother:media:pending";
 pub const PENDING_EXTENSION: &str = "mother.media:pending";
 pub const USE_EXTENSION: &str = "mother.media:use";
 pub const INTERPRETATION_EXTENSION: &str = "mother.media:interpretation";
-pub const INTERPRETATION_PREDICATES: [&str; 3] = [
+pub const INTERPRETATION_PREDICATES: [&str; 4] = [
     "mother.media:caption",
     "mother.media:description",
     "mother.media:ocr_text",
+    "mother.media:transcript",
 ];
 /// Default per-asset ingest cap; owners may lower or raise it explicitly.
 pub const DEFAULT_MAX_BYTES: u64 = 64 * 1024 * 1024;
@@ -81,6 +82,16 @@ fn file_name(asset: &MediaAsset) -> Result<String> {
         "image/heic" => "heic",
         "image/heif" => "heif",
         "image/avif" => "avif",
+        "video/mp4" => "mp4",
+        "video/quicktime" => "mov",
+        "video/webm" => "webm",
+        "video/x-matroska" => "mkv",
+        "video/x-msvideo" => "avi",
+        "audio/mp4" => "m4a",
+        "audio/mpeg" => "mp3",
+        "audio/wav" => "wav",
+        "audio/ogg" => "ogg",
+        "audio/flac" => "flac",
         _ => return Err(invalid("Unsupported stored media type")),
     };
     Ok(format!("{}.{extension}", asset.sha256))
@@ -218,6 +229,8 @@ pub struct IngestReport {
     pub acquisition_id: String,
     pub reused: bool,
     pub derivative: Option<DerivativeReport>,
+    /// Stripping was requested but this format is never rewritten; the original is kept.
+    pub derivative_unsupported: bool,
 }
 
 /// Bytes the owner attaches: a fresh file, or an asset already in the Garden.
@@ -618,12 +631,8 @@ pub(super) fn ingest_tx(
     let reused = store_asset(tx, &info, &found, now)?;
     let acquisition_id = append_acquisition(tx, &info.sha256, input, None, now)?;
     let mut derivative = None;
-    if options.strip_metadata && !found.embedded.is_empty() {
-        if !found.strippable {
-            return Err(invalid(
-                "Metadata removal is not supported for HEIC, HEIF or AVIF; ingest without stripping",
-            ));
-        }
+    let unsupported = options.strip_metadata && !found.embedded.is_empty() && !found.strippable;
+    if options.strip_metadata && !found.embedded.is_empty() && found.strippable {
         let clean = crate::media::strip(bytes).map_err(invalid)?;
         let checked = crate::media::inspect(&clean).map_err(invalid)?;
         if !checked.embedded.is_empty() || checked.media_type != found.media_type {
@@ -655,9 +664,12 @@ pub(super) fn ingest_tx(
         acquisition_id,
         reused,
         derivative,
+        derivative_unsupported: unsupported,
     })
 }
 /// Read and ingest an owner-selected file inside a caller-owned transaction.
+/// Images are read whole for inspection; recordings are streamed into the blob
+/// store and inspected from both ends, so memory stays bounded.
 pub(super) fn ingest_file_tx(
     tx: &redb::WriteTransaction,
     path: &Path,
@@ -665,8 +677,70 @@ pub(super) fn ingest_file_tx(
     options: IngestOptions,
     now: &str,
 ) -> Result<IngestReport> {
-    let bytes = read_owner_file(path, options.max_bytes)?;
-    ingest_tx(tx, &bytes, input, options, now)
+    use std::io::{Seek, SeekFrom};
+    if options.max_bytes == 0 || options.max_bytes > MAX_SAFE_INTEGER {
+        return Err(invalid("Invalid media size cap"));
+    }
+    let unreadable = |_| invalid("Media file could not be read");
+    let mut file = File::open(path).map_err(|_| invalid("Media file could not be opened"))?;
+    let length = file.metadata().map_err(unreadable)?.len();
+    if length == 0 {
+        return Err(invalid("Empty media file"));
+    }
+    if length > options.max_bytes {
+        return Err(failure(
+            GardenErrorCode::LimitExceeded,
+            "Media file exceeds the ingest size cap",
+        ));
+    }
+    let scan = crate::media::SCAN_BYTES as u64;
+    let mut head = Vec::new();
+    (&mut file)
+        .take(scan)
+        .read_to_end(&mut head)
+        .map_err(unreadable)?;
+    if !crate::media::sniff(&head).is_some_and(crate::media::is_recording) {
+        drop(file);
+        let bytes = read_owner_file(path, options.max_bytes)?;
+        return ingest_tx(tx, &bytes, input, options, now);
+    }
+    input.validate()?;
+    let mut tail = Vec::new();
+    file.seek(SeekFrom::Start(length.saturating_sub(scan)))
+        .map_err(unreadable)?;
+    (&mut file)
+        .take(scan)
+        .read_to_end(&mut tail)
+        .map_err(unreadable)?;
+    let found = crate::media::inspect_recording(&head, &tail).map_err(invalid)?;
+    if input
+        .declared_media_type
+        .as_deref()
+        .is_some_and(|declared| declared != found.media_type)
+    {
+        return Err(invalid(
+            "Declared media type does not match the recording bytes",
+        ));
+    }
+    file.seek(SeekFrom::Start(0)).map_err(unreadable)?;
+    let info = put_blob_tx(tx, (&mut file).take(options.max_bytes + 1))?;
+    if info.size_bytes != length {
+        return Err(invalid("Media file changed while it was being read"));
+    }
+    let reused = store_asset(tx, &info, &found, now)?;
+    let acquisition_id = append_acquisition(tx, &info.sha256, input, None, now)?;
+    Ok(IngestReport {
+        sha256: info.sha256,
+        size_bytes: info.size_bytes,
+        media_type: found.media_type.into(),
+        width: None,
+        height: None,
+        embedded_metadata: found.embedded.iter().map(|s| (*s).to_owned()).collect(),
+        acquisition_id,
+        reused,
+        derivative: None,
+        derivative_unsupported: options.strip_metadata && !found.embedded.is_empty(),
+    })
 }
 /// Evidence draft citing a stored asset, with per-use context.
 pub(super) fn evidence_draft(
@@ -1322,10 +1396,15 @@ impl GardenStore {
                 ));
             }
         };
+        if chosen.media_type.starts_with("video/") {
+            return Err(forbidden(
+                "Video is not returned over MCP; the owner views it locally",
+            ));
+        }
         if chosen.size_bytes > MAX_REPLY_BYTES {
             return Err(failure(
                 GardenErrorCode::LimitExceeded,
-                "Image exceeds the 2 MiB MCP reply bound; view it locally as the owner",
+                "Media exceeds the 2 MiB MCP reply bound; view it locally as the owner",
             ));
         }
         let bytes = read_bytes(&tx, &chosen.sha256)?;

@@ -64,7 +64,7 @@
     },
     {
       "name": "mother_garden_media_get",
-      "description": "Return one authorized image (at most 2 MiB) as image content. Requires media:bytes. A metadata-stripped derivative is preferred; the original needs media:originals and variant original. The image is disclosed to your host.",
+      "description": "Return one authorized image or audio recording (at most 2 MiB) as image or audio content. Requires media:bytes. A metadata-stripped derivative is preferred; the original needs media:originals and variant original. Video is never returned. The media is disclosed to your host.",
       "inputSchema": {
         "$schema": "https://json-schema.org/draft/2020-12/schema",
         "type": "object",
