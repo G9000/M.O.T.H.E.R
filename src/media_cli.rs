@@ -8,7 +8,7 @@ use mother::{
         contracts::{ObservedTime, TimePrecision},
         media_tools::{
             AcquisitionInput, AttachRequest, AttachSource, AttachmentReview, DEFAULT_MAX_BYTES,
-            IngestOptions, MediaOrigin,
+            DEFAULT_STAGE_ABOVE, IngestOptions, MediaOrigin,
         },
         store::GardenStore,
     },
@@ -79,6 +79,11 @@ enum MediaCommand {
         #[arg(long)]
         record: Option<String>,
     },
+    /// Discard interrupted large-file stages; published media is never removed.
+    Cleanup {
+        #[arg(long)]
+        db: PathBuf,
+    },
     /// Re-hash stored images and report missing, corrupt or dangling media.
     Verify {
         #[arg(long)]
@@ -131,6 +136,9 @@ struct Provenance {
     strip_metadata: bool,
     #[arg(long, default_value_t = DEFAULT_MAX_BYTES)]
     max_bytes: u64,
+    /// Recordings larger than this are written in bounded transactions.
+    #[arg(long, default_value_t = DEFAULT_STAGE_ABOVE)]
+    stage_above: u64,
     /// Do not record the original filename.
     #[arg(long)]
     no_filename: bool,
@@ -161,6 +169,7 @@ impl Provenance {
             IngestOptions {
                 max_bytes: self.max_bytes,
                 strip_metadata: self.strip_metadata,
+                stage_above: self.stage_above,
             },
         ))
     }
@@ -263,6 +272,7 @@ pub(crate) fn run(args: Media) -> Result<()> {
                 .map_err(domain_error)?,
         ),
         MediaCommand::Verify { db } => print(open(&db)?.media_verify().map_err(domain_error)?),
+        MediaCommand::Cleanup { db } => print(open(&db)?.media_cleanup().map_err(domain_error)?),
         MediaCommand::ExportAll { db, out } => print(
             open(&db)?
                 .media_export_all(&absolute(&out)?)

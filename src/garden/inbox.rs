@@ -652,7 +652,10 @@ impl GardenStore {
         value: Value,
         attachment: &super::media::AttachmentReview<'_>,
     ) -> Result<(OutcomeResponse, super::media::IngestReport)> {
-        let (outcome, report) = self.review_inner(value, |_| {}, Some(attachment))?;
+        let (outcome, report) =
+            self.with_prepared(attachment.path, attachment.options, |prepared| {
+                self.review_inner(value, |_| {}, Some((attachment, prepared)))
+            })?;
         Ok((
             outcome,
             report.ok_or_else(|| storage_error("attachment ingest missing"))?,
@@ -662,7 +665,7 @@ impl GardenStore {
         &self,
         value: Value,
         mut hook: impl FnMut(CommitStage),
-        attachment: Option<&super::media::AttachmentReview<'_>>,
+        attachment: Option<(&super::media::AttachmentReview<'_>, &super::media::Prepared)>,
     ) -> Result<(OutcomeResponse, Option<super::media::IngestReport>)> {
         bounded_json(&value)?;
         let request: ReviewRequest = serde_json::from_value(value).map_err(|_| {
@@ -762,7 +765,7 @@ impl GardenStore {
         }
         let mut request = request;
         let mut ingest = None;
-        if let Some(attachment) = attachment {
+        if let Some((attachment, prepared)) = attachment {
             let [(index, found)] = pending.as_slice() else {
                 return Err(failure(
                     GardenErrorCode::InvalidInput,
@@ -797,6 +800,7 @@ impl GardenStore {
                 &input,
                 attachment.options,
                 &now,
+                prepared,
             )?;
             let key = owned[*index].item_key.clone();
             owned[*index].draft = Some(super::media::evidence_draft(
