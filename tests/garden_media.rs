@@ -1264,3 +1264,107 @@ fn interpretations_are_listed_with_their_media_and_found_by_search() {
     let listed = f.store.media_list(&narrow, &f.args(json!({}))).unwrap();
     assert_eq!(listed["assets"][0]["interpretations"], json!([]));
 }
+
+#[test]
+fn an_interrupted_stage_resumes_when_the_same_file_is_added_again() {
+    let f = Fixture::new();
+    let (_, memory) = f.memory();
+    // 40 MiB: three staging batches; stop after the first.
+    let video = mp4(40 * 1024 * 1024);
+    let path = f.file("resume.mp4", &video);
+    let stage = f
+        .store
+        .media_stage_partial(&path, staged(), 1)
+        .unwrap()
+        .expect("a partial stage");
+    let report = f.store.media_verify().unwrap();
+    assert_eq!(report["problems"][0]["kind"], "interrupted_stage");
+    assert_eq!(report["problems"][0]["written"], 16);
+
+    // A different file never adopts that stage.
+    let other = f.file("other.mp4", &mp4(3 * 1024 * 1024));
+    let unrelated = f
+        .store
+        .media_add(
+            &other,
+            &AcquisitionInput::new(MediaOrigin::Captured),
+            staged(),
+        )
+        .unwrap();
+    assert_eq!(unrelated.resumed_chunks, 0);
+    assert_eq!(
+        f.store.media_verify().unwrap()["problems"][0]["stageId"],
+        stage.as_str()
+    );
+
+    let attached = f
+        .store
+        .media_attach(&AttachRequest {
+            source: AttachSource::File {
+                path: &path,
+                input: AcquisitionInput::new(MediaOrigin::Captured),
+                options: staged(),
+            },
+            target: memory,
+            expected_revision: 1,
+            note: None,
+        })
+        .unwrap();
+    assert_eq!(attached["ingest"]["resumedChunks"], 16);
+    assert_eq!(attached["ingest"]["sha256"], sha(&video).as_str());
+    let report = f.store.media_verify().unwrap();
+    assert_eq!(report["ok"], true, "{report}");
+    let out = f.dir.path().join("resumed.mp4");
+    f.store
+        .media_export(attached["ingest"]["sha256"].as_str().unwrap(), &out)
+        .unwrap();
+    assert_eq!(std::fs::read(out).unwrap(), video);
+    f.store
+        .backup_to(&f.dir.path().join("resumed-backup"))
+        .unwrap();
+}
+
+#[test]
+fn a_corrupted_staged_chunk_forces_a_clean_restart() {
+    let f = Fixture::new();
+    let video = mp4(20 * 1024 * 1024);
+    let path = f.file("restart.mp4", &video);
+    f.store
+        .media_stage_partial(&path, staged(), 1)
+        .unwrap()
+        .expect("a partial stage");
+    let database = f.dir.path().join("garden.redb");
+    let Fixture {
+        dir, store, writer, ..
+    } = f;
+    drop(store);
+    {
+        let db = redb::Database::open(&database).unwrap();
+        let tx = db.begin_write().unwrap();
+        tx.open_table(redb::TableDefinition::<(&str, u64), &[u8]>::new(
+            "garden_blob_chunks",
+        ))
+        .unwrap()
+        .insert((sha(&video).as_str(), 3), vec![0u8; 1024 * 1024].as_slice())
+        .unwrap();
+        tx.commit().unwrap();
+    }
+    let store = GardenStore::open(&database).unwrap();
+    let added = store
+        .media_add(
+            &path,
+            &AcquisitionInput::new(MediaOrigin::Captured),
+            staged(),
+        )
+        .unwrap();
+    assert_eq!(
+        added.resumed_chunks, 0,
+        "mismatched chunks are never reused"
+    );
+    let report = store.media_verify().unwrap();
+    assert_eq!(report["ok"], true, "{report}");
+    let out = dir.path().join("restarted.mp4");
+    store.media_export(&added.sha256, &out).unwrap();
+    assert_eq!(std::fs::read(out).unwrap(), video);
+    let _ = writer;
+}

@@ -241,6 +241,8 @@ pub(super) enum Prepared {
         sha256: String,
         size_bytes: u64,
         found: crate::media::Inspection,
+        /// Chunks reused from an interrupted stage of the same bytes.
+        resumed: u64,
     },
 }
 
@@ -265,6 +267,8 @@ pub struct IngestReport {
     pub derivative: Option<DerivativeReport>,
     /// Stripping was requested but this format is never rewritten; the original is kept.
     pub derivative_unsupported: bool,
+    /// Chunks reused from an interrupted staged ingest of the same bytes.
+    pub resumed_chunks: u64,
 }
 
 /// Bytes the owner attaches: a fresh file, or an asset already in the Garden.
@@ -767,6 +771,7 @@ pub(super) fn ingest_tx(
         reused,
         derivative,
         derivative_unsupported: unsupported,
+        resumed_chunks: 0,
     })
 }
 /// Read and ingest an owner-selected file inside a caller-owned transaction.
@@ -786,6 +791,7 @@ pub(super) fn ingest_file_tx(
         sha256,
         size_bytes,
         found,
+        resumed,
     } = prepared
     {
         return publish_staged_tx(
@@ -797,6 +803,7 @@ pub(super) fn ingest_file_tx(
             input,
             options,
             now,
+            *resumed,
         );
     }
     if options.max_bytes == 0 || options.max_bytes > MAX_SAFE_INTEGER {
@@ -861,6 +868,7 @@ pub(super) fn ingest_file_tx(
         reused,
         derivative: None,
         derivative_unsupported: options.strip_metadata && !found.embedded.is_empty(),
+        resumed_chunks: 0,
     })
 }
 /// Publish a staged (or already stored) recording in the caller's transaction.
@@ -874,6 +882,7 @@ fn publish_staged_tx(
     input: &AcquisitionInput,
     options: IngestOptions,
     now: &str,
+    resumed: u64,
 ) -> Result<IngestReport> {
     input.validate()?;
     if input
@@ -929,6 +938,7 @@ fn publish_staged_tx(
         reused,
         derivative: None,
         derivative_unsupported: options.strip_metadata && !found.embedded.is_empty(),
+        resumed_chunks: resumed,
     })
 }
 /// Evidence draft citing a stored asset, with per-use context.
@@ -1383,6 +1393,34 @@ impl GardenStore {
     /// Hash a large recording, then write its chunks under that address in bounded
     /// transactions. Nothing references the chunks until the publishing transaction.
     fn prepare_file(&self, path: &Path, options: IngestOptions) -> Result<Prepared> {
+        self.prepare_limited(path, options, None)
+    }
+    /// Find an unpublished stage of exactly these bytes, most advanced first.
+    fn find_stage(&self, sha256: &str, size: u64) -> Result<Option<(String, Stage)>> {
+        let tx = self.db.begin_read().map_err(storage_error)?;
+        let table = tx.open_table(STAGES).map_err(storage_error)?;
+        let mut best: Option<(String, Stage)> = None;
+        for entry in table.iter().map_err(storage_error)? {
+            let (key, value) = entry.map_err(storage_error)?;
+            let staged: Stage = decode(value.value())?;
+            if staged.sha256 == sha256
+                && staged.size_bytes == size
+                && best
+                    .as_ref()
+                    .is_none_or(|(_, b)| staged.written > b.written)
+            {
+                best = Some((key.value().to_owned(), staged));
+            }
+        }
+        Ok(best)
+    }
+    /// Stage with an optional batch limit; a limit leaves an unfinished stage behind.
+    fn prepare_limited(
+        &self,
+        path: &Path,
+        options: IngestOptions,
+        batch_limit: Option<u64>,
+    ) -> Result<Prepared> {
         use std::io::{Seek, SeekFrom};
         let unreadable = |_| invalid("Media file could not be read");
         let Ok(mut file) = File::open(path) else {
@@ -1442,38 +1480,83 @@ impl GardenStore {
                 sha256,
                 size_bytes: length,
                 found,
+                resumed: 0,
             });
         }
-        let id = Uuid::new_v4().to_string();
-        let mut stage = Stage {
-            sha256: sha256.clone(),
-            size_bytes: length,
-            chunks: length.div_ceil(CHUNK),
-            written: 0,
-            started_at: self.now(),
+        let fill = |file: &mut File, buffer: &mut [u8]| -> Result<usize> {
+            let mut filled = 0;
+            while filled < buffer.len() {
+                match file.read(&mut buffer[filled..]).map_err(unreadable)? {
+                    0 => break,
+                    n => filled += n,
+                }
+            }
+            Ok(filled)
         };
-        let tx = self.begin()?;
-        tx.open_table(STAGES)
-            .map_err(storage_error)?
-            .insert(id.as_str(), encode(&stage)?.as_slice())
-            .map_err(storage_error)?;
-        tx.commit().map_err(storage_error)?;
-        let written = (|| -> Result<()> {
-            file.seek(SeekFrom::Start(0)).map_err(unreadable)?;
-            let mut check = Sha256::new();
+        file.seek(SeekFrom::Start(0)).map_err(unreadable)?;
+        let mut check = Sha256::new();
+        let mut resumed = 0;
+        let mut previous = self.find_stage(&sha256, length)?;
+        if let Some((old, staged)) = &previous {
+            // Reuse only chunks that match the file byte for byte.
+            let tx = self.db.begin_read().map_err(storage_error)?;
+            let chunks = tx.open_table(BLOB_BYTES).map_err(storage_error)?;
+            let mut matches = staged.written <= staged.chunks;
+            for index in 0..staged.written.min(staged.chunks) {
+                let filled = fill(&mut file, &mut buffer)?;
+                let stored = chunks
+                    .get((sha256.as_str(), index))
+                    .map_err(storage_error)?;
+                if stored.is_none_or(|bytes| bytes.value() != &buffer[..filled]) {
+                    matches = false;
+                    break;
+                }
+                check.update(&buffer[..filled]);
+            }
+            drop(chunks);
+            drop(tx);
+            if matches {
+                resumed = staged.written;
+            } else {
+                self.discard_stage(old)?;
+                previous = None;
+                file.seek(SeekFrom::Start(0)).map_err(unreadable)?;
+                check = Sha256::new();
+            }
+        }
+        let (id, mut stage) = match previous {
+            Some(found_stage) => found_stage,
+            None => {
+                let id = Uuid::new_v4().to_string();
+                let stage = Stage {
+                    sha256: sha256.clone(),
+                    size_bytes: length,
+                    chunks: length.div_ceil(CHUNK),
+                    written: 0,
+                    started_at: self.now(),
+                };
+                let tx = self.begin()?;
+                tx.open_table(STAGES)
+                    .map_err(storage_error)?
+                    .insert(id.as_str(), encode(&stage)?.as_slice())
+                    .map_err(storage_error)?;
+                tx.commit().map_err(storage_error)?;
+                (id, stage)
+            }
+        };
+        let mut batches = 0u64;
+        let written = (|| -> Result<bool> {
             while stage.written < stage.chunks {
+                if batch_limit.is_some_and(|limit| batches == limit) {
+                    return Ok(false);
+                }
+                batches += 1;
                 let tx = self.begin()?;
                 {
                     let mut chunks = tx.open_table(BLOB_BYTES).map_err(storage_error)?;
                     let end = (stage.written + STAGE_BATCH_CHUNKS).min(stage.chunks);
                     while stage.written < end {
-                        let mut filled = 0;
-                        while filled < buffer.len() {
-                            match file.read(&mut buffer[filled..]).map_err(unreadable)? {
-                                0 => break,
-                                n => filled += n,
-                            }
-                        }
+                        let filled = fill(&mut file, &mut buffer)?;
                         let expected = if stage.written + 1 == stage.chunks {
                             length - stage.written * CHUNK
                         } else {
@@ -1495,21 +1578,24 @@ impl GardenStore {
                     .map_err(storage_error)?;
                 tx.commit().map_err(storage_error)?;
             }
-            if hex(&check.finalize()) != sha256 {
+            if hex(&check.clone().finalize()) != sha256 {
                 return Err(invalid("Media file changed while it was being read"));
             }
-            Ok(())
+            Ok(true)
         })();
-        if let Err(error) = written {
-            let _ = self.discard_stage(&id);
-            return Err(error);
+        match written {
+            Err(error) => {
+                let _ = self.discard_stage(&id);
+                Err(error)
+            }
+            Ok(_) => Ok(Prepared::Staged {
+                stage: Some(id),
+                sha256,
+                size_bytes: length,
+                found,
+                resumed,
+            }),
         }
-        Ok(Prepared::Staged {
-            stage: Some(id),
-            sha256,
-            size_bytes: length,
-            found,
-        })
     }
     /// Remove one unpublished stage. Chunks of a published blob are never touched.
     fn discard_stage(&self, id: &str) -> Result<bool> {
@@ -1570,6 +1656,19 @@ impl GardenStore {
     #[doc(hidden)]
     pub fn media_stage_only(&self, path: &Path, options: IngestOptions) -> Result<Option<String>> {
         Ok(match self.prepare_file(path, options)? {
+            Prepared::Staged { stage, .. } => stage,
+            Prepared::Inline => None,
+        })
+    }
+    /// Trusted test hook: write at most `batches` staging transactions, then stop.
+    #[doc(hidden)]
+    pub fn media_stage_partial(
+        &self,
+        path: &Path,
+        options: IngestOptions,
+        batches: u64,
+    ) -> Result<Option<String>> {
+        Ok(match self.prepare_limited(path, options, Some(batches))? {
             Prepared::Staged { stage, .. } => stage,
             Prepared::Inline => None,
         })

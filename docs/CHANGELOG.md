@@ -2,6 +2,8 @@
 
 ## 22 November 2026
 
+- Documented resuming an interrupted staged ingest by re-running the same command, and the `resumedChunks` report field, in the [visual memory guide](visual-memory.md).
+
 - Added the [visual-memory harness skill](../skills/visual-memory/SKILL.md) and described it in the [visual memory guide](visual-memory.md), along with interpretations shown in media listings and the gallery.
 
 - Documented staged ingest of large recordings, `--stage-above`, interrupted-stage reports, the backup guard and `garden media cleanup` in the [visual memory guide](visual-memory.md).
