@@ -98,7 +98,7 @@ A caption, description, OCR result or transcript is an assertion with predicate 
 {"producer":{"kind":"model","name":"<model or person>"},"method":"caption","producedAt":"2026-11-22T10:00:00Z"}
 ```
 
-For a model producer, confidence, when present, must use `model_inference`. Interpretations go through proposals and owner review like any other graph content. Several can coexist for one image, and retracting one leaves the image and the others untouched. Search indexes the text, never the image. The subject is the subject of the assertion the image supports. Mother never sends an image to an AI service on its own.
+For a model producer, confidence, when present, must use `model_inference`. Interpretations go through proposals and owner review like any other graph content. Several can coexist for one image, and retracting one leaves the image and the others untouched. Graph text queries find interpretation text; the media itself is never indexed. `media_list`, `garden media list` and the `--media` gallery show each item's active interpretations with their attribution. The subject is the subject of the assertion the image supports. Mother never sends an image to an AI service on its own.
 
 ## MCP access
 
@@ -106,7 +106,7 @@ Two tools are catalogued in `contracts/media-tools.json`. They are advertised on
 
 | Tool | Scope | Returns |
 | --- | --- | --- |
-| `mother_garden_media_list` | `media:meta` (needs `garden:read`) | Paged metadata, acquisitions, derivatives and visible uses. No bytes. |
+| `mother_garden_media_list` | `media:meta` (needs `garden:read`) | Paged metadata, acquisitions, derivatives, visible uses and visible interpretations. No bytes. |
 | `mother_garden_media_get` | `media:bytes` (needs `media:meta`) | One image or audio recording of at most 2 MiB, as MCP image or audio content. Video is never returned. |
 
 - Only assets cited by evidence the credential can currently see are disclosed. Hidden assets are absent from listings and counts.
@@ -114,6 +114,10 @@ Two tools are catalogued in `contracts/media-tools.json`. They are advertised on
 - Images over the bound are refused, never truncated.
 - Shared clients cannot receive `media:bytes` or `media:originals`.
 - Returning an image discloses it to the host and usually its model provider. Hosts differ in how they handle image results, and a protocol test does not prove a host shows or forwards them.
+
+## Harness skill
+
+The [visual-memory skill](../skills/visual-memory/SKILL.md) teaches a harness this whole flow: proposing a pending attachment instead of claiming the media is saved, reading media metadata, fetching only what a task needs, and proposing attributed captions, descriptions, OCR text and transcripts. Install it the same way as the [Witness Journal skill](witness-journal.md), copying the `skills/visual-memory` folder into your harness's skills directory. The MCP server's own instructions also describe the pending-attachment flow to every connected harness.
 
 ## Backups
 

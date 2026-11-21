@@ -529,6 +529,74 @@ fn uses(tx: &redb::ReadTransaction, asset: &MediaAsset) -> Result<Vec<String>> {
     }
     Ok(ids)
 }
+const MAX_INTERPRETATIONS_SHOWN: usize = 20;
+/// Active interpretation assertions citing the given evidence. With a principal,
+/// only interpretations that principal can currently see are returned.
+fn interpretations(
+    tx: &redb::ReadTransaction,
+    principal: Option<&Principal>,
+    evidence_ids: &[String],
+) -> Result<Vec<Value>> {
+    let index = tx.open_table(indexes::EVIDENCE).map_err(storage_error)?;
+    let current = tx.open_table(CURRENT).map_err(storage_error)?;
+    let mut seen = BTreeSet::new();
+    let mut out = Vec::new();
+    for evidence in evidence_ids {
+        let full = json!([{"kind":"evidence","id":evidence}, ""]).to_string();
+        let prefix = &full[..full.len() - 3];
+        let end = format!("{prefix}\u{10ffff}");
+        for entry in index.range(prefix..end.as_str()).map_err(storage_error)? {
+            let (key, _) = entry.map_err(storage_error)?;
+            let parsed: Value = serde_json::from_str(key.value()).map_err(storage_error)?;
+            let Some(id) = parsed[1].as_str() else {
+                continue;
+            };
+            if !seen.insert(id.to_owned()) {
+                continue;
+            }
+            let Some(bytes) = current.get(id).map_err(storage_error)? else {
+                continue;
+            };
+            let record: GardenRecord = decode(bytes.value())?;
+            let GardenDraft::Assertion {
+                predicate,
+                object:
+                    AssertionObject::Value {
+                        value: TypedValue::String { value },
+                    },
+                extensions,
+                ..
+            } = &record.draft
+            else {
+                continue;
+            };
+            if !INTERPRETATION_PREDICATES.contains(&predicate.as_str())
+                || record.metadata.lifecycle != Lifecycle::Active
+            {
+                continue;
+            }
+            if let Some(principal) = principal {
+                let Ok((context, replacements)) = context_read(tx, principal, vec![id.to_owned()])
+                else {
+                    continue;
+                };
+                if visible(principal, &record, &context, &replacements).is_err() {
+                    continue;
+                }
+            }
+            let attribution = extensions
+                .get(INTERPRETATION_EXTENSION)
+                .map_or(Value::Null, |e| e.payload.clone());
+            out.push(json!({"assertionId":id,"revision":record.metadata.revision,
+                "predicate":predicate,"text":value,"attribution":attribution,
+                "contributor":record.metadata.contributor,"approver":record.metadata.approver}));
+            if out.len() == MAX_INTERPRETATIONS_SHOWN {
+                return Ok(out);
+            }
+        }
+    }
+    Ok(out)
+}
 fn read_bytes(tx: &redb::ReadTransaction, sha: &str) -> Result<Vec<u8>> {
     let meta = tx.open_table(BLOBS).map_err(storage_error)?;
     let info: BlobInfo = decode(
@@ -1698,6 +1766,11 @@ impl GardenStore {
                 continue;
             }
             let all = acquisitions(&acquisition_table, &asset.sha256)?;
+            let cited: Vec<String> = used
+                .iter()
+                .filter_map(|u| u["evidenceId"].as_str().map(str::to_owned))
+                .collect();
+            let readings = interpretations(&tx, Some(&principal), &cited)?;
             let derived: Vec<Value> = derivatives(&derivative_table, &asset.sha256)?
                 .into_iter()
                 .filter_map(|sha| asset_read(&assets, &sha).ok().flatten())
@@ -1708,7 +1781,7 @@ impl GardenStore {
                 "embeddedMetadata":asset.embedded_metadata,"derivatives":derived,
                 "acquisitions":all.iter().take(MAX_ACQUISITIONS_SHOWN).collect::<Vec<_>>(),
                 "acquisitionsOmitted":all.len().saturating_sub(MAX_ACQUISITIONS_SHOWN),
-                "uses":used}));
+                "uses":used,"interpretations":readings}));
         }
         Ok(
             json!({"version":2,"workspaceId":state.workspace_id,"generation":state.generation,
@@ -1843,8 +1916,10 @@ impl GardenStore {
         }
         let mut out = Vec::new();
         for (asset, evidence) in selected {
+            let cited = uses(&tx, &asset)?;
             out.push(json!({"asset":asset,"evidenceId":evidence,
-                "uses":uses(&tx, &asset)?,
+                "interpretations":interpretations(&tx, None, &cited)?,
+                "uses":cited,
                 "derivatives":derivatives(&derivative_table, &asset.sha256)?,
                 "acquisitions":acquisitions(&acquisition_table, &asset.sha256)?}));
         }

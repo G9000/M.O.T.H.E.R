@@ -49,6 +49,11 @@ async function main() {
     if (first.originalFilename) caption.append(line("File", first.originalFilename));
     if (first.eventTime?.at) caption.append(line("Event", first.eventTime.at));
     if (first.origin) caption.append(line("Origin", first.origin.replace("_", " ")));
+    for (reading of image.interpretations ?? []) {
+      const kind = reading.predicate.replace("mother.media:", "").replace("_", " ");
+      const by = reading.attribution?.producer?.name ?? reading.contributor;
+      caption.append(line(`${kind} (${by})`, reading.text));
+    }
     caption.append(line("Shown", image.variant));
     caption.append(line("Cited by", `${image.uses} evidence record(s)`));
     figure.append(img, caption);

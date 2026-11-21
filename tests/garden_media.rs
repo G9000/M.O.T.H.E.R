@@ -1165,3 +1165,102 @@ fn interrupted_stages_are_reported_block_backups_and_are_cleaned_up() {
     assert_eq!(std::fs::read(copy).unwrap(), mp4(3 * 1024 * 1024));
     assert_eq!(f.store.media_verify().unwrap()["ok"], true);
 }
+
+#[test]
+fn interpretations_are_listed_with_their_media_and_found_by_search() {
+    let f = Fixture::new();
+    let (person, memory) = f.memory();
+    let attached = f.attach(&f.file("harbour.png", &png(6)), &memory, 1, false);
+    let evidence = attached["outcome"]["receipt"]["results"][0]["reference"]["id"].clone();
+    let caption = |text: &str| {
+        f.batch(json!([{"itemKey":"c","mutation":"create","expectedRevision":0,"draft":{"kind":"assertion",
+            "subject":{"refType":"existing","kind":"entity","id":person},"predicate":"mother.media:caption",
+            "object":{"type":"value","value":{"type":"string","value":text}},
+            "validTime":{"validFrom":null,"validUntil":null,"sourceTimezone":null,"precision":"unknown"},
+            "observedTime":{"at":null,"sourceTimezone":null,"precision":"unknown"},
+            "evidence":[{"refType":"existing","kind":"evidence","id":evidence}],"confidence":null,
+            "extensions":{"mother.media:interpretation":{"schemaVersion":1,"payload":{
+                "producer":{"kind":"model","name":"synthetic-vision"},"method":"caption"}}}}}]))
+    };
+    let first = f
+        .store
+        .apply(&f.writer, &caption("Boats moored in a quiet harbour"))
+        .unwrap();
+    f.store
+        .apply(&f.writer, &caption("Gulls above the breakwater"))
+        .unwrap();
+    let reader = f.grant(
+        "reader",
+        &["garden:read", "media:meta"],
+        GardenAccess::All {},
+    );
+    let listed = f.store.media_list(&reader, &f.args(json!({}))).unwrap();
+    let readings = listed["assets"][0]["interpretations"].as_array().unwrap();
+    assert_eq!(readings.len(), 2);
+    assert!(
+        readings
+            .iter()
+            .all(|r| r["attribution"]["producer"]["name"] == "synthetic-vision")
+    );
+    let owner = f.store.media_owner_list(None).unwrap();
+    assert_eq!(
+        owner["assets"][0]["interpretations"]
+            .as_array()
+            .unwrap()
+            .len(),
+        2
+    );
+
+    let mut query: QueryRequest = serde_json::from_value(json!({"version":2,"workspaceId":f.ws,
+        "generation":f.generation,"requiredExtensions":{},"ids":[],"kinds":[],"entityType":null,
+        "predicate":"mother.media:caption","property":null,"validAt":null,"knownAt":null,
+        "text":"harbour","vector":null,"traversal":null,"limit":10,"cursor":null}))
+    .unwrap();
+    let hits = f.store.query(&f.writer, &query).unwrap().hits;
+    assert_eq!(hits.len(), 1, "interpretation text is searchable");
+    assert_eq!(
+        hits[0].record.metadata.id,
+        first.receipt.results[0].reference.id
+    );
+
+    // A retracted interpretation leaves the media and the other reading in place.
+    f.store
+        .apply(
+            &f.writer,
+            &f.batch(
+                json!([{"itemKey":"r","mutation":"retract","expectedRevision":1,
+                "id":{"kind":"assertion","id":first.receipt.results[0].reference.id}}]),
+            ),
+        )
+        .unwrap();
+    let listed = f.store.media_list(&reader, &f.args(json!({}))).unwrap();
+    let readings = listed["assets"][0]["interpretations"].as_array().unwrap();
+    assert_eq!(readings.len(), 1);
+    assert_eq!(readings[0]["text"], "Gulls above the breakwater");
+    query.text = Some("harbour".into());
+    assert!(f.store.query(&f.writer, &query).unwrap().hits.is_empty());
+
+    // A reader that cannot see the interpretation does not get it.
+    let narrow = f.grant(
+        "narrow",
+        &["garden:read", "media:meta"],
+        GardenAccess::Allowlist {
+            objects: vec![
+                ExternalReference {
+                    kind: GardenKind::Assertion,
+                    id: memory.clone(),
+                },
+                ExternalReference {
+                    kind: GardenKind::Evidence,
+                    id: evidence.as_str().unwrap().to_owned(),
+                },
+                ExternalReference {
+                    kind: GardenKind::Entity,
+                    id: person.clone(),
+                },
+            ],
+        },
+    );
+    let listed = f.store.media_list(&narrow, &f.args(json!({}))).unwrap();
+    assert_eq!(listed["assets"][0]["interpretations"], json!([]));
+}
