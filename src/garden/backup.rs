@@ -179,6 +179,7 @@ fn known_tables() -> BTreeSet<String> {
                 "garden_v1_admissions",
                 "garden_v1_pending_dedup",
                 "garden_v1_vectors_v1",
+                "garden_media_stages",
             ]
             .into_iter()
             .map(str::to_owned),
@@ -417,6 +418,7 @@ impl GardenStore {
         {
             return Err(bad("Unknown canonical multimap table"));
         }
+        media::validate_stages(&tx)?;
         validate_blobs(&tx)?;
         media::validate(&tx)?;
         create_bundle_dir(out)?;

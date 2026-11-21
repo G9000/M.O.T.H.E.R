@@ -222,7 +222,7 @@ fn ingest_deduplicates_bytes_and_appends_provenance() {
     let big = f.file("big.png", &png(4096));
     let capped = IngestOptions {
         max_bytes: 1024,
-        strip_metadata: false,
+        ..IngestOptions::default()
     };
     assert_eq!(
         f.store.media_add(&big, &input, capped).unwrap_err().code,
@@ -949,7 +949,7 @@ fn recordings_stream_into_the_store_and_keep_their_metadata_report() {
                 &AcquisitionInput::new(MediaOrigin::Captured),
                 IngestOptions {
                     max_bytes: 1024,
-                    strip_metadata: false,
+                    ..IngestOptions::default()
                 },
             )
             .unwrap_err()
@@ -1028,4 +1028,140 @@ fn transcripts_are_attributed_interpretations_of_recordings() {
         f.store.apply(&f.writer, &batch).unwrap().receipt.status,
         OutcomeStatus::Applied
     );
+}
+
+fn staged() -> IngestOptions {
+    IngestOptions {
+        stage_above: 1024 * 1024,
+        ..IngestOptions::default()
+    }
+}
+
+#[test]
+fn large_recordings_are_staged_across_transactions_and_published_atomically() {
+    let f = Fixture::new();
+    let (_, memory) = f.memory();
+    // 20 MiB above a 1 MiB threshold: two 16-chunk staging transactions.
+    let video = mp4(20 * 1024 * 1024);
+    let path = f.file("long.mp4", &video);
+    let sequence = f.store.audit(&f.writer).unwrap().sequence;
+    let attached = f
+        .store
+        .media_attach(&AttachRequest {
+            source: AttachSource::File {
+                path: &path,
+                input: AcquisitionInput::new(MediaOrigin::Captured),
+                options: staged(),
+            },
+            target: memory.clone(),
+            expected_revision: 1,
+            note: None,
+        })
+        .unwrap();
+    assert_eq!(attached["ingest"]["sha256"], sha(&video).as_str());
+    assert_eq!(attached["ingest"]["embeddedMetadata"], json!(["gps"]));
+    assert_eq!(f.store.audit(&f.writer).unwrap().sequence, sequence + 1);
+    assert_eq!(f.assertion(&memory).metadata.revision, 2);
+    let out = f.dir.path().join("long-copy.mp4");
+    f.store
+        .media_export(attached["ingest"]["sha256"].as_str().unwrap(), &out)
+        .unwrap();
+    assert_eq!(std::fs::read(&out).unwrap(), video);
+    let report = f.store.media_verify().unwrap();
+    assert_eq!(report["ok"], true, "{report}");
+    f.store
+        .backup_to(&f.dir.path().join("staged-backup"))
+        .unwrap();
+
+    // The same bytes again are reused without restaging.
+    let again = f
+        .store
+        .media_add(
+            &path,
+            &AcquisitionInput::new(MediaOrigin::Imported),
+            staged(),
+        )
+        .unwrap();
+    assert!(again.reused);
+    assert_eq!(f.store.media_cleanup().unwrap()["stagesRemoved"], 0);
+}
+
+#[test]
+fn a_failed_publish_discards_its_stage() {
+    let f = Fixture::new();
+    let (_, memory) = f.memory();
+    let path = f.file("stale.mp4", &mp4(3 * 1024 * 1024));
+    let stale = f.store.media_attach(&AttachRequest {
+        source: AttachSource::File {
+            path: &path,
+            input: AcquisitionInput::new(MediaOrigin::Captured),
+            options: staged(),
+        },
+        target: memory,
+        expected_revision: 9,
+        note: None,
+    });
+    assert_eq!(stale.unwrap_err().code, GardenErrorCode::Conflict);
+    let report = f.store.media_verify().unwrap();
+    assert_eq!(report["ok"], true, "{report}");
+    assert_eq!(f.store.media_owner_list(None).unwrap()["assets"], json!([]));
+    f.store
+        .backup_to(&f.dir.path().join("clean-backup"))
+        .unwrap();
+}
+
+#[test]
+fn interrupted_stages_are_reported_block_backups_and_are_cleaned_up() {
+    let f = Fixture::new();
+    let (_, memory) = f.memory();
+    // A published recording whose bytes an interrupted stage must never remove.
+    let kept = mp4(2 * 1024 * 1024);
+    let published = f.attach(&f.file("kept.mp4", &kept), &memory, 1, false);
+    let interrupted = f.file("cut.mp4", &mp4(5 * 1024 * 1024 + 7));
+    let stage = f
+        .store
+        .media_stage_only(&interrupted, staged())
+        .unwrap()
+        .expect("a stage was written");
+    let report = f.store.media_verify().unwrap();
+    assert_eq!(report["ok"], false);
+    assert_eq!(report["problems"][0]["kind"], "interrupted_stage");
+    assert_eq!(report["problems"][0]["stageId"], stage.as_str());
+    let refused = f
+        .store
+        .backup_to(&f.dir.path().join("refused"))
+        .unwrap_err();
+    assert!(
+        refused.message.contains("garden media cleanup"),
+        "{refused:?}"
+    );
+    assert_eq!(f.store.media_cleanup().unwrap()["stagesRemoved"], 1);
+    let report = f.store.media_verify().unwrap();
+    assert_eq!(report["ok"], true, "{report}");
+    f.store
+        .backup_to(&f.dir.path().join("after-cleanup"))
+        .unwrap();
+    let out = f.dir.path().join("kept-copy.mp4");
+    f.store
+        .media_export(published["ingest"]["sha256"].as_str().unwrap(), &out)
+        .unwrap();
+    assert_eq!(std::fs::read(out).unwrap(), kept);
+
+    // A stage left behind for bytes that were later published keeps those bytes.
+    let racing = f.file("race.mp4", &mp4(3 * 1024 * 1024));
+    let leftover = f
+        .store
+        .media_stage_only(&racing, staged())
+        .unwrap()
+        .unwrap();
+    let (_, second) = f.memory();
+    let added = f.attach(&racing, &second, 1, false);
+    assert_ne!(leftover, "");
+    assert_eq!(f.store.media_cleanup().unwrap()["stagesRemoved"], 1);
+    let copy = f.dir.path().join("race-copy.mp4");
+    f.store
+        .media_export(added["ingest"]["sha256"].as_str().unwrap(), &copy)
+        .unwrap();
+    assert_eq!(std::fs::read(copy).unwrap(), mp4(3 * 1024 * 1024));
+    assert_eq!(f.store.media_verify().unwrap()["ok"], true);
 }

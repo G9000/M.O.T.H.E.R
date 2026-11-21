@@ -31,6 +31,13 @@ pub(crate) const ACQUISITIONS: TableDefinition<&str, &[u8]> =
     TableDefinition::new("garden_media_acquisitions");
 pub(crate) const DERIVATIVES: TableDefinition<&str, &[u8]> =
     TableDefinition::new("garden_media_derivatives");
+/// Transient record of an unpublished large ingest; never exported or restored.
+pub(crate) const STAGES: TableDefinition<&str, &[u8]> = TableDefinition::new("garden_media_stages");
+/// Recordings above this size are staged unless the owner chooses otherwise.
+pub const DEFAULT_STAGE_ABOVE: u64 = 64 * 1024 * 1024;
+/// Chunks (1 MiB each) written per staging transaction.
+const STAGE_BATCH_CHUNKS: u64 = 16;
+const CHUNK: u64 = 1024 * 1024;
 
 /// Source URI marking a proposed attachment whose original the owner has not supplied.
 pub const PENDING_URI: &str = "urn:mother:media:pending";
@@ -200,14 +207,41 @@ impl AcquisitionInput {
 pub struct IngestOptions {
     pub max_bytes: u64,
     pub strip_metadata: bool,
+    /// Recordings larger than this are staged across bounded transactions.
+    pub stage_above: u64,
 }
 impl Default for IngestOptions {
     fn default() -> Self {
         Self {
             max_bytes: DEFAULT_MAX_BYTES,
             strip_metadata: false,
+            stage_above: DEFAULT_STAGE_ABOVE,
         }
     }
+}
+
+/// A large recording written in bounded transactions, awaiting its atomic publish.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct Stage {
+    sha256: String,
+    size_bytes: u64,
+    chunks: u64,
+    written: u64,
+    started_at: String,
+}
+/// Work done before the publishing transaction opens.
+#[derive(Debug, Clone)]
+pub(super) enum Prepared {
+    /// Small files and images: ingest entirely inside the publishing transaction.
+    Inline,
+    /// A large recording: chunks already written (or already stored, `stage: None`).
+    Staged {
+        stage: Option<String>,
+        sha256: String,
+        size_bytes: u64,
+        found: crate::media::Inspection,
+    },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -676,8 +710,27 @@ pub(super) fn ingest_file_tx(
     input: &AcquisitionInput,
     options: IngestOptions,
     now: &str,
+    prepared: &Prepared,
 ) -> Result<IngestReport> {
     use std::io::{Seek, SeekFrom};
+    if let Prepared::Staged {
+        stage,
+        sha256,
+        size_bytes,
+        found,
+    } = prepared
+    {
+        return publish_staged_tx(
+            tx,
+            stage.as_deref(),
+            sha256,
+            *size_bytes,
+            found,
+            input,
+            options,
+            now,
+        );
+    }
     if options.max_bytes == 0 || options.max_bytes > MAX_SAFE_INTEGER {
         return Err(invalid("Invalid media size cap"));
     }
@@ -732,6 +785,74 @@ pub(super) fn ingest_file_tx(
     Ok(IngestReport {
         sha256: info.sha256,
         size_bytes: info.size_bytes,
+        media_type: found.media_type.into(),
+        width: None,
+        height: None,
+        embedded_metadata: found.embedded.iter().map(|s| (*s).to_owned()).collect(),
+        acquisition_id,
+        reused,
+        derivative: None,
+        derivative_unsupported: options.strip_metadata && !found.embedded.is_empty(),
+    })
+}
+/// Publish a staged (or already stored) recording in the caller's transaction.
+#[allow(clippy::too_many_arguments)]
+fn publish_staged_tx(
+    tx: &redb::WriteTransaction,
+    stage: Option<&str>,
+    sha256: &str,
+    size_bytes: u64,
+    found: &crate::media::Inspection,
+    input: &AcquisitionInput,
+    options: IngestOptions,
+    now: &str,
+) -> Result<IngestReport> {
+    input.validate()?;
+    if input
+        .declared_media_type
+        .as_deref()
+        .is_some_and(|declared| declared != found.media_type)
+    {
+        return Err(invalid(
+            "Declared media type does not match the recording bytes",
+        ));
+    }
+    let info = BlobInfo {
+        sha256: sha256.to_owned(),
+        size_bytes,
+        chunks: size_bytes.div_ceil(CHUNK),
+    };
+    let mut blobs = tx.open_table(BLOBS).map_err(storage_error)?;
+    if let Some(id) = stage {
+        let mut stages = tx.open_table(STAGES).map_err(storage_error)?;
+        let staged: Stage = decode(
+            stages
+                .get(id)
+                .map_err(storage_error)?
+                .ok_or_else(|| storage_error("staged ingest disappeared"))?
+                .value(),
+        )?;
+        if staged.sha256 != sha256
+            || staged.written != staged.chunks
+            || staged.chunks != info.chunks
+        {
+            return Err(storage_error("staged ingest is incomplete"));
+        }
+        stages.remove(id).map_err(storage_error)?;
+        if blobs.get(sha256).map_err(storage_error)?.is_none() {
+            blobs
+                .insert(sha256, encode(&info)?.as_slice())
+                .map_err(storage_error)?;
+        }
+    } else if blobs.get(sha256).map_err(storage_error)?.is_none() {
+        return Err(storage_error("reused recording bytes disappeared"));
+    }
+    drop(blobs);
+    let reused = store_asset(tx, &info, found, now)?;
+    let acquisition_id = append_acquisition(tx, sha256, input, None, now)?;
+    Ok(IngestReport {
+        sha256: sha256.to_owned(),
+        size_bytes,
         media_type: found.media_type.into(),
         width: None,
         height: None,
@@ -987,8 +1108,29 @@ pub(super) fn check_proposal(
     Ok(())
 }
 
-const TABLES: [TableDefinition<'static, &'static str, &'static [u8]>; 3] =
-    [ASSETS, ACQUISITIONS, DERIVATIVES];
+const TABLES: [TableDefinition<'static, &'static str, &'static [u8]>; 4] =
+    [ASSETS, ACQUISITIONS, DERIVATIVES, STAGES];
+/// Backups refuse while an interrupted large-file ingest is staged.
+pub(super) fn validate_stages(tx: &redb::ReadTransaction) -> Result<()> {
+    let present = tx
+        .list_tables()
+        .map_err(storage_error)?
+        .any(|t| t.name() == STAGES.name());
+    if present
+        && tx
+            .open_table(STAGES)
+            .map_err(storage_error)?
+            .iter()
+            .map_err(storage_error)?
+            .next()
+            .is_some()
+    {
+        return Err(invalid(
+            "An interrupted large-file ingest is staged; run garden media cleanup first",
+        ));
+    }
+    Ok(())
+}
 /// Create empty media tables; opening an older store adds them without other changes.
 pub(super) fn initialize(tx: &redb::WriteTransaction) -> Result<()> {
     for table in TABLES {
@@ -1145,10 +1287,224 @@ impl GardenStore {
         input: &AcquisitionInput,
         options: IngestOptions,
     ) -> Result<IngestReport> {
+        self.with_prepared(path, options, |prepared| {
+            let tx = self.begin()?;
+            let report = ingest_file_tx(&tx, path, input, options, &self.now(), prepared)?;
+            tx.commit().map_err(storage_error)?;
+            Ok(report)
+        })
+    }
+    /// Stage a large recording before `publish` runs; discard the stage if it fails.
+    pub(super) fn with_prepared<T>(
+        &self,
+        path: &Path,
+        options: IngestOptions,
+        publish: impl FnOnce(&Prepared) -> Result<T>,
+    ) -> Result<T> {
+        let prepared = self.prepare_file(path, options)?;
+        let result = publish(&prepared);
+        if result.is_err()
+            && let Prepared::Staged {
+                stage: Some(id), ..
+            } = &prepared
+        {
+            let _ = self.discard_stage(id);
+        }
+        result
+    }
+    /// Hash a large recording, then write its chunks under that address in bounded
+    /// transactions. Nothing references the chunks until the publishing transaction.
+    fn prepare_file(&self, path: &Path, options: IngestOptions) -> Result<Prepared> {
+        use std::io::{Seek, SeekFrom};
+        let unreadable = |_| invalid("Media file could not be read");
+        let Ok(mut file) = File::open(path) else {
+            return Ok(Prepared::Inline);
+        };
+        let length = file.metadata().map_err(unreadable)?.len();
+        if length == 0 || length > options.max_bytes || length <= options.stage_above {
+            return Ok(Prepared::Inline);
+        }
+        let scan = crate::media::SCAN_BYTES as u64;
+        let mut head = Vec::new();
+        (&mut file)
+            .take(scan)
+            .read_to_end(&mut head)
+            .map_err(unreadable)?;
+        if !crate::media::sniff(&head).is_some_and(crate::media::is_recording) {
+            return Ok(Prepared::Inline);
+        }
+        let mut tail = Vec::new();
+        file.seek(SeekFrom::Start(length.saturating_sub(scan)))
+            .map_err(unreadable)?;
+        (&mut file)
+            .take(scan)
+            .read_to_end(&mut tail)
+            .map_err(unreadable)?;
+        let found = crate::media::inspect_recording(&head, &tail).map_err(invalid)?;
+        file.seek(SeekFrom::Start(0)).map_err(unreadable)?;
+        let mut hash = Sha256::new();
+        let mut buffer = vec![0; CHUNK as usize];
+        let mut total = 0u64;
+        loop {
+            let read = file.read(&mut buffer).map_err(unreadable)?;
+            if read == 0 {
+                break;
+            }
+            hash.update(&buffer[..read]);
+            total += read as u64;
+        }
+        if total != length {
+            return Err(invalid("Media file changed while it was being read"));
+        }
+        let sha256 = hex(&hash.finalize());
+        let already = match self
+            .db
+            .begin_read()
+            .map_err(storage_error)?
+            .open_table(BLOBS)
+        {
+            Ok(table) => table.get(sha256.as_str()).map_err(storage_error)?.is_some(),
+            // Blob tables are created by the first ingest.
+            Err(redb::TableError::TableDoesNotExist(_)) => false,
+            Err(error) => return Err(storage_error(error)),
+        };
+        if already {
+            return Ok(Prepared::Staged {
+                stage: None,
+                sha256,
+                size_bytes: length,
+                found,
+            });
+        }
+        let id = Uuid::new_v4().to_string();
+        let mut stage = Stage {
+            sha256: sha256.clone(),
+            size_bytes: length,
+            chunks: length.div_ceil(CHUNK),
+            written: 0,
+            started_at: self.now(),
+        };
         let tx = self.begin()?;
-        let report = ingest_file_tx(&tx, path, input, options, &self.now())?;
+        tx.open_table(STAGES)
+            .map_err(storage_error)?
+            .insert(id.as_str(), encode(&stage)?.as_slice())
+            .map_err(storage_error)?;
         tx.commit().map_err(storage_error)?;
-        Ok(report)
+        let written = (|| -> Result<()> {
+            file.seek(SeekFrom::Start(0)).map_err(unreadable)?;
+            let mut check = Sha256::new();
+            while stage.written < stage.chunks {
+                let tx = self.begin()?;
+                {
+                    let mut chunks = tx.open_table(BLOB_BYTES).map_err(storage_error)?;
+                    let end = (stage.written + STAGE_BATCH_CHUNKS).min(stage.chunks);
+                    while stage.written < end {
+                        let mut filled = 0;
+                        while filled < buffer.len() {
+                            match file.read(&mut buffer[filled..]).map_err(unreadable)? {
+                                0 => break,
+                                n => filled += n,
+                            }
+                        }
+                        let expected = if stage.written + 1 == stage.chunks {
+                            length - stage.written * CHUNK
+                        } else {
+                            CHUNK
+                        };
+                        if filled as u64 != expected {
+                            return Err(invalid("Media file changed while it was being read"));
+                        }
+                        check.update(&buffer[..filled]);
+                        chunks
+                            .insert((sha256.as_str(), stage.written), &buffer[..filled])
+                            .map_err(storage_error)?;
+                        stage.written += 1;
+                    }
+                }
+                tx.open_table(STAGES)
+                    .map_err(storage_error)?
+                    .insert(id.as_str(), encode(&stage)?.as_slice())
+                    .map_err(storage_error)?;
+                tx.commit().map_err(storage_error)?;
+            }
+            if hex(&check.finalize()) != sha256 {
+                return Err(invalid("Media file changed while it was being read"));
+            }
+            Ok(())
+        })();
+        if let Err(error) = written {
+            let _ = self.discard_stage(&id);
+            return Err(error);
+        }
+        Ok(Prepared::Staged {
+            stage: Some(id),
+            sha256,
+            size_bytes: length,
+            found,
+        })
+    }
+    /// Remove one unpublished stage. Chunks of a published blob are never touched.
+    fn discard_stage(&self, id: &str) -> Result<bool> {
+        let tx = self.begin()?;
+        let staged: Option<Stage> = tx
+            .open_table(STAGES)
+            .map_err(storage_error)?
+            .remove(id)
+            .map_err(storage_error)?
+            .map(|v| decode(v.value()))
+            .transpose()?;
+        let Some(staged) = staged else {
+            return Ok(false);
+        };
+        let published = tx
+            .open_table(BLOBS)
+            .map_err(storage_error)?
+            .get(staged.sha256.as_str())
+            .map_err(storage_error)?
+            .is_some();
+        if !published {
+            let mut chunks = tx.open_table(BLOB_BYTES).map_err(storage_error)?;
+            for index in 0..staged.chunks {
+                chunks
+                    .remove((staged.sha256.as_str(), index))
+                    .map_err(storage_error)?;
+            }
+        }
+        tx.commit().map_err(storage_error)?;
+        Ok(true)
+    }
+    /// Owner-only: discard every interrupted large-file stage.
+    /// # Errors
+    /// Returns storage errors; published blobs are never removed.
+    pub fn media_cleanup(&self) -> Result<Value> {
+        let ids: Vec<String> = {
+            let tx = self.db.begin_read().map_err(storage_error)?;
+            let table = tx.open_table(STAGES).map_err(storage_error)?;
+            table
+                .iter()
+                .map_err(storage_error)?
+                .map(|entry| {
+                    entry
+                        .map(|(k, _)| k.value().to_owned())
+                        .map_err(storage_error)
+                })
+                .collect::<Result<_>>()?
+        };
+        let mut removed = 0;
+        for id in &ids {
+            if self.discard_stage(id)? {
+                removed += 1;
+            }
+        }
+        Ok(json!({"stagesRemoved":removed}))
+    }
+    /// Trusted test hook: stage a recording without publishing it, as if interrupted.
+    #[doc(hidden)]
+    pub fn media_stage_only(&self, path: &Path, options: IngestOptions) -> Result<Option<String>> {
+        Ok(match self.prepare_file(path, options)? {
+            Prepared::Staged { stage, .. } => stage,
+            Prepared::Inline => None,
+        })
     }
     /// Apply a trusted owner batch in the caller's transaction, under the canonical writer.
     pub(super) fn owner_apply_tx(
@@ -1194,6 +1550,20 @@ impl GardenStore {
     /// # Errors
     /// A stale revision, missing target or invalid media commits nothing.
     pub fn media_attach(&self, request: &AttachRequest<'_>) -> Result<Value> {
+        match &request.source {
+            AttachSource::File { path, options, .. } => {
+                self.with_prepared(path, *options, |prepared| {
+                    self.attach_with(request, &Some(prepared.clone()))
+                })
+            }
+            AttachSource::Existing { .. } => self.attach_with(request, &None),
+        }
+    }
+    fn attach_with(
+        &self,
+        request: &AttachRequest<'_>,
+        prepared: &Option<Prepared>,
+    ) -> Result<Value> {
         let tx = self.begin()?;
         let now = self.now();
         let (sha, acquisition, event_time, report) = match &request.source {
@@ -1202,7 +1572,14 @@ impl GardenStore {
                 input,
                 options,
             } => {
-                let report = ingest_file_tx(&tx, path, input, *options, &now)?;
+                let report = ingest_file_tx(
+                    &tx,
+                    path,
+                    input,
+                    *options,
+                    &now,
+                    prepared.as_ref().unwrap_or(&Prepared::Inline),
+                )?;
                 (
                     report.sha256.clone(),
                     Some(report.acquisition_id.clone()),
@@ -1812,6 +2189,21 @@ fn verify(tx: &redb::ReadTransaction) -> Result<Value> {
             if pair.is_none_or(|(a, b)| !asset_set.contains(a) || !asset_set.contains(b)) {
                 note(json!({"kind":"dangling_derivative","link":key.value()}));
             }
+        }
+    }
+    if present.contains(STAGES.name()) {
+        for entry in tx
+            .open_table(STAGES)
+            .map_err(storage_error)?
+            .iter()
+            .map_err(storage_error)?
+        {
+            let (key, value) = entry.map_err(storage_error)?;
+            let staged: Stage = decode(value.value())?;
+            note(
+                json!({"kind":"interrupted_stage","stageId":key.value(),"sha256":staged.sha256,
+                "written":staged.written,"chunks":staged.chunks}),
+            );
         }
     }
     let mut references = 0u64;

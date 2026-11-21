@@ -13,6 +13,16 @@ Everything here works on the native redb Garden's v2 graph. The v1 `artifact` re
 
 The default ingest cap is 64 MiB per file; `--max-bytes` changes it. Recordings are streamed into the store rather than read into memory. Their metadata comes from the first and last 4 MiB of the file: location (`gps`), `device`, `tags`, `id3`, `xmp`, `text` and `picture`. An MP4 or QuickTime file whose movie header lies outside both ends is reported as `unscanned`, so nothing about it is ruled out. A file that changes while it is being read is rejected.
 
+Recordings larger than 64 MiB (`--stage-above` changes the threshold) are staged. Mother hashes the file first, then writes its chunks under that hash in transactions of 16 MiB each. One final transaction publishes the stored bytes together with the asset, its acquisition and, for `attach` or an attachment review, the evidence link. Until that commit, nothing refers to the staged chunks, and a failed publish discards them. To store a long recording, raise `--max-bytes` as well.
+
+If a staged ingest is interrupted, `garden media verify` reports it as `interrupted_stage`. Backups refuse until you run:
+
+```powershell
+mother garden media cleanup --db "C:\private-data\garden.redb"
+```
+
+Cleanup removes only unpublished stages. Bytes that belong to a stored recording are never removed.
+
 ## Owner commands
 
 Stop the owner service before direct database commands, as described in [the local service guide](garden-service.md).

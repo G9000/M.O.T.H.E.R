@@ -2,6 +2,8 @@
 
 ## 22 November 2026
 
+- Documented staged ingest of large recordings, `--stage-above`, interrupted-stage reports, the backup guard and `garden media cleanup` in the [visual memory guide](visual-memory.md).
+
 - Extended the [visual memory guide](visual-memory.md) to audio and video: accepted formats, streamed ingest, metadata reports, transcripts, gallery playback and the MCP audio and video rules. Marked M10 implemented in the spec.
 
 - Documented `garden media export-all` and `garden media import` in the [visual memory guide](visual-memory.md), and marked M11 implemented in the spec.

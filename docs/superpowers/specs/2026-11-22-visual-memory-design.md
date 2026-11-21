@@ -19,9 +19,12 @@ Status: implemented for M1–M11 (tracked in
   inside the 3D garden.
 - Derivatives come from lossless container rewriting for JPEG, PNG, WebP and GIF.
   HEIC, HEIF, AVIF and recording metadata is reported but not removed.
-- Recordings (M10) are streamed into the existing single-transaction blob store
-  under the owner's size cap, rather than staged across transactions. Audio of
-  at most 2 MiB is returned over MCP as audio content; video never is.
+- Recordings (M10) are streamed into the existing blob store under the owner's
+  size cap. Above a staging threshold (default 64 MiB), chunks are written
+  under the final hash in bounded transactions and published in one final
+  transaction ([#22](https://github.com/G9000/M.O.T.H.E.R/issues/22)). The blob
+  layout and backup format are unchanged. Audio of at most 2 MiB is returned over
+  MCP as audio content; video never is.
 
 Principle: preserve the original bytes as evidence, then build attributed,
 searchable interpretations around them. An interpretation never replaces or
