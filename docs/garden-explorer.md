@@ -80,3 +80,5 @@ npm run build
 ```
 
 then rebuild `mother`. Node is needed for that step only; the executable needs no Node. The file names in `assets/garden-explorer/` are fixed and listed in `src/explorer.rs`; a new file must be added there to be served. The snapshot is `GardenStore::v1_garden_view` in `src/garden/compat_view.rs`.
+
+For event dates, evidence and historical comparisons in native Garden records, use the [Life Timeline](life-timeline.md).

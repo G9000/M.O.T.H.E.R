@@ -43,6 +43,8 @@ impl clap::Subcommand for DeferredGardenCommand {
 pub(crate) enum GardenCommand {
     /// Browse a bounded, authorized graph neighborhood.
     Relationships(crate::relationships::Browse),
+    /// Browse dated claims and compare what the authorized garden knew.
+    Timeline(crate::timeline::Timeline),
     /// Submit a directed relationship for native owner review.
     SuggestLink(crate::relationships::Suggest),
     /// Review a bounded authorized slice for non-destructive gardening suggestions.
@@ -341,6 +343,7 @@ pub(crate) fn execute_garden(command: GardenCommand) -> Result<()> {
     }
     match command {
         GardenCommand::Relationships(args) => crate::relationships::browse(args),
+        GardenCommand::Timeline(args) => crate::timeline::run(args),
         GardenCommand::SuggestLink(args) => crate::relationships::suggest(args),
         GardenCommand::Tend(args) => crate::tending::run(args),
         GardenCommand::Review { db, request, graph } => {

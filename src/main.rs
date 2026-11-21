@@ -7,6 +7,7 @@ mod garden_cli;
 mod mcp;
 mod relationships;
 mod tending;
+mod timeline;
 mod tui;
 
 #[tokio::main]

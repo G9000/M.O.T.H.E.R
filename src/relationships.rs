@@ -127,13 +127,13 @@ struct Identity {
     generation: String,
 }
 
-struct Connection {
+pub(crate) struct Connection {
     backend: Backend,
     identity: Identity,
 }
 
 impl Connection {
-    fn open(path: &Path) -> Result<Self> {
+    pub(crate) fn open(path: &Path) -> Result<Self> {
         let backend_kind = read_json(path, 16_384)?;
         let (backend, identity) = match backend_kind["backend"].as_str() {
             Some("garden_redb") => {
@@ -180,6 +180,15 @@ impl Connection {
     }
 
     fn get(&self, reference: ExternalReference) -> Result<GetResponse> {
+        self.get_at(reference, None, None)
+    }
+
+    pub(crate) fn get_at(
+        &self,
+        reference: ExternalReference,
+        revision: Option<u64>,
+        known_at: Option<&str>,
+    ) -> Result<GetResponse> {
         reference.validate().map_err(domain_error)?;
         let request = GetRequest {
             version: 2,
@@ -187,8 +196,8 @@ impl Connection {
             generation: self.identity.generation.clone(),
             required_extensions: Default::default(),
             reference,
-            revision: None,
-            known_at: None,
+            revision,
+            known_at: known_at.map(str::to_owned),
         };
         let result = match &self.backend {
             Backend::Direct { store, config } => {
@@ -205,7 +214,7 @@ impl Connection {
         })
     }
 
-    fn blank_query(&self) -> QueryRequest {
+    pub(crate) fn blank_query(&self) -> QueryRequest {
         QueryRequest {
             version: 2,
             workspace_id: self.identity.workspace_id.clone(),
@@ -226,7 +235,7 @@ impl Connection {
         }
     }
 
-    fn query(&self, request: &QueryRequest) -> Result<QueryResponse> {
+    pub(crate) fn query(&self, request: &QueryRequest) -> Result<QueryResponse> {
         match &self.backend {
             Backend::Direct { store, config } => {
                 store.query(&config.auth(), request).map_err(domain_error)
