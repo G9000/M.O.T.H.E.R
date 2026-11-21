@@ -22,7 +22,7 @@ struct Bridge {
 }
 impl ServerHandler for Bridge {
     fn get_info(&self) -> ServerConfig {
-        ServerConfig::new(ServerCapabilities::builder().enable_tools().build()).with_server_info(Implementation::new("mother-garden",env!("CARGO_PKG_VERSION"))).with_instructions("M.O.T.H.E.R shared garden through its local owner service. Your harness retains its memory, intelligence, permissions and instruction hierarchy. Read authorized shared context, resolve complete records, and publish only selected attributed content. Pending proposals remain outside canonical recall until local owner approval. MCP cannot grant, approve, migrate, activate or launch. Preserve operation UUIDs after uncertain results and reconcile receipts; this bridge never retries a mutation automatically.")
+        ServerConfig::new(ServerCapabilities::builder().enable_tools().build()).with_server_info(Implementation::new("mother-garden",env!("CARGO_PKG_VERSION"))).with_instructions("M.O.T.H.E.R shared garden through its local owner service. Your harness retains its memory, intelligence, permissions and instruction hierarchy. Read authorized shared context, resolve complete records, and publish only selected attributed content. Pending proposals remain outside canonical recall until local owner approval. MCP cannot grant, approve, migrate, activate or launch. Preserve operation UUIDs after uncertain results and reconcile receipts; this bridge never retries a mutation automatically. Media tools appear only when separately granted. To keep a photo or recording from the conversation, propose a pending attachment (source urn:mother:media:pending) and ask the owner to finish it in Mother; never say media is saved before approval.")
     }
     async fn list_tools(
         &self,

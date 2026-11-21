@@ -351,7 +351,8 @@ fn gallery(store: &GardenStore, originals: bool) -> Result<Gallery> {
         shown.push(
             json!({"sha256":sha,"originalSha256":asset["sha256"],"variant":variant,
             "mediaType":kind,"width":asset["width"],"height":asset["height"],
-            "acquisitions":entry["acquisitions"],"uses":uses}),
+            "acquisitions":entry["acquisitions"],"interpretations":entry["interpretations"],
+            "uses":uses}),
         );
     }
     gallery.listing = serde_json::to_vec(
