@@ -52,6 +52,39 @@ const MAX_LIST: usize = 50;
 const SCAN_BUDGET: usize = 500;
 const MAX_ACQUISITIONS_SHOWN: usize = 20;
 const MAX_REPORT: usize = 1000;
+const EXPORT_FORMAT: &str = "mother-media-export";
+const MAX_EXPORT_MANIFEST: usize = 16 * 1024 * 1024;
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct ExportManifest {
+    format: String,
+    version: u32,
+    assets: Vec<ExportedAsset>,
+    #[serde(default)]
+    missing: Vec<Value>,
+}
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct ExportedAsset {
+    asset: MediaAsset,
+    file: Option<String>,
+    acquisitions: Vec<Acquisition>,
+    derivatives: Vec<String>,
+}
+fn file_name(asset: &MediaAsset) -> Result<String> {
+    let extension = match asset.media_type.as_str() {
+        "image/jpeg" => "jpg",
+        "image/png" => "png",
+        "image/webp" => "webp",
+        "image/gif" => "gif",
+        "image/heic" => "heic",
+        "image/heif" => "heif",
+        "image/avif" => "avif",
+        _ => return Err(invalid("Unsupported stored media type")),
+    };
+    Ok(format!("{}.{extension}", asset.sha256))
+}
 
 fn invalid(message: &str) -> GardenError {
     failure(GardenErrorCode::InvalidInput, message)
@@ -1380,6 +1413,216 @@ impl GardenStore {
         file.write_all(&bytes).map_err(storage_error)?;
         file.sync_all().map_err(storage_error)?;
         Ok(json!({"sha256":sha,"sizeBytes":bytes.len(),"path":out}))
+    }
+    /// Owner-only: write every stored image as `<sha256>.<ext>` plus a manifest into a
+    /// new private directory. Unreadable bytes and dangling references are listed as
+    /// missing; nothing is fabricated.
+    /// # Errors
+    /// Refuses existing or linked destinations; a failed export removes only its own directory.
+    pub fn media_export_all(&self, out: &Path) -> Result<Value> {
+        super::backup::safe_path(out)?;
+        if out.exists() {
+            return Err(invalid("Export destination already exists"));
+        }
+        let tx = self.db.begin_read().map_err(storage_error)?;
+        let state = state_read(&tx)?;
+        let report = verify(&tx)?;
+        super::backup::create_bundle_dir(out)?;
+        let result = (|| -> Result<Value> {
+            let acquisition_table = tx.open_table(ACQUISITIONS).map_err(storage_error)?;
+            let derivative_table = tx.open_table(DERIVATIVES).map_err(storage_error)?;
+            let mut assets = Vec::new();
+            let mut missing: Vec<Value> = Vec::new();
+            let mut bytes_written = 0u64;
+            for entry in tx
+                .open_table(ASSETS)
+                .map_err(storage_error)?
+                .iter()
+                .map_err(storage_error)?
+            {
+                let (_, value) = entry.map_err(storage_error)?;
+                let asset: MediaAsset = decode(value.value())?;
+                let file = match read_bytes(&tx, &asset.sha256) {
+                    Ok(bytes) => {
+                        let name = file_name(&asset)?;
+                        let mut handle = crate::config::create_private_file(&out.join(&name))
+                            .map_err(storage_error)?;
+                        handle.write_all(&bytes).map_err(storage_error)?;
+                        handle.sync_all().map_err(storage_error)?;
+                        bytes_written += bytes.len() as u64;
+                        Some(name)
+                    }
+                    Err(error) => {
+                        missing.push(json!({"kind":"unreadable_bytes","sha256":asset.sha256,
+                            "reason":error.message}));
+                        None
+                    }
+                };
+                assets.push(json!({"asset":asset,"file":file,
+                    "acquisitions":acquisitions(&acquisition_table, &asset.sha256)?,
+                    "derivatives":derivatives(&derivative_table, &asset.sha256)?,
+                    "evidenceIds":uses(&tx, &asset)?}));
+            }
+            for problem in report["problems"].as_array().into_iter().flatten() {
+                if problem["kind"] == "missing_reference" {
+                    missing.push(problem.clone());
+                }
+            }
+            let manifest = json!({"format":EXPORT_FORMAT,"version":1,
+                "workspaceId":state.workspace_id,"generation":state.generation,
+                "exportedAt":self.now(),"assets":assets,"missing":missing});
+            let encoded = serde_json::to_vec_pretty(&manifest).map_err(storage_error)?;
+            if encoded.len() > MAX_EXPORT_MANIFEST {
+                return Err(failure(
+                    GardenErrorCode::LimitExceeded,
+                    "Media manifest exceeds its 16 MiB bound",
+                ));
+            }
+            let mut handle = crate::config::create_private_file(&out.join("manifest.json"))
+                .map_err(storage_error)?;
+            handle.write_all(&encoded).map_err(storage_error)?;
+            handle.sync_all().map_err(storage_error)?;
+            Ok(
+                json!({"path":out,"assets":manifest["assets"].as_array().map_or(0, Vec::len),
+                "files":manifest["assets"].as_array().map_or(0, |a| a.iter().filter(|x| !x["file"].is_null()).count()),
+                "bytes":bytes_written,"missing":manifest["missing"]}),
+            )
+        })();
+        if result.is_err() {
+            let _ = std::fs::remove_dir_all(out);
+        }
+        result
+    }
+    /// Owner-only: verify and add a media export's images, acquisitions and derivative
+    /// links in one transaction. Graph evidence is not imported; repeating is a no-op.
+    /// # Errors
+    /// Any digest, size, type, name or provenance mismatch commits nothing.
+    pub fn media_import(&self, dir: &Path) -> Result<Value> {
+        super::backup::safe_path(dir)?;
+        let manifest_path = dir.join("manifest.json");
+        let mut bytes = Vec::new();
+        File::open(&manifest_path)
+            .map_err(|_| invalid("Media export manifest is missing"))?
+            .take(MAX_EXPORT_MANIFEST as u64 + 1)
+            .read_to_end(&mut bytes)
+            .map_err(storage_error)?;
+        if bytes.len() > MAX_EXPORT_MANIFEST {
+            return Err(failure(
+                GardenErrorCode::LimitExceeded,
+                "Media manifest exceeds its 16 MiB bound",
+            ));
+        }
+        let manifest: ExportManifest =
+            serde_json::from_slice(&bytes).map_err(|_| invalid("Invalid media export manifest"))?;
+        if manifest.format != EXPORT_FORMAT || manifest.version != 1 {
+            return Err(failure(
+                GardenErrorCode::UnsupportedVersion,
+                "Unsupported media export format",
+            ));
+        }
+        let exported: BTreeSet<&str> = manifest
+            .assets
+            .iter()
+            .filter(|a| a.file.is_some())
+            .map(|a| a.asset.sha256.as_str())
+            .collect();
+        let tx = self.begin()?;
+        let now = self.now();
+        let (mut imported, mut reused, mut added, mut skipped, mut linked) =
+            (0u64, 0u64, 0u64, 0u64, 0u64);
+        for entry in &manifest.assets {
+            let Some(file) = &entry.file else { continue };
+            digest(&entry.asset.sha256)?;
+            if *file != file_name(&entry.asset)? {
+                return Err(invalid("Exported file name does not match its asset"));
+            }
+            let path = dir.join(file);
+            super::backup::safe_path(&path)?;
+            let content = read_owner_file(&path, entry.asset.size_bytes)?;
+            if content.len() as u64 != entry.asset.size_bytes
+                || hex(&Sha256::digest(&content)) != entry.asset.sha256
+            {
+                return Err(invalid(
+                    "Exported file does not match its recorded digest or size",
+                ));
+            }
+            let found = crate::media::inspect(&content).map_err(invalid)?;
+            if found.media_type != entry.asset.media_type {
+                return Err(invalid(
+                    "Exported file does not match its recorded media type",
+                ));
+            }
+            let info = put_blob_tx(&tx, content.as_slice())?;
+            if store_asset(&tx, &info, &found, &now)? {
+                reused += 1;
+            } else {
+                imported += 1;
+            }
+        }
+        let mut table = tx.open_table(ACQUISITIONS).map_err(storage_error)?;
+        let assets = tx.open_table(ASSETS).map_err(storage_error)?;
+        for entry in manifest.assets.iter().filter(|a| a.file.is_some()) {
+            for acquisition in &entry.acquisitions {
+                if acquisition.sha256 != entry.asset.sha256
+                    || contracts::id(&acquisition.id).is_err()
+                {
+                    return Err(invalid("Acquisition does not belong to its exported asset"));
+                }
+                AcquisitionInput {
+                    original_filename: acquisition.original_filename.clone(),
+                    event_time: acquisition.event_time.clone(),
+                    source: acquisition.source.clone(),
+                    origin: acquisition.origin,
+                    declared_media_type: None,
+                }
+                .validate()?;
+                chrono::DateTime::parse_from_rfc3339(&acquisition.acquired_at)
+                    .map_err(|_| invalid("Invalid acquisition time"))?;
+                if let Some(source) = &acquisition.derived_from
+                    && asset_read(&assets, source)?.is_none()
+                    && !exported.contains(source.as_str())
+                {
+                    return Err(invalid("Derivative provenance names an absent original"));
+                }
+                let key = format!("{}/{}", acquisition.sha256, acquisition.id);
+                if let Some(existing) = table.get(key.as_str()).map_err(storage_error)? {
+                    if decode::<Acquisition>(existing.value())? != *acquisition {
+                        return Err(invalid("Acquisition ID collides with different provenance"));
+                    }
+                    skipped += 1;
+                    continue;
+                }
+                table
+                    .insert(key.as_str(), encode(acquisition)?.as_slice())
+                    .map_err(storage_error)?;
+                added += 1;
+            }
+        }
+        drop(table);
+        let mut links = tx.open_table(DERIVATIVES).map_err(storage_error)?;
+        for entry in manifest.assets.iter().filter(|a| a.file.is_some()) {
+            for derived in &entry.derivatives {
+                digest(derived)?;
+                if asset_read(&assets, derived)?.is_none() {
+                    continue;
+                }
+                let key = format!("{}/{derived}", entry.asset.sha256);
+                if links.get(key.as_str()).map_err(storage_error)?.is_none() {
+                    links
+                        .insert(key.as_str(), [].as_slice())
+                        .map_err(storage_error)?;
+                    linked += 1;
+                }
+            }
+        }
+        drop(links);
+        drop(assets);
+        tx.commit().map_err(storage_error)?;
+        Ok(
+            json!({"assetsImported":imported,"assetsReused":reused,"acquisitionsAdded":added,
+            "acquisitionsAlreadyPresent":skipped,"derivativesLinked":linked,
+            "missingInExport":manifest.missing.len()}),
+        )
     }
     /// Read-only integrity report over media bytes, provenance and references.
     /// # Errors

@@ -41,6 +41,18 @@ mother garden media verify --db "C:\private-data\garden.redb"
 mother garden media export --db "C:\private-data\garden.redb" --sha256 <sha256> --out "C:\private-photos\copy.jpg"
 ```
 
+To move images between Gardens without a full backup:
+
+```powershell
+mother garden media export-all --db "C:\private-data\garden.redb" --out "C:\private-exports\garden-media"
+```
+
+```powershell
+mother garden media import --db "C:\private-data\other.redb" --dir "C:\private-exports\garden-media"
+```
+
+`export-all` writes a new private directory with one `<sha256>.<ext>` file per stored image and a `manifest.json` holding each asset's metadata, acquisitions, derivative links and citing evidence IDs. Images whose bytes can't be read, and evidence citing bytes that aren't stored, go in the manifest's `missing` list rather than failing the export. `import` checks every file's digest, size and type against the manifest. It then adds assets, acquisitions (copied unchanged) and derivative links in one transaction. Graph evidence is not imported, so attach the images to memories in the new Garden yourself. Repeating an import adds nothing, and any mismatch commits nothing.
+
 `attach` ingests the file (or reuses a stored asset), creates the evidence and revises the assertion in one transaction. A stale `--expected-revision`, a missing target or invalid bytes commit nothing. `export` refuses to overwrite and verifies the digest first. `verify` re-hashes every stored image and reports missing, corrupt or dangling media without changing anything.
 
 To browse attached images locally:

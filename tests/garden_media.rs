@@ -796,3 +796,102 @@ fn verification_reports_corrupt_media_and_backup_refuses_it() {
     assert!(store.backup_to(&dir.path().join("refused")).is_err());
     assert!(!dir.path().join("refused").exists());
 }
+
+#[test]
+fn media_export_round_trips_into_another_garden_and_reports_missing_bytes() {
+    let f = Fixture::new();
+    let (_, memory) = f.memory();
+    let attached = f.attach(&f.file("trip.jpg", &jpeg_with_gps(7)), &memory, 1, true);
+    let original = attached["ingest"]["sha256"].as_str().unwrap().to_owned();
+    let derivative = attached["ingest"]["derivative"]["sha256"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+    let out = f.dir.path().join("media-export");
+    let report = f.store.media_export_all(&out).unwrap();
+    assert_eq!(
+        (&report["assets"], &report["files"]),
+        (&json!(2), &json!(2))
+    );
+    assert_eq!(report["missing"], json!([]));
+    assert_eq!(
+        std::fs::read(out.join(format!("{original}.jpg"))).unwrap(),
+        jpeg_with_gps(7)
+    );
+    assert!(f.store.media_export_all(&out).is_err(), "never overwrites");
+
+    let other = Fixture::new();
+    let imported = other.store.media_import(&out).unwrap();
+    assert_eq!(imported["assetsImported"], 2);
+    assert_eq!(imported["acquisitionsAdded"], 2);
+    assert_eq!(imported["derivativesLinked"], 1);
+    let strip = |value: Value| -> Vec<Value> {
+        let mut assets: Vec<Value> = value["assets"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|a| json!([a["asset"]["sha256"], a["acquisitions"], a["derivatives"]]))
+            .collect();
+        assets.sort_by_key(|a| a[0].to_string());
+        assets
+    };
+    assert_eq!(
+        strip(f.store.media_owner_list(None).unwrap()),
+        strip(other.store.media_owner_list(None).unwrap())
+    );
+    assert_eq!(other.store.media_verify().unwrap()["ok"], true);
+    let again = other.store.media_import(&out).unwrap();
+    assert_eq!(
+        (
+            again["assetsImported"].clone(),
+            again["acquisitionsAdded"].clone()
+        ),
+        (json!(0), json!(0))
+    );
+    assert_eq!(again["acquisitionsAlreadyPresent"], 2);
+    let _ = derivative;
+
+    // A tampered file commits nothing.
+    let third = Fixture::new();
+    std::fs::write(out.join(format!("{original}.jpg")), jpeg_with_gps(8)).unwrap();
+    assert_eq!(
+        third.store.media_import(&out).unwrap_err().code,
+        GardenErrorCode::InvalidInput
+    );
+    assert_eq!(
+        third.store.media_owner_list(None).unwrap()["assets"],
+        json!([])
+    );
+}
+
+#[test]
+fn media_export_lists_unreadable_bytes_instead_of_fabricating_them() {
+    let f = Fixture::new();
+    let (_, memory) = f.memory();
+    let attached = f.attach(&f.file("lost.png", &png(20)), &memory, 1, false);
+    let sha256 = attached["ingest"]["sha256"].as_str().unwrap().to_owned();
+    let database = f.dir.path().join("garden.redb");
+    let Fixture { dir, store, .. } = f;
+    drop(store);
+    {
+        let db = redb::Database::open(&database).unwrap();
+        let tx = db.begin_write().unwrap();
+        tx.open_table(redb::TableDefinition::<(&str, u64), &[u8]>::new(
+            "garden_blob_chunks",
+        ))
+        .unwrap()
+        .insert((sha256.as_str(), 0), [1u8, 2].as_slice())
+        .unwrap();
+        tx.commit().unwrap();
+    }
+    let store = GardenStore::open(&database).unwrap();
+    let out = dir.path().join("partial");
+    let report = store.media_export_all(&out).unwrap();
+    assert_eq!(report["files"], 0);
+    assert_eq!(report["missing"][0]["kind"], "unreadable_bytes");
+    assert_eq!(report["missing"][0]["sha256"], sha256.as_str());
+    assert!(!out.join(format!("{sha256}.png")).exists());
+    let manifest: Value =
+        serde_json::from_slice(&std::fs::read(out.join("manifest.json")).unwrap()).unwrap();
+    assert!(manifest["assets"][0]["file"].is_null());
+}
