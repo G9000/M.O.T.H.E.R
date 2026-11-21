@@ -131,7 +131,7 @@ fn config(dir: &Path, database: &Path, auth: &Auth) -> std::path::PathBuf {
 
 #[test]
 fn media_tools_are_advertised_by_scope_and_return_image_content() {
-    let dir = tempfile::tempdir().unwrap();
+    let dir = tempfile::tempdir_in(std::fs::canonicalize(std::env::temp_dir()).unwrap()).unwrap();
     let database = dir.path().join("garden.redb");
     let ws = uuid::Uuid::new_v4().to_string();
     let generation = uuid::Uuid::new_v4().to_string();

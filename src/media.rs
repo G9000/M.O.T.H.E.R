@@ -63,7 +63,13 @@ pub fn sniff(bytes: &[u8]) -> Option<&'static str> {
         let size = be32(bytes, 0).ok()? as usize;
         let end = size.clamp(16, bytes.len().min(4096));
         let brands: Vec<&[u8]> = std::iter::once(&bytes[8..12])
-            .chain(bytes[16..end].chunks_exact(4))
+            .chain(
+                bytes[16..end]
+                    .as_chunks::<4>()
+                    .0
+                    .iter()
+                    .map(<[u8; 4]>::as_slice),
+            )
             .collect();
         let has = |names: &[&[u8]]| brands.iter().any(|b| names.contains(b));
         if has(&[b"avif", b"avis"]) {

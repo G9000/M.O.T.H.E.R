@@ -70,7 +70,8 @@ struct Fixture {
 }
 impl Fixture {
     fn new() -> Self {
-        let dir = tempfile::tempdir().unwrap();
+        let dir =
+            tempfile::tempdir_in(std::fs::canonicalize(std::env::temp_dir()).unwrap()).unwrap();
         let ws = Uuid::new_v4().to_string();
         let generation = Uuid::new_v4().to_string();
         let store =

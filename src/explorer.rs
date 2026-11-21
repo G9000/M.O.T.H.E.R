@@ -445,7 +445,8 @@ mod tests {
                 AcquisitionInput, AttachRequest, AttachSource, IngestOptions, MediaOrigin,
             },
         };
-        let dir = tempfile::tempdir().unwrap();
+        let dir =
+            tempfile::tempdir_in(std::fs::canonicalize(std::env::temp_dir()).unwrap()).unwrap();
         let (ws, generation) = (
             uuid::Uuid::new_v4().to_string(),
             uuid::Uuid::new_v4().to_string(),
