@@ -84,6 +84,20 @@ enum MediaCommand {
         #[arg(long)]
         db: PathBuf,
     },
+    /// Write every stored image plus a manifest into a new private directory.
+    ExportAll {
+        #[arg(long)]
+        db: PathBuf,
+        #[arg(long)]
+        out: PathBuf,
+    },
+    /// Verify and add images, provenance and derivative links from a media export.
+    Import {
+        #[arg(long)]
+        db: PathBuf,
+        #[arg(long)]
+        dir: PathBuf,
+    },
     /// Write one stored image to a new private file for the owner to open.
     Export {
         #[arg(long)]
@@ -249,6 +263,16 @@ pub(crate) fn run(args: Media) -> Result<()> {
                 .map_err(domain_error)?,
         ),
         MediaCommand::Verify { db } => print(open(&db)?.media_verify().map_err(domain_error)?),
+        MediaCommand::ExportAll { db, out } => print(
+            open(&db)?
+                .media_export_all(&absolute(&out)?)
+                .map_err(domain_error)?,
+        ),
+        MediaCommand::Import { db, dir } => print(
+            open(&db)?
+                .media_import(&absolute(&dir)?)
+                .map_err(domain_error)?,
+        ),
         MediaCommand::Export { db, sha256, out } => print(
             open(&db)?
                 .media_export(&sha256, &absolute(&out)?)

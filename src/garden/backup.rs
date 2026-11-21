@@ -185,7 +185,7 @@ fn known_tables() -> BTreeSet<String> {
         )
         .collect()
 }
-fn safe_path(path: &Path) -> Result<()> {
+pub(super) fn safe_path(path: &Path) -> Result<()> {
     for parent in path.ancestors() {
         match fs::symlink_metadata(parent) {
             Ok(meta) => {
@@ -216,7 +216,7 @@ fn sync_dir(path: &Path) -> Result<()> {
 fn sync_dir(_path: &Path) -> Result<()> {
     Ok(())
 }
-fn create_bundle_dir(path: &Path) -> Result<()> {
+pub(super) fn create_bundle_dir(path: &Path) -> Result<()> {
     #[cfg(unix)]
     let mut builder = fs::DirBuilder::new();
     #[cfg(not(unix))]

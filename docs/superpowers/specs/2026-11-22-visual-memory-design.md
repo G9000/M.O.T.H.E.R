@@ -1,8 +1,8 @@
 # Visual memory design
 
-Status: implemented for M1–M9 (tracked in
-[issues #8–#16](https://github.com/G9000/M.O.T.H.E.R/issues?q=is%3Aissue+%22Visual+memory%3A%22));
-M10 and M11 remain deferred. The owner and harness guide is
+Status: implemented for M1–M9 and M11 (tracked in
+[issues #8–#16 and #18](https://github.com/G9000/M.O.T.H.E.R/issues?q=is%3Aissue+%22Visual+memory%3A%22));
+M10 remains deferred. The owner and harness guide is
 [visual memory](../../visual-memory.md). The build differs from this plan where noted:
 
 - A pending attachment uses the existing URI source locator with
