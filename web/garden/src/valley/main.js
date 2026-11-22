@@ -4,7 +4,8 @@
 // still reports its progress through patch-block, which here goes nowhere.)
 import { patchBlock } from 'patch-block';
 import * as THREE from 'three';
-import { createGarden, fetchSnapshot, loadMedia, loadSnapshot, pathLengthFor } from '../garden/garden.js';
+import { createGarden, fetchReading, fetchSnapshot, loadMedia, loadSnapshot, pathLengthFor } from '../garden/garden.js';
+import { startReadingPage } from '../garden/path.js';
 import { bakeGround, createField, createFrame, loadGroundTextures } from '../lib/index.js';
 import { createFluff, createStones } from './dressing.js';
 import { createFloor, FLOOR, paintFloor } from './floor.js';
@@ -75,6 +76,24 @@ let snapshot = (await loadSnapshot()) ?? (import.meta.env.DEV ? (await import('.
 if (!snapshot) {
   $('loading').firstElementChild.textContent = 'This garden link has already been used, or the garden was closed. Run the command again for a new link.';
   throw new Error('no snapshot');
+}
+/** Whether this browser can draw the garden at all; the context made to ask is given straight back. */
+function hasWebGL2() {
+  if (params.has('nowebgl')) return false; // (for checking the page as such a browser would show it)
+  try {
+    const gl = document.createElement('canvas').getContext('webgl2');
+    gl?.getExtension('WEBGL_lose_context')?.loseContext();
+    return !!gl;
+  } catch {
+    return false;
+  }
+}
+// The Reading Path on its own, when asked for or when the garden can't be drawn: nothing below runs.
+const readingOnly = params.get('view') === 'read' ? 'chosen' : hasWebGL2() ? null : 'no-webgl';
+if (readingOnly) {
+  startReadingPage({ snapshot, fetchSnapshot, fetchReading, reason: readingOnly });
+  block.ready();
+  await new Promise(() => {});
 }
 const needed = pathLengthFor(snapshot);
 // Leave room for new flowers so ordinary updates don't have to repaint the terrain.

@@ -114,14 +114,15 @@ export function fromSnapshot(src, all) {
  * @param fetchReading (id) => Promise of the full reading, or null when it cannot be had
  * @param snapshotOf (id) => the snapshot's record, or undefined
  * @param all () => every snapshot record, for the fallback
- * @param order () => record IDs in reading order, newest first
- * @param walk (id) => stands the walker beside that record's flower
+ * @param order () => record IDs in reading order, newest first; one open may bring its own order instead
+ * @param walk (id) => stands the walker beside that record's flower; left out where there is no garden to walk
  */
 export function createReader(root, { fetchReading, snapshotOf, all, order, walk, signal }) {
   let current = null;
   let lens = recall('garden-reader-lens', '');
   let size = Number(recall('garden-reader-size', '17')) || 17;
   let opener = null;
+  let sequence = null;
   let asked = 0;
   // the lens on screen, and the record it was picked for by hand (a pick is kept while that record loads)
   let shown = 'owner';
@@ -277,7 +278,7 @@ export function createReader(root, { fetchReading, snapshotOf, all, order, walk,
   function render(focusTab = false) {
     const r = current;
     const active = shown;
-    const ids = order();
+    const ids = sequence ?? order();
     const at = ids.indexOf(r.recordId);
     const body = { mother, owner, archive }[active](r);
     root.innerHTML = `
@@ -290,7 +291,7 @@ export function createReader(root, { fetchReading, snapshotOf, all, order, walk,
           <div class="rnav">
             <button data-size="-1" aria-label="Smaller text" ${size <= SIZES[0] ? 'disabled' : ''}>A−</button>
             <button data-size="1" aria-label="Larger text" ${size >= SIZES[SIZES.length - 1] ? 'disabled' : ''}>A+</button>
-            <button data-walk ${snapshotOf(r.recordId) ? '' : 'disabled'}>Walk there</button>
+            ${walk ? `<button data-walk ${snapshotOf(r.recordId) ? '' : 'disabled'}>Walk there</button>` : ''}
             <button class="close" data-close aria-label="Close the reader">×</button>
           </div>
         </div>
@@ -337,8 +338,12 @@ export function createReader(root, { fetchReading, snapshotOf, all, order, walk,
     }
   }
 
-  function open(id, from = document.activeElement) {
-    if (root.hidden) opener = from;
+  /** @param ids the order Later and Earlier step through for this reading, when not the garden's own */
+  function open(id, from = document.activeElement, ids = null) {
+    if (root.hidden) {
+      opener = from;
+      sequence = ids;
+    }
     document.pointerLockElement && document.exitPointerLock();
     root.hidden = false;
     load(id);
@@ -349,6 +354,7 @@ export function createReader(root, { fetchReading, snapshotOf, all, order, walk,
     root.hidden = true;
     root.innerHTML = '';
     current = null;
+    sequence = null;
     const back = opener;
     opener = null;
     if (back?.isConnected) back.focus();
@@ -369,7 +375,7 @@ export function createReader(root, { fetchReading, snapshotOf, all, order, walk,
       root.querySelector('#provenance')?.focus();
     } else if (t.dataset.read) load(t.dataset.read);
     else if (t.dataset.step) {
-      const ids = order();
+      const ids = sequence ?? order();
       const next = ids[ids.indexOf(current.recordId) + Number(t.dataset.step)];
       if (next) load(next);
     } else if (t.dataset.size) {
@@ -428,6 +434,10 @@ export function createReader(root, { fetchReading, snapshotOf, all, order, walk,
     close,
     get isOpen() {
       return !root.hidden;
+    },
+    /** The record on screen, while open. */
+    get recordId() {
+      return current?.recordId ?? null;
     },
   };
 }

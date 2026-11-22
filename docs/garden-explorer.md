@@ -62,6 +62,17 @@ Use the [Living Memory Graph](living-memory-graph.md) to follow directed relatio
 - The panels hide while you walk with the mouse captured; Esc brings them back. The record count appears when you hover the title.
 - `T` and `1`–`4` change the time of day, `0` lets the evening pass on to sunset, and `,` and `.` nudge the hour; `P` turns the paint finish off and on.
 
+## The Reading Path
+
+The Reading Path lists every record of the snapshot as text, newest first, so you can read one after another without walking. Open it with the book button at the top right. It covers the garden, which waits behind it; **Back to the garden** or Esc returns you where you were.
+
+- Records are grouped by month, or by kind with **By kind**, with pinned records first under *Kept close*. Each entry shows its kind, the date it was recorded, how it was captured, how many reflections name it and whether it is retired, then the opening of its text.
+- The search box finds records whose title, text, kind and status contain every word. The kind buttons set kinds aside, and **Set aside retired records** does what it says.
+- Choosing an entry opens it in the reader (below). **Later** and **Earlier** in the reader then step through the Reading Path as it is filtered. **Walk there** puts the path away and stands you by the flower.
+- From the keyboard: `/` goes to the search box, the down arrow goes from the search box to the first entry, up and down move between entries, Home and End go to the first and last, and Enter reads one. Closing the reader returns focus to the entry you opened. While the path is up, the garden behind it can't be reached and its walking keys do nothing.
+
+When the browser doesn't offer WebGL 2, the page opens as the Reading Path alone and says why. To choose that page on purpose, add `?view=read` before the `#` in the Garden link, or to the address of an open Garden tab, then reload. The page then draws no 3D garden at all. On its own, the Reading Path of a live Garden checks for changes every five seconds while the page is visible and no record is open, keeping your search and place. Over the garden it shows the snapshot it opened with, and the garden waits to refresh until it is closed.
+
 ## Reading a memory
 
 The reader opens one record over the garden, which stays exactly where it was. It shows three lenses over the same stored record. Switching lenses fetches nothing new and writes nothing.
@@ -97,7 +108,7 @@ Nothing can be changed from the garden. Pinning, handoffs and review stay with t
 
 ## Limits
 
-- The page needs WebGL 2 and a capable graphics card. It has been run on one machine only (an RTX 5090); its frame rate with the garden planted was not measured, and integrated graphics, phones, Safari and Firefox are untested. Adding `?quality=low` or `?quality=medium` to the address before the `#` draws less.
+- The 3D garden needs WebGL 2 and a capable graphics card; without WebGL 2 the page opens as the Reading Path. It has been run on one machine only (an RTX 5090); its frame rate with the garden planted was not measured, and integrated graphics, phones, Safari and Firefox are untested. Adding `?quality=low` or `?quality=medium` to the address before the `#` draws less.
 - The page is about 2.6 MB and takes several seconds to paint the land and sky on first load.
 - Checked with a synthetic garden of 500 records. The record list, the card and standing beside a chosen flower were exercised; walking with the mouse captured was not driven by the automated check.
 - Records are ordered by when they were first created. Threads are drawn for the open record only, not for the whole garden at once. "Similar in meaning" links are still not drawn.
