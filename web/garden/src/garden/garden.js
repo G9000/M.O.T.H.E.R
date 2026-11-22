@@ -552,7 +552,7 @@ const $ = (id) => document.getElementById(id);
  * @param field the valley's meadow: its uniforms are the light the flowers stand in
  * @param goTo (x, z, yaw, pitch) stands the walker somewhere, looking a way
  */
-export function createGarden({ snapshot, field, scene, canvas, goTo, media = [] }) {
+export function createGarden({ snapshot, field, scene, canvas, goTo, media = [], chime = () => {} }) {
   const records = readRecords(snapshot);
   const byId = new Map(records.map((r) => [r.id, r]));
   const refBy = (id) => records.filter((r) => r.refs.includes(id)).map((r) => r.id);
@@ -921,6 +921,7 @@ export function createGarden({ snapshot, field, scene, canvas, goTo, media = [] 
   }
   const viewer = createViewer($('viewer'));
   function openPhoto(p) {
+    chime();
     document.pointerLockElement && document.exitPointerLock();
     viewer.open(photos, photos.indexOf(p));
   }
@@ -951,6 +952,7 @@ export function createGarden({ snapshot, field, scene, canvas, goTo, media = [] 
   const chips = (ids) => ids.map((id) => `<button class="chip" data-go="${esc(id)}">${dot(byId.get(id))}${esc(byId.get(id).title)}</button>`).join('');
 
   function showCard(r) {
+    if (open !== r) chime();
     open = r;
     showThreads(r);
     list.hidden = true;

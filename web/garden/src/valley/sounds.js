@@ -1,11 +1,13 @@
-// The valley's sound: recordings only, nothing synthesized. Footsteps are five recordings by Kenney (CC0), which are
-// in this repo. The five ambiences (grass in the wind, leaves, a summer evening, water at a bank, crickets) are cut
-// from the Sonniss GDC bundles, which may be used in a game but not passed on as files: they are in the released
-// demo and not in this repo. MISSING_ASSETS.md says which recordings they are and how to put them back.
+// The valley's sound. Footsteps are five recordings by Kenney (CC0), which are in this repo. The five ambiences
+// (grass in the wind, leaves, a summer evening, water at a bank, crickets) were cut from the Sonniss GDC bundles,
+// which may be used in a game but not passed on as files, so they are not in this repo (MISSING_ASSETS.md says how
+// to put them back). Where a recording is missing, the garden's own synthesized voice (ambience.js) plays instead.
 //
 // The build writes ./audio/manifest.json listing the recordings that are there, so nothing is asked for that isn't.
 // Sound starts on the first click, as browsers ask; everything is fetched and decoded before that, so the click
 // itself costs nothing.
+
+import { createAmbience } from './ambience.js';
 
 const LOOPS = ['grass', 'leaves', 'summer', 'lake', 'crickets'];
 
@@ -17,19 +19,20 @@ export function createSounds(base = './audio/') {
   const loops = {};
   let begun = false;
   let lastStep = -1;
+  let ambience = null;
+  let muted = false;
 
   return {
     /** Fetches and decodes the recordings. Call while loading; resolves whether or not there is any sound to have. */
     async load() {
       const Ctx = window.AudioContext || window.webkitAudioContext;
       if (!Ctx) return;
-      let names;
+      let names = [];
       try {
         const res = await fetch(`${base}manifest.json`);
-        if (!res.ok) return;
-        names = await res.json();
+        if (res.ok) names = await res.json();
       } catch {
-        return;
+        // no recordings: the synthesized ambience still plays
       }
       try {
         ctx = new Ctx();
@@ -57,8 +60,12 @@ export function createSounds(base = './audio/') {
       if (ctx.state === 'suspended') ctx.resume();
       if (begun) return;
       begun = true;
+      ambience = createAmbience(ctx, master);
       for (const name of LOOPS) {
-        if (!buffers[name]) continue;
+        if (!buffers[name]) {
+          loops[name] = ambience.voices[name];
+          continue;
+        }
         const source = ctx.createBufferSource();
         source.buffer = buffers[name];
         source.loop = true;
@@ -92,6 +99,7 @@ export function createSounds(base = './audio/') {
      */
     update(dt, here) {
       if (!begun) return;
+      ambience?.update(dt);
       const ease = Math.min(1, dt * 1.6);
       const to = (name, value) => {
         if (loops[name]) loops[name].gain.value += (value - loops[name].gain.value) * ease;
@@ -101,6 +109,17 @@ export function createSounds(base = './audio/') {
       to('summer', 0.55 * (1 - 0.5 * here.dusk));
       to('lake', here.tarn * 0.5);
       to('crickets', here.dusk * 0.3);
+    },
+    /** A soft bell, for a record or a photo opening. */
+    chime() {
+      if (ctx?.state === 'running' && !muted) ambience?.chime();
+    },
+    get muted() {
+      return muted;
+    },
+    set muted(on) {
+      muted = on;
+      if (master) master.gain.setTargetAtTime(on ? 0 : 0.8, ctx.currentTime, 0.25);
     },
   };
 }

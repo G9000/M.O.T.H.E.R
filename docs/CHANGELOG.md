@@ -2,6 +2,8 @@
 
 ## 22 November 2026
 
+- Described the memory garden's synthesized ambience and its sound button in the [explorer guide](garden-explorer.md): wind, leaves, birds, water and crickets made in the page in place of the recordings that can't be shipped, a chime when a record or photo opens, and `M` to turn sound off and on.
+
 - Added the memory garden's photo grove to the [explorer guide](garden-explorer.md): attached photos, recordings and videos on easels round the pool, a viewer for each, and search, map and list entries for them. Noted in the [visual memory guide](visual-memory.md) that the garden shows the same media, that `--originals` now works without `--media`, and that the restyled gallery opens items in a viewer. Checked with invented media only.
 
 - Described the memory garden's new finding tools in the [explorer guide](garden-explorer.md): word search with lit flowers and beacons, threads between linked records, the beds legend and harness filter, the timeline and its replay, the map, and the clumps of companion blooms along the path. Checked with invented records in Chromium only.

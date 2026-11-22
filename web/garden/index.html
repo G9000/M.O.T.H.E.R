@@ -1080,6 +1080,16 @@
           transform: none;
         }
       }
+      #soundBtn .mute,
+      #soundBtn.off .on {
+        display: none;
+      }
+      #soundBtn.off .mute {
+        display: block;
+      }
+      #soundBtn.off {
+        color: var(--text-3);
+      }
     </style>
   </head>
   <body>
@@ -1092,6 +1102,7 @@
       <div class="brand glass"><span class="mark" aria-hidden="true"></span><h1>Memory Garden</h1><span class="badge" id="count">Read-only</span></div>
       <span class="spacer"></span>
       <label class="find glass"><span hidden>Search the garden</span><svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><circle cx="10.5" cy="10.5" r="6.5"/><path d="m20 20-4.6-4.6"/><path d="M10.5 6.8v1.4M10.5 12.8v1.4M6.8 10.5h1.4M12.8 10.5h1.4" stroke-width="1"/></svg><input id="q" type="search" placeholder="Search the garden" autocomplete="off" spellcheck="false" /><kbd>/</kbd><span id="found" hidden></span></label>
+      <button class="btn glass" id="soundBtn" title="Sound (M)" aria-pressed="true" aria-label="Sound is on"><svg class="ico on" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 9.5v5h3.5L12 18.5v-13L7.5 9.5z"/><path d="M15.5 9a4 4 0 0 1 0 6M18 6.5a7.5 7.5 0 0 1 0 11"/></svg><svg class="ico mute" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 9.5v5h3.5L12 18.5v-13L7.5 9.5z"/><path d="m16 9.5 5 5M21 9.5l-5 5"/></svg></button>
       <button class="btn glass" id="listBtn" aria-controls="list" title="Every record (L)"><svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><path d="M9 6h11M9 12h11M9 18h11"/><path d="M4.5 4.5 6 6 4.5 7.5 3 6zM4.5 10.5 6 12l-1.5 1.5L3 12zM4.5 16.5 6 18l-1.5 1.5L3 18z" fill="currentColor" stroke="none"/></svg><span hidden>Records</span></button>
     </header>
     <aside class="beds glass" aria-label="The beds: show or set aside each kind">
@@ -1114,7 +1125,7 @@
     <div id="start">
       <div>
         <b>Click to walk</b>
-        <span>W A S D to walk · E to read a flower · / to search</span>
+        <span>W A S D to walk · E to read a flower · / to search · M for sound</span>
       </div>
     </div>
     <div id="note"></div>

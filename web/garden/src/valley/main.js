@@ -484,7 +484,36 @@ mark('land');
 await stage(0.48, 'Planting the garden');
 // the owner's photos and recordings, for the grove by the pool (invented ones under the dev server)
 const media = import.meta.env.DEV && snapshot.workspaceId === 'demo' ? await (await import('../garden/demo.js')).demoMedia() : await loadMedia();
-garden = createGarden({ snapshot, field, scene, canvas, goTo, media });
+garden = createGarden({ snapshot, field, scene, canvas, goTo, media, chime: () => sounds.chime() });
+// sound on or off: the button by the search, or M; remembered in this browser only
+{
+  const button = $('soundBtn');
+  const show = () => {
+    button.setAttribute('aria-pressed', String(!sounds.muted));
+    button.setAttribute('aria-label', sounds.muted ? 'Sound is off' : 'Sound is on');
+    button.classList.toggle('off', sounds.muted);
+  };
+  try {
+    sounds.muted = localStorage.getItem('garden-sound') === 'off';
+  } catch {
+    // storage may be blocked: sound starts on
+  }
+  show();
+  const flip = () => {
+    sounds.start();
+    sounds.muted = !sounds.muted;
+    try {
+      localStorage.setItem('garden-sound', sounds.muted ? 'off' : 'on');
+    } catch {
+      // as above
+    }
+    show();
+  };
+  button.addEventListener('click', flip);
+  document.addEventListener('keydown', (e) => {
+    if (e.code === 'KeyM' && !(e.target instanceof HTMLInputElement || e.target instanceof HTMLSelectElement)) flip();
+  });
+}
 mark('garden');
 await stage(0.5, 'Painting the mountains');
 await skyReady;
