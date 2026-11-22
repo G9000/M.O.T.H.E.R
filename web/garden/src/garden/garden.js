@@ -10,7 +10,11 @@ import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 import { COMMON } from '../lib/index.js';
 import { gardenRadius, pathAt, pathLength, START, TARN, tarnDistance } from '../valley/world.js';
 import { createViewer, describe, placeholder } from './media.js';
+import { createReadingPath } from './path.js';
 import { createReader } from './reader.js';
+import { fetchReading } from './session.js';
+
+export { fetchReading, fetchSnapshot, loadMedia, loadSnapshot } from './session.js';
 
 const TAU = Math.PI * 2;
 const KINDS = ['memory', 'decision', 'task', 'checkpoint', 'artifact', 'action'];
@@ -42,72 +46,6 @@ const PAINT = {
 };
 // The line is drawn where two different small alphas meet (see lib/frame.js): one per part of a flower.
 const INK = { outer: 0.05, inner: 0.08, core: 0.11, green: 0.17 };
-
-// ---- the snapshot ---------------------------------------------------------------------------------------------
-/**
- * The link from the terminal carries a single-use token after the "#". It is traded once for this tab's session
- * and taken out of the address bar; a reload uses the session again.
- */
-let session = null;
-export async function loadSnapshot() {
-  try {
-    const launch = location.hash.slice(1);
-    try {
-      session = sessionStorage.getItem('garden-session');
-    } catch {
-      // storage may be blocked: this page still has the session it is about to be given
-    }
-    if (launch) {
-      history.replaceState(null, '', location.pathname + location.search);
-      const res = await fetch('./api/session', { method: 'POST', headers: { Authorization: `Bearer ${launch}` } });
-      if (res.ok) {
-        session = (await res.json()).session;
-        try {
-          sessionStorage.setItem('garden-session', session);
-        } catch {
-          // as above
-        }
-      }
-    }
-    return await fetchSnapshot();
-  } catch {
-    return null;
-  }
-}
-
-/** One record's full reading (its whole text, provenance and links), or null when it cannot be had. */
-export async function fetchReading(id) {
-  if (!session) return null;
-  const res = await fetch(`./api/garden/records/${encodeURIComponent(id)}`, { headers: { Authorization: `Bearer ${session}` } });
-  return res.ok ? res.json() : null;
-}
-
-export async function fetchSnapshot(since) {
-  if (!session) return null;
-  const path = since ? `./api/garden?since=${encodeURIComponent(since)}` : './api/garden';
-  const res = await fetch(path, { headers: { Authorization: `Bearer ${session}` } });
-  return res.ok ? res.json() : null;
-}
-
-/** The attached photos, recordings and videos of the same snapshot, each with its bytes: [{ item, blob }]. */
-export async function loadMedia() {
-  if (!session) return [];
-  try {
-    const auth = { headers: { Authorization: `Bearer ${session}` } };
-    const res = await fetch('./api/media', auth);
-    if (!res.ok) return [];
-    const { images = [] } = await res.json();
-    const out = await Promise.all(
-      images.map(async (item) => {
-        const r = await fetch(`./api/media/${item.sha256}`, auth).catch(() => null);
-        return r?.ok ? { item, blob: await r.blob() } : null;
-      }),
-    );
-    return out.filter(Boolean);
-  } catch {
-    return [];
-  }
-}
 
 /** The snapshot as the garden uses it. History entries: [revision, harness, time, changed fields, earlier text]. */
 function readRecords(snapshot) {
@@ -1076,9 +1014,23 @@ export function createGarden({ snapshot, field, scene, canvas, goTo, media = [],
     snapshotOf: (id) => byId.get(id)?.src,
     all: () => records.map((r) => r.src),
     order: () => order,
-    walk: (id) => byId.get(id) && visit(byId.get(id)),
+    walk: (id) => {
+      readingPath.close();
+      if (byId.has(id)) visit(byId.get(id));
+    },
     signal,
   });
+  // the Reading Path: the same records as text, over the garden, which waits behind it
+  const readingPath = createReadingPath($('path'), {
+    snapshot,
+    read: (id, from, ids) => reader.open(id, from, ids),
+    onOpen: () => {
+      unlock();
+      closePanels();
+    },
+    signal,
+  });
+  listen($('pathBtn'), 'click', (e) => readingPath.open(e.currentTarget));
   for (const panel of [card, list]) {
     listen(panel, 'click', (e) => {
       const go = e.target.closest('[data-go]');
@@ -1412,7 +1364,7 @@ export function createGarden({ snapshot, field, scene, canvas, goTo, media = [],
     document.body.classList.toggle('listing', !list.hidden);
   }
 
-  const typing = () => reader.isOpen || ['INPUT', 'SELECT'].includes(document.activeElement?.tagName);
+  const typing = () => reader.isOpen || readingPath.isOpen || ['INPUT', 'SELECT'].includes(document.activeElement?.tagName);
   setTime(1000);
 
   function dispose() {
@@ -1420,6 +1372,7 @@ export function createGarden({ snapshot, field, scene, canvas, goTo, media = [],
     stop();
     viewer.close();
     reader.close();
+    readingPath.close();
     markLabels.forEach(({ el }) => el.remove());
     focusLabel.remove();
     photos.forEach(({ url }) => URL.revokeObjectURL(url));
@@ -1445,7 +1398,7 @@ export function createGarden({ snapshot, field, scene, canvas, goTo, media = [],
     visit,
     typing,
     selectedKinds: () => [...want.kinds],
-    canRefresh: () => !viewer.isOpen && !reader.isOpen && card.hidden && list.hidden && !typing() && !playing && want.cutoff === Infinity,
+    canRefresh: () => !viewer.isOpen && !reader.isOpen && !readingPath.isOpen && card.hidden && list.hidden && !typing() && !playing && want.cutoff === Infinity,
     dispose,
     flowers: FLOWER,
   };

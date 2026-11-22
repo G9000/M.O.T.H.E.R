@@ -892,6 +892,222 @@
           height: 80px;
         }
       }
+      /* ---- the Reading Path: every record as text, over the garden or as the whole page -------------------------- */
+      .path {
+        position: fixed;
+        inset: 0;
+        z-index: 7;
+        overflow: auto;
+        overscroll-behavior: contain;
+        padding: 28px 16px 64px;
+        background: #15171f;
+        scrollbar-width: thin;
+        scrollbar-color: rgba(255, 255, 255, 0.25) transparent;
+        animation: fade 0.25s var(--ease);
+      }
+      .rpwrap {
+        display: grid;
+        gap: 16px;
+        width: min(760px, 100%);
+        margin: 0 auto;
+      }
+      .rptop {
+        display: flex;
+        align-items: flex-end;
+        justify-content: space-between;
+        gap: 12px;
+        flex-wrap: wrap;
+      }
+      .rpkicker {
+        margin: 0 0 2px;
+        font-size: 13px;
+        color: var(--text-3);
+      }
+      .rptop h1 {
+        margin: 0;
+        font: 600 clamp(26px, 4vw, 34px) / 1.15 var(--display);
+      }
+      .rptop h1:focus {
+        outline: none;
+      }
+      .rpback,
+      .rpseg button,
+      .rpkinds button {
+        padding: 6px 14px;
+        border: 1px solid var(--hair-soft);
+        border-radius: 999px;
+        background: rgba(255, 255, 255, 0.06);
+        font-size: 14px;
+        color: var(--text-2);
+        cursor: pointer;
+      }
+      .rpback:hover,
+      .rpseg button:hover,
+      .rpkinds button:hover {
+        background: rgba(255, 255, 255, 0.14);
+        color: #fff;
+      }
+      .rpseg button[aria-pressed='true'] {
+        background: rgba(255, 255, 255, 0.92);
+        color: #15161c;
+        font-weight: 600;
+      }
+      .rpkinds button {
+        display: inline-flex;
+        align-items: center;
+        gap: 7px;
+      }
+      .rpkinds button[aria-pressed='false'] {
+        color: var(--text-3);
+        text-decoration: line-through;
+        text-decoration-color: rgba(255, 255, 255, 0.3);
+      }
+      .rpkinds button[aria-pressed='false'] .dot {
+        opacity: 0.35;
+      }
+      .rpintro,
+      .rpnote {
+        margin: 0;
+        font-size: 15px;
+        line-height: 1.55;
+        color: var(--text-2);
+      }
+      .rpintro a {
+        color: #fff;
+      }
+      .rpnote {
+        padding: 9px 13px;
+        border-radius: 10px;
+        background: rgba(255, 210, 138, 0.12);
+        color: var(--warn);
+      }
+      .rpcontrols {
+        display: grid;
+        gap: 10px;
+      }
+      .rpfind {
+        display: grid;
+        gap: 4px;
+        font-size: 13px;
+        color: var(--text-3);
+      }
+      .rpfind input {
+        padding: 10px 14px;
+        border: 1px solid var(--hair);
+        border-radius: 12px;
+        background: rgba(255, 255, 255, 0.06);
+        font-size: 16px;
+        color: #fff;
+      }
+      .rpfind input::placeholder {
+        color: var(--text-3);
+      }
+      .rprow,
+      .rpseg,
+      .rpkinds {
+        display: flex;
+        flex-wrap: wrap;
+        align-items: center;
+        gap: 6px;
+      }
+      .rprow {
+        gap: 10px 16px;
+      }
+      .rprow .check {
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+        font-size: 14px;
+        color: var(--text-2);
+      }
+      .rpcount {
+        margin: 0;
+        font-size: 14px;
+        color: var(--text-3);
+      }
+      .rpgroup h2 {
+        position: sticky;
+        top: -28px;
+        z-index: 1;
+        margin: 8px 0 6px;
+        padding: 10px 0 6px;
+        background: #15171f;
+        font: 600 15px var(--display);
+        color: var(--text-2);
+      }
+      .rpn {
+        margin-left: 4px;
+        font-weight: 400;
+        color: var(--text-3);
+      }
+      .rpitems {
+        display: grid;
+        gap: 4px;
+        margin: 0;
+        padding: 0;
+        list-style: none;
+      }
+      .rpentry {
+        display: grid;
+        gap: 4px;
+        width: 100%;
+        padding: 12px 14px;
+        border: 0;
+        border-radius: 12px;
+        background: rgba(255, 255, 255, 0.04);
+        text-align: left;
+        cursor: pointer;
+      }
+      .rpentry:hover {
+        background: rgba(255, 255, 255, 0.09);
+      }
+      .rpentry:focus-visible {
+        background: rgba(255, 255, 255, 0.1);
+      }
+      .rpmeta {
+        display: flex;
+        flex-wrap: wrap;
+        align-items: center;
+        gap: 0 2px;
+        font-size: 13px;
+        color: var(--text-3);
+      }
+      .rpmeta .dot {
+        margin-right: 6px;
+      }
+      .rpsep {
+        padding: 0 6px;
+      }
+      .rpoff {
+        color: var(--bad);
+      }
+      .rptitle {
+        font: 600 17px/1.35 var(--display);
+        color: #fff;
+        overflow-wrap: anywhere;
+      }
+      .rpentry.retired .rptitle {
+        color: var(--text-2);
+      }
+      .rpexcerpt {
+        font-size: 15.5px;
+        line-height: 1.55;
+        color: var(--text-2);
+        overflow-wrap: anywhere;
+      }
+      .rpnone {
+        margin: 16px 0;
+        color: var(--text-3);
+      }
+      body.reading-only {
+        background: #15171f;
+      }
+      body.reading-only > :not(.path, .reader, script, noscript) {
+        display: none !important;
+      }
+      body.reading-only .path {
+        animation: none;
+      }
       /* ---- the reader: one record, for reading, over the garden --------------------------------------------------- */
       .readit {
         justify-self: start;
@@ -1396,6 +1612,7 @@
       <span class="spacer"></span>
       <label class="find glass"><span hidden>Search the garden</span><svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><circle cx="10.5" cy="10.5" r="6.5"/><path d="m20 20-4.6-4.6"/><path d="M10.5 6.8v1.4M10.5 12.8v1.4M6.8 10.5h1.4M12.8 10.5h1.4" stroke-width="1"/></svg><input id="q" type="search" placeholder="Search the garden" autocomplete="off" spellcheck="false" /><kbd>/</kbd><span id="found" hidden></span></label>
       <button class="btn glass off" id="soundBtn" title="Sound (M)" aria-pressed="false" aria-label="Sound is off"><svg class="ico on" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 9.5v5h3.5L12 18.5v-13L7.5 9.5z"/><path d="M15.5 9a4 4 0 0 1 0 6M18 6.5a7.5 7.5 0 0 1 0 11"/></svg><svg class="ico mute" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 9.5v5h3.5L12 18.5v-13L7.5 9.5z"/><path d="m16 9.5 5 5M21 9.5l-5 5"/></svg></button>
+      <button class="btn glass" id="pathBtn" aria-controls="path" title="Reading Path: every record as text"><svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><path d="M5 4.5h9.5a3 3 0 0 1 3 3v12a2.5 2.5 0 0 0-2.5-2.5H5z"/><path d="M8 8.5h6M8 12h6"/></svg><span hidden>Reading Path</span></button>
       <button class="btn glass" id="listBtn" aria-controls="list" title="Every record (L)"><svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><path d="M9 6h11M9 12h11M9 18h11"/><path d="M4.5 4.5 6 6 4.5 7.5 3 6zM4.5 10.5 6 12l-1.5 1.5L3 12zM4.5 16.5 6 18l-1.5 1.5L3 18z" fill="currentColor" stroke="none"/></svg><span hidden>Records</span></button>
     </header>
     <aside class="beds glass" aria-label="The beds: show or set aside each kind">
@@ -1411,6 +1628,7 @@
     </div>
     <div class="mapbox glass"><canvas id="map" aria-label="Map of the garden: click a flower's dot to walk to it"></canvas></div>
     <aside class="card glass" id="card" hidden aria-live="polite"></aside>
+    <main class="path" id="path" hidden aria-labelledby="rp-title"></main>
     <div class="reader" id="reader" hidden></div>
     <div class="viewer" id="viewer" hidden role="dialog" aria-label="A photo or recording from the garden"></div>
     <aside class="panel glass" id="list" hidden aria-label="All records">
