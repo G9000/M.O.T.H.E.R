@@ -62,7 +62,7 @@
     <em>
       This repository was born out of my personal life tragedy, <br>
       transformed into a place of comfort, remembrance, and hope.
-      M.O.T.H.E.R I want to be welcome home.
+      M.O.T.H.E.R I want to be welcome home. Final artwork before entombment.
     </em>
   </sub>
 </p>
