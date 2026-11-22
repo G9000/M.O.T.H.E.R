@@ -10,6 +10,7 @@ import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 import { COMMON } from '../lib/index.js';
 import { gardenRadius, pathAt, pathLength, START, TARN, tarnDistance } from '../valley/world.js';
 import { createViewer, describe, placeholder } from './media.js';
+import { createReader } from './reader.js';
 
 const TAU = Math.PI * 2;
 const KINDS = ['memory', 'decision', 'task', 'checkpoint', 'artifact', 'action'];
@@ -74,6 +75,13 @@ export async function loadSnapshot() {
   }
 }
 
+/** One record's full reading (its whole text, provenance and links), or null when it cannot be had. */
+export async function fetchReading(id) {
+  if (!session) return null;
+  const res = await fetch(`./api/garden/records/${encodeURIComponent(id)}`, { headers: { Authorization: `Bearer ${session}` } });
+  return res.ok ? res.json() : null;
+}
+
 export async function fetchSnapshot(since) {
   if (!session) return null;
   const path = since ? `./api/garden?since=${encodeURIComponent(since)}` : './api/garden';
@@ -127,6 +135,7 @@ function readRecords(snapshot) {
 ${r.content}
 ${r.status}
 ${r.kind}`.toLowerCase(),
+        src: r,
         h: r.history.map((e) => [e.revision, e.actor, e.at, e.changed, e.revision !== r.revision && (!e.changed || e.changed.includes('content')) ? e.excerpt : '']),
       };
     });
@@ -989,10 +998,8 @@ export function createGarden({ snapshot, field, scene, canvas, goTo, media = [],
       ${r.next ? `<div class="note"><b>Next step</b>${esc(r.next)}</div>` : ''}
       ${linked.length ? `<div class="rel"><h3>Linked · walk there</h3><div class="chips">${chips(linked)}</div></div>` : ''}
       ${r.hiddenRefs ? `<p class="sub">${r.hiddenRefs === 1 ? '1 linked record is' : `${r.hiddenRefs} linked records are`} outside this snapshot.</p>` : ''}
-      <details><summary>${r.revision === 1 ? '1 revision' : `${esc(r.revision)} revisions`}${r.h.length < r.revision ? `, latest ${r.h.length} shown` : ''}</summary><div class="hist">${[...r.h]
-        .reverse()
-        .map((e) => `<div><span class="r">rev ${esc(e[0])}</span><span>${esc(e[1])}, ${when(e[2])}${e[3] ? `<br><span class="x">changed ${e[3].map(esc).join(', ')}</span>` : ''}${e[4] ? `<br><span class="x">“${esc(e[4])}”</span>` : ''}</span></div>`)
-        .join('')}</div></details>`;
+      <button class="readit" data-read="${esc(r.id)}">Read this ${r.kind === 'memory' ? 'memory' : 'record'}</button>
+      <p class="sub">Its sources, links and ${r.revision === 1 ? 'one revision' : `${esc(r.revision)} revisions`} are in the reader's Archive.</p>`;
     card.hidden = false;
   }
   function closePanels() {
@@ -1011,7 +1018,7 @@ export function createGarden({ snapshot, field, scene, canvas, goTo, media = [],
         .map(([name, rs]) => {
           const items = rs.filter((r) => !q || matches(r));
           if (!items.length) return '';
-          return `<h3>${name}</h3>${items.map((r) => `<button class="item ${RETIRED.has(r.status) ? 'off' : ''}" data-go="${esc(r.id)}">${dot(r)}${esc(r.title)}</button>`).join('')}`;
+          return `<h3>${name}</h3>${items.map((r) => `<div class="row"><button class="item ${RETIRED.has(r.status) ? 'off' : ''}" data-go="${esc(r.id)}">${dot(r)}${esc(r.title)}</button><button class="readbtn" data-read="${esc(r.id)}" aria-label="Read ${esc(r.title)}">Read</button></div>`).join('')}`;
         })
         .join('') || (grove ? '' : '<p class="none">Nothing matches.</p>');
   }
@@ -1061,11 +1068,24 @@ export function createGarden({ snapshot, field, scene, canvas, goTo, media = [],
     showCard(focus);
     unlock();
   }
+  // the reader: a record opened for reading, over the garden, which stays as it was
+  const reading = records.filter((r) => !r.pinned).sort((a, b) => b.created - a.created);
+  const order = [...records.filter((r) => r.pinned), ...reading].map((r) => r.id);
+  const reader = createReader($('reader'), {
+    fetchReading,
+    snapshotOf: (id) => byId.get(id)?.src,
+    all: () => records.map((r) => r.src),
+    order: () => order,
+    walk: (id) => byId.get(id) && visit(byId.get(id)),
+    signal,
+  });
   for (const panel of [card, list]) {
     listen(panel, 'click', (e) => {
       const go = e.target.closest('[data-go]');
       const pic = e.target.closest('[data-photo]');
-      if (go) visit(byId.get(go.dataset.go));
+      const readIt = e.target.closest('[data-read]');
+      if (readIt) reader.open(readIt.dataset.read, readIt);
+      else if (go) visit(byId.get(go.dataset.go));
       else if (pic) visit(photos[Number(pic.dataset.photo)]);
       else if (e.target.closest('[data-close]')) closePanels();
     });
@@ -1285,6 +1305,10 @@ export function createGarden({ snapshot, field, scene, canvas, goTo, media = [],
       search.focus();
       search.select();
     } else if (e.code === 'KeyE') read();
+    else if (e.code === 'KeyR' && (open || focus) && !(open ?? focus).photo) {
+      unlock();
+      reader.open((open ?? focus).id);
+    }
     else if (e.code === 'KeyL') {
       e.preventDefault();
       unlock();
@@ -1388,13 +1412,14 @@ export function createGarden({ snapshot, field, scene, canvas, goTo, media = [],
     document.body.classList.toggle('listing', !list.hidden);
   }
 
-  const typing = () => ['INPUT', 'SELECT'].includes(document.activeElement?.tagName);
+  const typing = () => reader.isOpen || ['INPUT', 'SELECT'].includes(document.activeElement?.tagName);
   setTime(1000);
 
   function dispose() {
     lifecycle.abort();
     stop();
     viewer.close();
+    reader.close();
     markLabels.forEach(({ el }) => el.remove());
     focusLabel.remove();
     photos.forEach(({ url }) => URL.revokeObjectURL(url));
@@ -1420,7 +1445,7 @@ export function createGarden({ snapshot, field, scene, canvas, goTo, media = [],
     visit,
     typing,
     selectedKinds: () => [...want.kinds],
-    canRefresh: () => !viewer.isOpen && card.hidden && list.hidden && !typing() && !playing && want.cutoff === Infinity,
+    canRefresh: () => !viewer.isOpen && !reader.isOpen && card.hidden && list.hidden && !typing() && !playing && want.cutoff === Infinity,
     dispose,
     flowers: FLOWER,
   };

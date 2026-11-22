@@ -51,16 +51,40 @@ Use the [Living Memory Graph](living-memory-graph.md) to follow directed relatio
 ## Walking
 
 - Click the picture to walk: the mouse looks, `W A S D` move, Shift runs, Space jumps. Esc gives the mouse back.
-- Look at a flower within a few steps and press `E`, or click, to read its record: text, status, handoff, next step, linked records and recent revisions. Linked records are buttons that take you to them.
+- Look at a flower within a few steps and press `E`, or click, to open its card: text, status, handoff, next step and linked records. Linked records are buttons that take you to them. **Read this memory** on the card, or `R`, opens the reader (below).
 - `/` (or the small lens at the top right) opens the search box. Every word must appear in a record's title, text, status or kind. Found flowers are lit and a soft light hangs over each, the rest fade and shrink back into the meadow, and Enter stands you beside each found flower in turn (Shift+Enter goes back). Esc clears the search.
 - A record's card shows the records it names and those that name it; threads of light run from its flower to theirs while the card is open.
 - The kinds are a column of coloured dots at the left edge; hover it to open the legend and filter: click a kind to set it aside or bring it back. The harness menu keeps only records that harness wrote or revised, and "Set aside retired records" does what it says. Set-aside flowers stay where they are, faded.
 - The timeline at the bottom (faint until you hover it) shows the garden as it stood on any day: later flowers are not yet grown. ▶ replays the garden growing to today.
 - The map at the bottom right (larger while you hover it) shows the hill from above: the path, every record as a dot and where you stand, facing which way. Click a dot to walk to that record.
 - **The photo grove:** each attached photo, recording and video stands on a wooden easel in a ring round the pool at the path's end, its picture facing the water. A video shows a frame from its first seconds, and a recording a painted stand-in. Look at one and press E, or click, to open the viewer: the item large, its captions, descriptions, OCR text or transcripts with who wrote them, its date, file and source, which copy is shown, and how many memories cite it. Audio and video play there. The arrow keys step through the grove, and Esc closes it. Search finds photos by their words too, the map shows them as small white squares, and the list has them at the top.
-- `L` opens the list of every record, grouped by kind; it follows the search. Choosing one stands you on the path beside its flower. The list works from the keyboard and needs no walking.
+- `L` opens the list of every record, grouped by kind; it follows the search. Choosing one stands you on the path beside its flower, and the **Read** button beside it opens the reader without moving you. The list works from the keyboard and needs no walking.
 - The panels hide while you walk with the mouse captured; Esc brings them back. The record count appears when you hover the title.
 - `T` and `1`–`4` change the time of day, `0` lets the evening pass on to sunset, and `,` and `.` nudge the hour; `P` turns the paint finish off and on.
+
+## Reading a memory
+
+The reader opens one record over the garden, which stays exactly where it was. It shows three lenses over the same stored record. Switching lenses fetches nothing new and writes nothing.
+
+- **Mother's Eyes** shows reflections that already exist: memories with basis `model_inference`, either the record itself or active ones whose stored `references` name it. Each one shows who wrote it, when, and its review status. **Owner-reviewed** means that revision was approved in the owner inbox, and the writer shown is the proposer. Anything else reads **Review status unavailable**: `active` does not mean approved. A reflection is shown because it names the record, not because it was chosen as the record's story. When none exists, the lens says so. Nothing is generated.
+- **My Memories** shows the record's own text, labelled by how it was captured. `owner_statement` reads **Account captured from a conversation**, credited to its writer. `source` reads as a summary from a source. Checkpoints, tasks and other working records read as **A working record, not a recollection**, with their next step, completed items and open questions. No stored field marks text as the owner's exact words, so nothing is presented as a quotation or a first-person diary. A reflection's own record says there is no account in the owner's words.
+- **The Archive** shows the record ID, kind, status, revision, last writer, basis, owner review, created and revised times, text length and completeness, source addresses (copied, never opened), the records it names and those that name it, and up to 100 revisions. v1 records carry no event date, so the reader shows the recorded date and says the event date is not recorded. A reference to a record that is not available is shown as a gap, not as evidence that it never existed.
+
+**How do we know?** at the foot of a lens goes to the Archive. **Linked records** lists only exact stored links. **Later** and **Earlier** step through records in garden order. **A−** and **A+** change the text size, and **Walk there** closes the reader and stands you by the flower. Esc closes the reader and returns focus to where you opened it. While it is open, focus stays inside it and the garden's walking keys do nothing. The tabs work with the arrow keys, Home and End.
+
+The browser remembers the last lens and text size. It never stores what a record says. The last lens is used again on opening, except Mother's Eyes when a record has no reflection: that record opens in My Memories.
+
+The reader asks the server for `GET /api/garden/records/<id>` under the same session, host and origin checks as the snapshot. It returns the record's full text (the snapshot carries only 4,000 characters), its provenance and links. Unknown, malformed and outside-the-snapshot IDs all answer 404. The live Garden reads each record when it is opened. The offline command reads every shown record's reading with the snapshot, up to 64 MiB, before releasing the database. If a reading can't be fetched, the reader shows the snapshot's preview and says it is partial. The snapshot itself now also carries each record's `basis` and `sources`.
+
+Graph media and event dates are not attached to v1 records in the reader. That needs a verified v1↔graph association, which does not exist yet.
+
+To look at the reader with synthetic narrative fixtures:
+
+```
+MOTHER_READER_DEMO=<new file> cargo test --locked --test garden_reader demo -- --ignored
+```
+
+then run `garden explore --db` on that file.
 
 Nothing can be changed from the garden. Pinning, handoffs and review stay with the existing owner tools.
 
@@ -69,7 +93,7 @@ Nothing can be changed from the garden. Pinning, handoffs and review stay with t
 - The server listens on `127.0.0.1` only, on a random port, and serves files embedded in the executable. The page loads nothing from the network; a content security policy enforces that.
 - The page exchanges the token after the `#` for a browser session and removes it from the address bar. An offline link works once. A live link works until the owner service exits and is stored alongside the owner-private descriptor, so you can reopen the Garden. Keep the live link private.
 - Requests are refused unless they name the server's own local address, and requests from other origins are refused.
-- The server answers `GET` for the page files, snapshots and gallery, and `POST` for the one token exchange.
+- The server answers `GET` for the page files, snapshots, single-record readings and gallery, and `POST` for the one token exchange.
 
 ## Limits
 
@@ -77,7 +101,7 @@ Nothing can be changed from the garden. Pinning, handoffs and review stay with t
 - The page is about 2.6 MB and takes several seconds to paint the land and sky on first load.
 - Checked with a synthetic garden of 500 records. The record list, the card and standing beside a chosen flower were exercised; walking with the mouse captured was not driven by the automated check.
 - Records are ordered by when they were first created. Threads are drawn for the open record only, not for the whole garden at once. "Similar in meaning" links are still not drawn.
-- Long records show their first 4,000 characters, and each record its latest 20 revisions.
+- The card and snapshot show a long record's first 4,000 characters and its latest 20 revisions. The reader shows the whole record (up to 24,000 characters) and up to 100 revisions.
 - Sound is off until you turn it on with the speaker button by the search, or `M`. Footsteps are recordings. The rest is synthesized in the page, because the original ambience recordings can't be shipped (see `web/garden/MISSING_ASSETS.md`): wind in the grass that rises with the gusts, leaves under the trees, birdsong by day, water lapping near the pool and crickets as the light goes, each louder or quieter by where you stand and the hour. A soft chime sounds when a record or a photo opens. The same button or key turns it off again, and this browser remembers which. It was only checked by measuring the rendered signal, not by ear on other machines.
 
 ## Trying it without real data
