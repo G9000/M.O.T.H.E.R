@@ -4,7 +4,7 @@ The released demo has ten sounds. Five are in this repo: the footsteps (CC0). Th
 
 ## What happens without them
 
-The demo builds and plays. You hear your footsteps and nothing else: no wind in the grass, no leaves overhead, no birds and insects, no water at the tarn, no crickets at dusk. `npm run build` writes `dist/audio/manifest.json` listing only the recordings that are there, so the demo doesn't ask for the others and nothing fails.
+The demo builds and plays. Footsteps are recordings; in place of each missing ambience the memory garden plays its own synthesized voice (`src/valley/ambience.js`): wind in the grass, leaves overhead, birds and insects, water at the tarn and crickets at dusk. A recording you put back takes over from its synthesized voice. `npm run build` writes `dist/audio/manifest.json` listing only the recordings that are there, so the demo doesn't ask for the others and nothing fails.
 
 ## Where to get them
 

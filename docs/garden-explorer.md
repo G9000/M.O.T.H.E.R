@@ -62,7 +62,7 @@ Nothing can be changed from the garden. Pinning, handoffs and review stay with t
 - Checked with a synthetic garden of 500 records. The record list, the card and standing beside a chosen flower were exercised; walking with the mouse captured was not driven by the automated check.
 - Records are ordered by when they were first created. Threads are drawn for the open record only, not for the whole garden at once. "Similar in meaning" links are still not drawn.
 - Long records show their first 4,000 characters, and each record its latest 20 revisions.
-- Sound is footsteps only (see `web/garden/MISSING_ASSETS.md`).
+- Sound is off until you turn it on with the speaker button by the search, or `M`. Footsteps are recordings. The rest is synthesized in the page, because the original ambience recordings can't be shipped (see `web/garden/MISSING_ASSETS.md`): wind in the grass that rises with the gusts, leaves under the trees, birdsong by day, water lapping near the pool and crickets as the light goes, each louder or quieter by where you stand and the hour. A soft chime sounds when a record or a photo opens. The same button or key turns it off again, and this browser remembers which. It was only checked by measuring the rendered signal, not by ear on other machines.
 
 ## Trying it without real data
 
