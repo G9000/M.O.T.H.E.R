@@ -276,6 +276,12 @@ fn command_serves_one_snapshot_on_loopback_and_releases_the_database() {
 fn live_explorer_observes_writes_through_the_same_running_owner() {
     let parent = std::fs::canonicalize(std::env::temp_dir()).unwrap();
     let dir = tempfile::tempdir_in(parent).unwrap();
+    // The owner service writes its endpoint only into an owner-only directory.
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(dir.path(), std::fs::Permissions::from_mode(0o700)).unwrap();
+    }
     let db = dir.path().join("garden.redb");
     let endpoint = dir.path().join("service.json");
     let garden = Garden::new(&db);
