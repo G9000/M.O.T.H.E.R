@@ -898,6 +898,188 @@
           transition: none !important;
         }
       }
+      /* ---- the viewer: one photo, recording or video, large ------------------------------------------------------ */
+      .dot.photo {
+        border-radius: 2px;
+        background: #fff;
+      }
+      .viewer {
+        position: fixed;
+        inset: 0;
+        z-index: 8;
+        display: grid;
+        place-items: center;
+        padding: 56px 72px;
+        animation: fade 0.3s var(--ease);
+      }
+      @keyframes fade {
+        from {
+          opacity: 0;
+        }
+      }
+      .v-shade {
+        position: absolute;
+        inset: 0;
+        background: rgba(8, 10, 16, 0.62);
+        backdrop-filter: blur(14px) saturate(1.1);
+        -webkit-backdrop-filter: blur(14px) saturate(1.1);
+      }
+      .v-frame {
+        position: relative;
+        margin: 0;
+        display: grid;
+        grid-template-columns: minmax(0, auto) 300px;
+        max-width: min(1240px, 100%);
+        max-height: 100%;
+        border-radius: 18px;
+        overflow: hidden;
+        background: var(--glass-strong);
+        border: 1px solid var(--hair-soft);
+        box-shadow: 0 30px 80px rgba(0, 0, 0, 0.45);
+        animation: rise 0.4s var(--ease);
+      }
+      .v-media {
+        display: grid;
+        place-items: center;
+        min-width: 280px;
+        background: rgba(0, 0, 0, 0.35);
+      }
+      .v-media img,
+      .v-media video {
+        display: block;
+        max-width: min(900px, calc(100vw - 460px));
+        max-height: calc(100vh - 112px);
+        object-fit: contain;
+      }
+      .v-media audio {
+        width: 260px;
+        margin: 80px 20px;
+      }
+      .v-missing {
+        color: var(--text-3);
+        padding: 40px;
+      }
+      .v-text {
+        padding: 22px 22px 18px;
+        overflow: auto;
+        max-height: calc(100vh - 112px);
+        font-size: 13.5px;
+        color: var(--text-2);
+      }
+      .v-kind {
+        font-size: 11.5px;
+        font-weight: 600;
+        color: var(--text-3);
+      }
+      .v-text h2 {
+        margin: 6px 0 4px;
+        font: 600 19px/1.3 var(--display);
+        color: var(--text);
+        overflow-wrap: anywhere;
+      }
+      .v-when {
+        margin: 0 0 14px;
+        color: var(--text-3);
+        font-size: 12.5px;
+      }
+      .v-read {
+        margin: 0 0 12px;
+        padding: 9px 12px;
+        border-radius: 10px;
+        background: rgba(255, 255, 255, 0.07);
+      }
+      .v-read b {
+        display: block;
+        font: 600 11.5px var(--display);
+        color: var(--text);
+      }
+      .v-read p {
+        margin: 3px 0 0;
+        white-space: pre-wrap;
+        overflow-wrap: anywhere;
+      }
+      .v-read span {
+        display: block;
+        margin-top: 4px;
+        font-size: 11.5px;
+        color: var(--text-3);
+      }
+      .v-text dl {
+        display: grid;
+        grid-template-columns: auto 1fr;
+        gap: 5px 12px;
+        margin: 14px 0 0;
+        font-size: 12px;
+      }
+      .v-text dt {
+        color: var(--text-3);
+      }
+      .v-text dd {
+        margin: 0;
+        overflow-wrap: anywhere;
+      }
+      .v-count {
+        margin: 14px 0 0;
+        font-size: 11.5px;
+        color: var(--text-3);
+      }
+      .v-nav,
+      .v-close {
+        position: absolute;
+        display: grid;
+        place-items: center;
+        width: 40px;
+        height: 40px;
+        border-radius: 50%;
+        border: 1px solid var(--hair-soft);
+        background: var(--glass);
+        color: #fff;
+        cursor: pointer;
+        backdrop-filter: blur(16px);
+        -webkit-backdrop-filter: blur(16px);
+      }
+      .v-nav:hover,
+      .v-close:hover {
+        background: var(--glass-strong);
+      }
+      .v-prev {
+        left: 18px;
+        top: 50%;
+        transform: translateY(-50%);
+      }
+      .v-next {
+        right: 18px;
+        top: 50%;
+        transform: translateY(-50%);
+      }
+      .v-close {
+        top: 16px;
+        right: 18px;
+        font-size: 20px;
+      }
+      @media (max-width: 900px) {
+        .viewer {
+          padding: 56px 12px 12px;
+        }
+        .v-frame {
+          grid-template-columns: 1fr;
+          overflow: auto;
+        }
+        .v-media img,
+        .v-media video {
+          max-width: 100%;
+          max-height: 60vh;
+        }
+        .v-text {
+          max-height: none;
+        }
+        .v-prev,
+        .v-next {
+          top: auto;
+          bottom: 18px;
+          transform: none;
+        }
+      }
     </style>
   </head>
   <body>
@@ -925,6 +1107,7 @@
     </div>
     <div class="mapbox glass"><canvas id="map" aria-label="Map of the garden: click a flower's dot to walk to it"></canvas></div>
     <aside class="card glass" id="card" hidden aria-live="polite"></aside>
+    <div class="viewer" id="viewer" hidden role="dialog" aria-label="A photo or recording from the garden"></div>
     <aside class="panel glass" id="list" hidden aria-label="All records">
       <div id="items"></div>
     </aside>

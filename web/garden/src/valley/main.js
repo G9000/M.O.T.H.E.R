@@ -4,7 +4,7 @@
 // still reports its progress through patch-block, which here goes nowhere.)
 import { patchBlock } from 'patch-block';
 import * as THREE from 'three';
-import { createGarden, loadSnapshot, pathLengthFor } from '../garden/garden.js';
+import { createGarden, loadMedia, loadSnapshot, pathLengthFor } from '../garden/garden.js';
 import { bakeGround, createField, createFrame, loadGroundTextures } from '../lib/index.js';
 import { createFluff, createStones } from './dressing.js';
 import { createFloor, FLOOR, paintFloor } from './floor.js';
@@ -482,7 +482,9 @@ function tick(dt) {
 
 mark('land');
 await stage(0.48, 'Planting the garden');
-garden = createGarden({ snapshot, field, scene, canvas, goTo });
+// the owner's photos and recordings, for the grove by the pool (invented ones under the dev server)
+const media = import.meta.env.DEV && snapshot.workspaceId === 'demo' ? await (await import('../garden/demo.js')).demoMedia() : await loadMedia();
+garden = createGarden({ snapshot, field, scene, canvas, goTo, media });
 mark('garden');
 await stage(0.5, 'Painting the mountains');
 await skyReady;

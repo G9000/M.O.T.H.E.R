@@ -6,26 +6,195 @@
 <meta name="referrer" content="no-referrer">
 <title>Garden media</title>
 <style>
-  :root { color-scheme: light dark; --bg: #f6f4ef; --fg: #1f2421; --muted: #5d665f; --card: #ffffff; --line: #d9d5cb; }
-  @media (prefers-color-scheme: dark) { :root { --bg: #171a18; --fg: #e8e6e1; --muted: #a3aaa4; --card: #222622; --line: #343a35; } }
-  body { margin: 0; background: var(--bg); color: var(--fg); font: 15px/1.5 system-ui, sans-serif; }
-  header { padding: 20px 16px 8px; max-width: 1100px; margin: 0 auto; }
-  h1 { font-size: 20px; margin: 0 0 4px; }
-  p { margin: 0; color: var(--muted); }
-  main { display: grid; gap: 16px; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); padding: 16px; max-width: 1100px; margin: 0 auto; }
-  figure { margin: 0; background: var(--card); border: 1px solid var(--line); border-radius: 8px; overflow: hidden; }
-  img, video { display: block; width: 100%; height: 220px; object-fit: contain; background: var(--line); }
-  audio { display: block; width: 100%; margin: 16px 0 4px; }
-  figcaption { padding: 10px 12px; font-size: 13px; color: var(--muted); overflow-wrap: anywhere; }
-  figcaption strong { color: var(--fg); font-weight: 600; }
+  :root {
+    color-scheme: dark;
+    --glass: rgba(24, 26, 34, 0.42);
+    --glass-strong: rgba(22, 24, 32, 0.7);
+    --hair: rgba(255, 255, 255, 0.16);
+    --text: #fff;
+    --text-2: rgba(255, 255, 255, 0.74);
+    --text-3: rgba(255, 255, 255, 0.5);
+    --face: 'Segoe UI Variable Text', 'Segoe UI', system-ui, -apple-system, 'SF Pro Text', 'Helvetica Neue', sans-serif;
+    --display: 'Segoe UI Variable Display', 'Segoe UI', system-ui, -apple-system, 'SF Pro Display', 'Helvetica Neue', sans-serif;
+    --ease: cubic-bezier(0.2, 0.8, 0.2, 1);
+  }
+  * { box-sizing: border-box; }
+  [hidden] { display: none !important; }
+  body {
+    margin: 0;
+    min-height: 100vh;
+    color: var(--text);
+    font: 14px/1.5 var(--face);
+    -webkit-font-smoothing: antialiased;
+    background:
+      radial-gradient(80% 60% at 15% 0%, rgba(122, 156, 210, 0.35), transparent 70%),
+      radial-gradient(70% 60% at 90% 10%, rgba(216, 160, 170, 0.22), transparent 70%),
+      linear-gradient(180deg, #1b2030, #12151e 60%, #0e1017);
+  }
+  button { font: inherit; color: inherit; }
+  :focus-visible { outline: 1.5px solid rgba(255, 255, 255, 0.9); outline-offset: 2px; }
+  header {
+    position: sticky;
+    top: 0;
+    z-index: 2;
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 14px 20px;
+    background: linear-gradient(180deg, rgba(14, 16, 23, 0.85), rgba(14, 16, 23, 0));
+  }
+  .brand {
+    display: flex;
+    align-items: center;
+    gap: 9px;
+    padding: 6px 14px 6px 8px;
+    border-radius: 999px;
+    background: var(--glass);
+    border: 1px solid var(--hair);
+    backdrop-filter: blur(20px);
+    -webkit-backdrop-filter: blur(20px);
+  }
+  .mark {
+    width: 18px;
+    height: 18px;
+    border-radius: 50%;
+    background: radial-gradient(circle at 35% 30%, #fff 0 22%, rgba(255, 255, 255, 0.55) 23% 40%, transparent 41%), radial-gradient(circle, transparent 58%, rgba(255, 255, 255, 0.8) 60% 66%, transparent 68%);
+  }
+  h1 { margin: 0; font: 600 14px var(--display); }
+  #status { margin: 0; font-size: 12.5px; color: var(--text-3); }
+  main {
+    columns: 260px;
+    column-gap: 14px;
+    padding: 6px 20px 40px;
+    max-width: 1400px;
+    margin: 0 auto;
+  }
+  .tile {
+    position: relative;
+    display: block;
+    width: 100%;
+    margin: 0 0 14px;
+    padding: 0;
+    border: 1px solid var(--hair);
+    border-radius: 14px;
+    overflow: hidden;
+    background: var(--glass);
+    cursor: zoom-in;
+    break-inside: avoid;
+    text-align: left;
+    transition: transform 0.3s var(--ease), box-shadow 0.3s, border-color 0.3s;
+    animation: rise 0.5s var(--ease) both;
+  }
+  .tile:hover { transform: translateY(-2px); border-color: rgba(255, 255, 255, 0.35); box-shadow: 0 16px 40px rgba(0, 0, 0, 0.35); }
+  @keyframes rise { from { opacity: 0; transform: translateY(8px); } }
+  .tile img, .tile video { display: block; width: 100%; height: auto; }
+  .tile .stand-in {
+    display: grid;
+    place-items: center;
+    aspect-ratio: 4 / 3;
+    font-size: 44px;
+    background: linear-gradient(135deg, #6d5aa8, #d99ab4);
+  }
+  .tile.video .stand-in { background: linear-gradient(135deg, #3f6c8f, #9fc7c0); }
+  .tile .meta {
+    position: absolute;
+    inset: auto 0 0 0;
+    padding: 26px 12px 10px;
+    background: linear-gradient(180deg, transparent, rgba(8, 10, 16, 0.78));
+    font-size: 12.5px;
+    opacity: 0;
+    transition: opacity 0.25s;
+  }
+  .tile:hover .meta, .tile:focus-visible .meta { opacity: 1; }
+  .meta b { display: block; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .meta span { color: var(--text-2); }
+  .badge {
+    position: absolute;
+    top: 8px;
+    left: 8px;
+    padding: 1px 8px;
+    border-radius: 999px;
+    font-size: 11px;
+    font-weight: 600;
+    background: rgba(8, 10, 16, 0.6);
+    backdrop-filter: blur(10px);
+  }
+  .empty { margin: 80px auto; text-align: center; color: var(--text-3); }
+
+  /* the viewer */
+  .viewer { position: fixed; inset: 0; z-index: 8; display: grid; place-items: center; padding: 56px 72px; animation: fade 0.3s var(--ease); }
+  @keyframes fade { from { opacity: 0; } }
+  .v-shade { position: absolute; inset: 0; background: rgba(8, 10, 16, 0.7); backdrop-filter: blur(14px); -webkit-backdrop-filter: blur(14px); }
+  .v-frame {
+    position: relative;
+    margin: 0;
+    display: grid;
+    grid-template-columns: minmax(0, auto) 300px;
+    max-width: min(1240px, 100%);
+    max-height: 100%;
+    border-radius: 18px;
+    overflow: hidden;
+    background: var(--glass-strong);
+    border: 1px solid var(--hair);
+    box-shadow: 0 30px 80px rgba(0, 0, 0, 0.45);
+    animation: rise 0.4s var(--ease);
+  }
+  .v-media { display: grid; place-items: center; min-width: 280px; background: rgba(0, 0, 0, 0.35); }
+  .v-media img, .v-media video { display: block; max-width: min(900px, calc(100vw - 460px)); max-height: calc(100vh - 112px); object-fit: contain; }
+  .v-media audio { width: 260px; margin: 80px 20px; }
+  .v-text { padding: 22px 22px 18px; overflow: auto; max-height: calc(100vh - 112px); font-size: 13.5px; color: var(--text-2); }
+  .v-kind { font-size: 11.5px; font-weight: 600; color: var(--text-3); }
+  .v-text h2 { margin: 6px 0 4px; font: 600 19px/1.3 var(--display); color: var(--text); overflow-wrap: anywhere; }
+  .v-when { margin: 0 0 14px; color: var(--text-3); font-size: 12.5px; }
+  .v-read { margin: 0 0 12px; padding: 9px 12px; border-radius: 10px; background: rgba(255, 255, 255, 0.07); }
+  .v-read b { display: block; font: 600 11.5px var(--display); color: var(--text); }
+  .v-read p { margin: 3px 0 0; white-space: pre-wrap; overflow-wrap: anywhere; }
+  .v-read span { display: block; margin-top: 4px; font-size: 11.5px; color: var(--text-3); }
+  .v-text dl { display: grid; grid-template-columns: auto 1fr; gap: 5px 12px; margin: 14px 0 0; font-size: 12px; }
+  .v-text dt { color: var(--text-3); }
+  .v-text dd { margin: 0; overflow-wrap: anywhere; }
+  .v-count { margin: 14px 0 0; font-size: 11.5px; color: var(--text-3); }
+  .v-nav, .v-close {
+    position: absolute;
+    display: grid;
+    place-items: center;
+    width: 40px;
+    height: 40px;
+    border-radius: 50%;
+    border: 1px solid var(--hair);
+    background: var(--glass);
+    color: #fff;
+    cursor: pointer;
+    font-size: 20px;
+    line-height: 1;
+  }
+  .v-nav:hover, .v-close:hover { background: var(--glass-strong); }
+  .v-prev { left: 18px; top: 50%; transform: translateY(-50%); }
+  .v-next { right: 18px; top: 50%; transform: translateY(-50%); }
+  .v-close { top: 16px; right: 18px; }
+  @media (max-width: 900px) {
+    .viewer { padding: 56px 12px 12px; }
+    .v-frame { grid-template-columns: 1fr; overflow: auto; }
+    .v-media img, .v-media video { max-width: 100%; max-height: 60vh; }
+    .v-text { max-height: none; }
+    .v-prev, .v-next { top: auto; bottom: 18px; transform: none; }
+  }
+  @media (prefers-reduced-motion: reduce) { * { animation: none !important; transition: none !important; } }
 </style>
 </head>
 <body>
 <header>
-  <h1>Garden media</h1>
+  <div class="brand"><span class="mark" aria-hidden="true"></span><h1>Garden media</h1></div>
   <p id="status">Opening a private local snapshot…</p>
 </header>
 <main id="images"></main>
+<div class="viewer" id="viewer" hidden role="dialog" aria-label="One attached item, large">
+  <div class="v-shade" data-close></div>
+  <figure class="v-frame"><div class="v-media"></div><figcaption class="v-text"></figcaption></figure>
+  <button class="v-nav v-prev" aria-label="Previous" data-step="-1">‹</button>
+  <button class="v-nav v-next" aria-label="Next" data-step="1">›</button>
+  <button class="v-close" aria-label="Close" data-close>×</button>
+</div>
 <script src="/gallery.js"></script>
 </body>
 </html>

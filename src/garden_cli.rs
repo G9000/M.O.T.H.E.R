@@ -212,11 +212,12 @@ pub(crate) enum GardenCommand {
         /// Also open the one-time link in the default browser.
         #[arg(long)]
         open: bool,
-        /// Show attached images instead of the 3D garden; stripped copies are preferred.
+        /// Show the attached media gallery page instead of the 3D garden (the garden shows the
+        /// same media in its photo grove); stripped copies are preferred.
         #[arg(long)]
         media: bool,
-        /// With --media, also show originals that carry location or device metadata.
-        #[arg(long, requires = "media")]
+        /// Also show originals that carry location or device metadata.
+        #[arg(long)]
         originals: bool,
     },
     /// Serve graph MCP tools using graph-only private credentials.
@@ -559,12 +560,7 @@ pub(crate) fn execute_garden(command: GardenCommand) -> Result<()> {
             open,
             media,
             originals,
-        } => crate::explorer::run(
-            &absolute(&db)?,
-            usize::from(limit),
-            open,
-            media.then_some(originals),
-        ),
+        } => crate::explorer::run(&absolute(&db)?, usize::from(limit), open, media, originals),
         GardenCommand::Mcp { .. } => unreachable!("Graph MCP is dispatched asynchronously"),
     }
 }

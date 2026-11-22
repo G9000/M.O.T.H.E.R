@@ -8,7 +8,8 @@
 import * as THREE from 'three';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 import { COMMON } from '../lib/index.js';
-import { gardenRadius, pathAt, pathLength, START } from '../valley/world.js';
+import { gardenRadius, pathAt, pathLength, START, TARN, tarnDistance } from '../valley/world.js';
+import { createViewer, describe, placeholder } from './media.js';
 
 const TAU = Math.PI * 2;
 const KINDS = ['memory', 'decision', 'task', 'checkpoint', 'artifact', 'action'];
@@ -46,10 +47,10 @@ const INK = { outer: 0.05, inner: 0.08, core: 0.11, green: 0.17 };
  * The link from the terminal carries a single-use token after the "#". It is traded once for this tab's session
  * and taken out of the address bar; a reload uses the session again.
  */
+let session = null;
 export async function loadSnapshot() {
   try {
     const launch = location.hash.slice(1);
-    let session = null;
     try {
       session = sessionStorage.getItem('garden-session');
     } catch {
@@ -72,6 +73,26 @@ export async function loadSnapshot() {
     return res.ok ? await res.json() : null;
   } catch {
     return null;
+  }
+}
+
+/** The attached photos, recordings and videos of the same snapshot, each with its bytes: [{ item, blob }]. */
+export async function loadMedia() {
+  if (!session) return [];
+  try {
+    const auth = { headers: { Authorization: `Bearer ${session}` } };
+    const res = await fetch('./api/media', auth);
+    if (!res.ok) return [];
+    const { images = [] } = await res.json();
+    const out = await Promise.all(
+      images.map(async (item) => {
+        const r = await fetch(`./api/media/${item.sha256}`, auth).catch(() => null);
+        return r?.ok ? { item, blob: await r.blob() } : null;
+      }),
+    );
+    return out.filter(Boolean);
+  } catch {
+    return [];
   }
 }
 
@@ -531,7 +552,7 @@ const $ = (id) => document.getElementById(id);
  * @param field the valley's meadow: its uniforms are the light the flowers stand in
  * @param goTo (x, z, yaw, pitch) stands the walker somewhere, looking a way
  */
-export function createGarden({ snapshot, field, scene, canvas, goTo }) {
+export function createGarden({ snapshot, field, scene, canvas, goTo, media = [] }) {
   const records = readRecords(snapshot);
   const byId = new Map(records.map((r) => [r.id, r]));
   const refBy = (id) => records.filter((r) => r.refs.includes(id)).map((r) => r.id);
@@ -753,6 +774,157 @@ export function createGarden({ snapshot, field, scene, canvas, goTo }) {
     }
   }
 
+  // ---- the photo grove: the owner's photos, recordings and videos on easels round the pool at the path's end -----
+  const photos = media.map(({ item, blob }) => describe(item, blob));
+  const pictureVertex = /* glsl */ `
+    out vec2 vUv;
+    out vec3 vWorld;
+    out vec3 vN;
+    void main() {
+      vUv = uv;
+      vec4 w = modelMatrix * vec4(position, 1.0);
+      vWorld = w.xyz;
+      vN = normalize(mat3(modelMatrix) * normal);
+      gl_Position = projectionMatrix * viewMatrix * w;
+    }`;
+  const pictureFragment = /* glsl */ `
+    ${COMMON}
+    uniform sampler2D tPhoto;
+    uniform float uLook;
+    uniform float uDim;
+    in vec2 vUv;
+    in vec3 vWorld;
+    in vec3 vN;
+    layout(location = 0) out vec4 outC;
+    void main() {
+      vec3 c = texture(tPhoto, vUv).rgb;
+      vec3 N = normalize(vN);
+      vec3 V = normalize(uCamPos - vWorld);
+      if (dot(N, V) < 0.0) N = -N;
+      // lit as a painted board is: warm where the sun falls on it, never black in the shade
+      float lit = smoothstep(-0.2, 0.6, dot(N, uSunDir));
+      vec3 col = c * mix(uSkyColor * 0.55 + 0.45, uSunColor * 0.5 + 0.55, lit);
+      col *= 1.0 + 0.22 * uLook;
+      col = mix(col, vec3(dot(col, vec3(0.333))) * 0.8, uDim * 0.8);
+      outC = vec4(applyFog(col, vWorld), 0.14);
+    }`;
+  const easels = [];
+  if (photos.length) {
+    // rings round the pool, a little way back from its shore, the pictures turned to face the water
+    const SPACE = 3.6;
+    for (let ring = 0; easels.length < photos.length && ring < 8; ring++) {
+      const want = 1.55 + ring * 0.42;
+      const placed = [];
+      for (let i = 0; i < 720 && easels.length < photos.length; i++) {
+        const a = (i / 720) * TAU;
+        const dx = Math.cos(a);
+        const dz = Math.sin(a);
+        const unit = tarnDistance(TARN.at[0] + dx, TARN.at[1] + dz);
+        const r = want / Math.max(unit, 1e-4);
+        const x = TARN.at[0] + dx * r;
+        const z = TARN.at[1] + dz * r;
+        if ([...placed, ...easels].some((e) => Math.hypot(e.x - x, e.z - z) < SPACE)) continue;
+        const e = { x, z, y: field.heightAt(x, z), yaw: Math.atan2(TARN.at[0] - x, TARN.at[1] - z) };
+        placed.push(e);
+        easels.push(e);
+      }
+    }
+    photos.forEach((p, i) => Object.assign(p, easels[i], { tall: 1.75, created: p.at }));
+    // the easels: three legs, a ledge and a pale board, all in the garden's paint
+    const wood = [
+      part(TUBE, place(-0.42, 0.95, 0.12, 0.026, 1.95, 0.026, -0.12, -0.08), 'wood', INK.green, 0.35),
+      part(TUBE, place(0.42, 0.95, 0.12, 0.026, 1.95, 0.026, 0.12, -0.08), 'wood', INK.green, 0.35),
+      part(TUBE, place(0, 0.9, -0.32, 0.024, 1.85, 0.024, 0, 0.22), 'wood', INK.inner, 0.35),
+      part(TUBE, place(0, 0.66, 0.1, 0.035, 0.84, 0.035, Math.PI / 2), 'plank', INK.outer, 0.2),
+      part(new THREE.BoxGeometry(1.34, 1.34, 0.045), place(0, 1.34, 0.06, 1, 1, 1), 'pale', INK.inner, 0.15),
+      part(TUBE, place(0, 2.04, 0.08, 0.03, 0.2, 0.03, Math.PI / 2), 'wood', INK.outer, 0.2),
+    ];
+    const geometry = mergeGeometries(wood);
+    for (const g of wood) g.dispose();
+    geometry.setAttribute('aState', new THREE.InstancedBufferAttribute(new Float32Array(photos.length).fill(3), 1));
+    geometry.setAttribute('aMark', new THREE.InstancedBufferAttribute(new Float32Array(photos.length * 2).map((_, i) => (i % 2 ? 0 : 1)), 2));
+    const stands = new THREE.InstancedMesh(
+      geometry,
+      new THREE.ShaderMaterial({ glslVersion: THREE.GLSL3, side: THREE.DoubleSide, uniforms: { ...field.uniforms, uFocus: { value: -1 } }, vertexShader: vertex, fragmentShader: fragment }),
+      photos.length,
+    );
+    photos.forEach((p, i) => {
+      dummy.position.set(p.x, p.y - 0.03, p.z);
+      dummy.rotation.set(0, p.yaw, 0);
+      dummy.scale.setScalar(1);
+      dummy.updateMatrix();
+      stands.setMatrixAt(i, dummy.matrix);
+    });
+    stands.frustumCulled = false;
+    scene.add(stands);
+    // each picture on its board, as soon as its image is ready
+    const hang = (p, source, w, h, flip) => {
+      const texture = source instanceof HTMLCanvasElement ? new THREE.CanvasTexture(source) : new THREE.Texture(source);
+      texture.colorSpace = THREE.SRGBColorSpace;
+      texture.flipY = flip;
+      texture.anisotropy = 4;
+      texture.needsUpdate = true;
+      const k = 1.18 / Math.max(w, h);
+      const material = new THREE.ShaderMaterial({
+        glslVersion: THREE.GLSL3,
+        side: THREE.DoubleSide,
+        uniforms: { ...field.uniforms, tPhoto: { value: texture }, uLook: { value: 0 }, uDim: { value: 0 } },
+        vertexShader: pictureVertex,
+        fragmentShader: pictureFragment,
+      });
+      if (p.picture) {
+        p.picture.material.dispose();
+        p.picture.geometry.dispose();
+        scene.remove(p.picture);
+      }
+      const mesh = new THREE.Mesh(new THREE.PlaneGeometry(w * k, h * k), material);
+      mesh.position.set(p.x + Math.sin(p.yaw) * 0.09, p.y + 1.31, p.z + Math.cos(p.yaw) * 0.09);
+      mesh.rotation.set(0, p.yaw, 0);
+      mesh.frustumCulled = false;
+      scene.add(mesh);
+      p.picture = mesh;
+    };
+    for (const p of photos) {
+      const stand = placeholder(p, 256);
+      hang(p, stand, 1, 1, true);
+      if (p.kind === 'image' && p.blob) {
+        createImageBitmap(p.blob, { imageOrientation: 'flipY' })
+          .then((full) => {
+            const scale = Math.min(1, 1024 / Math.max(full.width, full.height));
+            if (scale === 1) return full;
+            full.close();
+            return createImageBitmap(p.blob, { imageOrientation: 'flipY', resizeWidth: Math.round(full.width * scale), resizeHeight: Math.round(full.height * scale), resizeQuality: 'high' });
+          })
+          .then((bitmap) => hang(p, bitmap, bitmap.width, bitmap.height, false))
+          .catch(() => {});
+      } else if (p.kind === 'video' && p.url) {
+        // the first moments of the film, once it can be seen
+        const film = document.createElement('video');
+        film.muted = true;
+        film.preload = 'auto';
+        film.src = p.url;
+        film.addEventListener('loadeddata', () => (film.currentTime = Math.min(1, (film.duration || 2) / 3)), { once: true });
+        film.addEventListener(
+          'seeked',
+          () => {
+            const c = document.createElement('canvas');
+            const k = 512 / Math.max(film.videoWidth, film.videoHeight, 1);
+            c.width = Math.max(1, Math.round(film.videoWidth * k));
+            c.height = Math.max(1, Math.round(film.videoHeight * k));
+            c.getContext('2d').drawImage(film, 0, 0, c.width, c.height);
+            hang(p, c, c.width, c.height, true);
+          },
+          { once: true },
+        );
+      }
+    }
+  }
+  const viewer = createViewer($('viewer'));
+  function openPhoto(p) {
+    document.pointerLockElement && document.exitPointerLock();
+    viewer.open(photos, photos.indexOf(p));
+  }
+
   // ---- what is said on the page ---------------------------------------------------------------------------------
   const n = records.length;
   $('count').textContent = !n ? 'Read-only · no records yet' : n < snapshot.total ? `Read-only · ${n} of ${snapshot.total} records` : `Read-only · ${n} ${n === 1 ? 'record' : 'records'}`;
@@ -810,14 +982,17 @@ export function createGarden({ snapshot, field, scene, canvas, goTo }) {
   function renderList() {
     const q = want.words.length;
     const groups = [['Pinned core', records.filter((r) => r.pinned)], ...KINDS.map((k) => [BED[k], records.filter((r) => r.kind === k && !r.pinned)])];
+    const pics = photos.filter((p) => !q || matches(p));
+    const grove = pics.length ? `<h3>Photos and recordings</h3>${pics.map((p) => `<button class="item" data-photo="${photos.indexOf(p)}"><span class="dot photo"></span>${esc(p.title)}</button>`).join('')}` : '';
     $('items').innerHTML =
+      grove +
       groups
         .map(([name, rs]) => {
           const items = rs.filter((r) => !q || matches(r));
           if (!items.length) return '';
           return `<h3>${name}</h3>${items.map((r) => `<button class="item ${RETIRED.has(r.status) ? 'off' : ''}" data-go="${esc(r.id)}">${dot(r)}${esc(r.title)}</button>`).join('')}`;
         })
-        .join('') || '<p class="none">Nothing matches.</p>';
+        .join('') || (grove ? '' : '<p class="none">Nothing matches.</p>');
   }
   function showList() {
     open = null;
@@ -829,6 +1004,14 @@ export function createGarden({ snapshot, field, scene, canvas, goTo }) {
   }
   /** Stands the walker a few steps short of a record's flower, looking at it, and opens its card. */
   function visit(r) {
+    if (r.photo) {
+      const x = r.x + Math.sin(r.yaw) * 2.6;
+      const z = r.z + Math.cos(r.yaw) * 2.6;
+      const drop = field.heightAt(x, z) + 1.68 - (r.y + 1.31);
+      goTo(x, z, Math.atan2(-(r.x - x), -(r.z - z)), -Math.atan2(drop, 2.6));
+      openPhoto(r);
+      return;
+    }
     let x;
     let z;
     if (r.s === null) {
@@ -853,13 +1036,16 @@ export function createGarden({ snapshot, field, scene, canvas, goTo }) {
   const unlock = () => document.pointerLockElement && document.exitPointerLock();
   function read() {
     if (!focus) return;
+    if (focus.photo) return openPhoto(focus);
     showCard(focus);
     unlock();
   }
   for (const panel of [card, list]) {
     panel.addEventListener('click', (e) => {
       const go = e.target.closest('[data-go]');
+      const pic = e.target.closest('[data-photo]');
       if (go) visit(byId.get(go.dataset.go));
+      else if (pic) visit(photos[Number(pic.dataset.photo)]);
       else if (e.target.closest('[data-close]')) closePanels();
     });
   }
@@ -867,13 +1053,14 @@ export function createGarden({ snapshot, field, scene, canvas, goTo }) {
   const want = { kinds: new Set([...KINDS, 'pinned']), harness: '', retired: false, cutoff: Infinity, words: [] };
   let found = [];
   let foundAt = -1;
-  const passes = (r) => want.kinds.has(r.pinned ? 'pinned' : r.kind) && (!want.harness || r.actors.includes(want.harness)) && !(want.retired && RETIRED.has(r.status));
-  const shown = (r) => r.pinned || r.created <= want.cutoff;
+  const passes = (r) => r.photo || want.kinds.has(r.pinned ? 'pinned' : r.kind) && (!want.harness || r.actors.includes(want.harness)) && !(want.retired && RETIRED.has(r.status));
+  const shown = (r) => r.photo || r.pinned || r.created <= want.cutoff;
   const matches = (r) => want.words.length > 0 && want.words.every((w) => r.text.includes(w));
   /** Says to every flower (and its companions) how grown and how marked it should be, and lights the beacons. */
   function apply() {
     want.words = search.value.trim().toLowerCase().split(/\s+/).filter(Boolean);
-    found = want.words.length ? records.filter((r) => matches(r) && passes(r) && shown(r)).sort((a, b) => b.created - a.created) : [];
+    found = want.words.length ? [...photos, ...records].filter((r) => matches(r) && passes(r) && shown(r)).sort((a, b) => (b.created || 0) - (a.created || 0)) : [];
+    for (const p of photos) if (p.picture) p.picture.material.uniforms.uDim.value = want.words.length && !matches(p) ? 1 : 0;
     foundAt = -1;
     for (const mesh of meshes) {
       const { owners, want: target } = mesh.userData;
@@ -1018,6 +1205,13 @@ export function createGarden({ snapshot, field, scene, canvas, goTo }) {
       ctx.arc(u, w, matches(r) ? 3 : 1.7, 0, TAU);
       ctx.fill();
     }
+    for (const p of photos) {
+      const [u, w] = toMap(p.x, p.z, size);
+      ctx.globalAlpha = !want.words.length || matches(p) ? 1 : 0.3;
+      ctx.fillStyle = '#ffffff';
+      const k = matches(p) ? 3.2 : 2.2;
+      ctx.fillRect(u - k, w - k, k * 2, k * 2);
+    }
     ctx.globalAlpha = 1;
     if (open) {
       const [u, w] = toMap(open.x, open.z, size);
@@ -1048,7 +1242,7 @@ export function createGarden({ snapshot, field, scene, canvas, goTo }) {
     const b = map.getBoundingClientRect();
     let best = null;
     let near = 8;
-    for (const r of records) {
+    for (const r of [...photos, ...records]) {
       if (!shown(r)) continue;
       const [u, w] = toMap(r.x, r.z, b.width);
       const d = Math.hypot(u - (e.clientX - b.left), w - (e.clientY - b.top));
@@ -1115,6 +1309,17 @@ export function createGarden({ snapshot, field, scene, canvas, goTo }) {
         best = r;
       }
     }
+    for (const p of photos) {
+      to.set(p.x - eye.x, p.y + 1.31 - eye.y, p.z - eye.z);
+      const d = to.length();
+      if (d > 14 || d < 0.3) continue;
+      const score = to.dot(gaze) / d - d * 0.0012 + 0.01;
+      if (score > bestScore) {
+        bestScore = score;
+        best = p;
+      }
+    }
+    for (const p of photos) if (p.picture) p.picture.material.uniforms.uLook.value += ((p === best ? 1 : 0) - p.picture.material.uniforms.uLook.value) * Math.min(1, dt * 8);
     // (with a card open, its flower stays the marked one)
     const marked = open ?? best;
     if (best !== focus) {
@@ -1124,7 +1329,7 @@ export function createGarden({ snapshot, field, scene, canvas, goTo }) {
     for (const mesh of meshes) mesh.material.uniforms.uFocus.value = marked && marked.mesh === mesh ? marked.index : -1;
     if (marked) {
       focusLabel.textContent = marked.title;
-      pin(focusLabel, v.set(marked.x, marked.y + marked.tall + 0.42, marked.z).clone(), camera);
+      pin(focusLabel, v.set(marked.x, marked.y + (marked.photo ? 2.25 : marked.tall + 0.42), marked.z).clone(), camera);
     } else focusLabel.hidden = true;
     for (const m of markLabels) {
       const far = Math.hypot(m.at.x - eye.x, m.at.z - eye.z);

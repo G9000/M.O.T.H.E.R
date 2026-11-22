@@ -74,6 +74,15 @@ struct Gallery {
     listing: Vec<u8>,
     images: BTreeMap<String, (&'static str, Vec<u8>)>,
 }
+impl Gallery {
+    /// No attached media: what the garden serves when the store holds none it can show.
+    fn empty() -> Self {
+        Self {
+            listing: br#"{"images":[],"withheld":0,"truncated":false,"readOnly":true}"#.to_vec(),
+            images: BTreeMap::new(),
+        }
+    }
+}
 
 fn secret() -> String {
     let mut bytes = [0; 32];
@@ -105,6 +114,8 @@ struct Site {
     session: Mutex<Option<String>>,
     snapshot: Vec<u8>,
     gallery: Option<Gallery>,
+    /// True when "/" is the media gallery page rather than the garden.
+    gallery_page: bool,
 }
 impl Site {
     fn new(port: u16, launch: String, snapshot: Vec<u8>) -> Self {
@@ -116,10 +127,19 @@ impl Site {
             session: Mutex::new(None),
             snapshot,
             gallery: None,
+            gallery_page: false,
         }
     }
+    /// The media gallery page on its own (`--media`).
     fn with_gallery(port: u16, launch: String, gallery: Gallery) -> Self {
         let mut site = Self::new(port, launch, gallery.listing.clone());
+        site.gallery = Some(gallery);
+        site.gallery_page = true;
+        site
+    }
+    /// The garden, with its attached media served under the same session for the photo grove.
+    fn with_media(port: u16, launch: String, snapshot: Vec<u8>, gallery: Gallery) -> Self {
+        let mut site = Self::new(port, launch, snapshot);
         site.gallery = Some(gallery);
         site
     }
@@ -136,8 +156,8 @@ impl Site {
             body: Cow::Borrowed(body),
         };
         Some(match (method, path) {
-            ("GET", "/") => page(HTML, GALLERY_HTML),
-            ("GET", "/gallery.js") => page(JS, GALLERY_JS),
+            ("GET", "/") if self.gallery_page => page(HTML, GALLERY_HTML),
+            ("GET", "/gallery.js") if self.gallery_page => page(JS, GALLERY_JS),
             ("GET", "/api/media") if self.signed_in(bearer) => Reply {
                 status: 200,
                 kind: JSON,
@@ -160,7 +180,9 @@ impl Site {
                     None => Reply::refuse(404, "Not found."),
                 }
             }
-            ("GET", _) if asset(path).is_some() => Reply::refuse(404, "Not found."),
+            ("GET", _) if self.gallery_page && asset(path).is_some() => {
+                Reply::refuse(404, "Not found.")
+            }
             _ => return None,
         })
     }
@@ -362,12 +384,20 @@ fn gallery(store: &GardenStore, originals: bool) -> Result<Gallery> {
 }
 
 /// Read one snapshot, release the database, then serve it on loopback until interrupted.
-pub(crate) fn run(db: &Path, limit: usize, open: bool, media: Option<bool>) -> Result<()> {
+/// `gallery_only` serves the media gallery page instead of the garden; `originals` also shows
+/// originals that carry embedded location or device data, in either.
+pub(crate) fn run(
+    db: &Path,
+    limit: usize,
+    open: bool,
+    gallery_only: bool,
+    originals: bool,
+) -> Result<()> {
     let listener = TcpListener::bind((Ipv4Addr::LOCALHOST, 0))?;
     let port = listener.local_addr()?.port();
     let launch = secret();
     let url = format!("http://127.0.0.1:{port}/#{launch}");
-    let site = if let Some(originals) = media {
+    let site = if gallery_only {
         let gallery = gallery(&GardenStore::open_active(db)?, originals)?;
         let listing: serde_json::Value = serde_json::from_slice(&gallery.listing)?;
         println!(
@@ -377,12 +407,27 @@ pub(crate) fn run(db: &Path, limit: usize, open: bool, media: Option<bool>) -> R
         );
         Arc::new(Site::with_gallery(port, launch, gallery))
     } else {
-        let view = GardenStore::open_active(db)?.v1_garden_view(limit)?;
+        let store = GardenStore::open_active(db)?;
+        let view = store.v1_garden_view(limit)?;
+        // The garden's photo grove: attached media, read in the same visit to the store.
+        let media = gallery(&store, originals).unwrap_or_else(|error| {
+            eprintln!("Attached media could not be read for this snapshot: {error}");
+            Gallery::empty()
+        });
+        drop(store);
+        let listing: serde_json::Value = serde_json::from_slice(&media.listing)?;
         println!(
             "{}",
-            json!({"url": url, "shown": view["shown"], "total": view["total"], "readOnly": true})
+            json!({"url": url, "shown": view["shown"], "total": view["total"],
+                "images": listing["images"].as_array().map_or(0, Vec::len),
+                "withheld": listing["withheld"], "readOnly": true})
         );
-        Arc::new(Site::new(port, launch, serde_json::to_vec(&view)?))
+        Arc::new(Site::with_media(
+            port,
+            launch,
+            serde_json::to_vec(&view)?,
+            media,
+        ))
     };
     std::io::stdout().flush()?;
     eprintln!(
@@ -549,6 +594,61 @@ mod tests {
             .status,
             403
         );
+    }
+
+    #[test]
+    fn the_garden_serves_its_media_under_the_same_single_session() {
+        let gallery = Gallery {
+            listing: b"{\"images\":[]}".to_vec(),
+            images: BTreeMap::from([("cd".repeat(32), ("image/jpeg", vec![7, 8]))]),
+        };
+        let site = Site::with_media(
+            4100,
+            "launch-token".into(),
+            b"{\"records\":[]}".to_vec(),
+            gallery,
+        );
+        let page = site.respond(&request("GET", "/", &[]));
+        assert_eq!(
+            page.body.as_ref(),
+            asset("/").unwrap().1,
+            "the garden, not the gallery page"
+        );
+        assert_eq!(
+            site.respond(&request("GET", "/assets/index.js", &[]))
+                .status,
+            200
+        );
+        assert_eq!(
+            site.respond(&request("GET", "/gallery.js", &[])).status,
+            404
+        );
+        let image = format!("/api/media/{}", "cd".repeat(32));
+        assert_eq!(site.respond(&request("GET", &image, &[])).status, 401);
+        assert_eq!(site.respond(&request("GET", "/api/media", &[])).status, 401);
+        let token = session(&site);
+        let bearer = format!("Authorization: Bearer {token}");
+        let reply = site.respond(&request("GET", &image, &[&bearer]));
+        assert_eq!(
+            (reply.status, reply.kind, reply.body.as_ref()),
+            (200, "image/jpeg", [7u8, 8].as_slice())
+        );
+        assert_eq!(
+            site.respond(&request("GET", "/api/garden", &[&bearer]))
+                .status,
+            200
+        );
+        assert_eq!(
+            site.respond(&request(
+                "GET",
+                &image,
+                &[&bearer, "Origin: https://elsewhere.example"]
+            ))
+            .status,
+            403
+        );
+        let empty: serde_json::Value = serde_json::from_slice(&Gallery::empty().listing).unwrap();
+        assert_eq!(empty["images"], json!([]));
     }
 
     #[test]

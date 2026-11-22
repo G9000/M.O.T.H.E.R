@@ -71,7 +71,9 @@ To browse attached images locally:
 mother garden explore --db "C:\private-data\garden.redb" --media
 ```
 
-The gallery uses the same single-use loopback link as the explorer, and it never calls out. It shows stripped derivatives where they exist and plays audio and video. Originals that carry embedded metadata are withheld unless you add `--originals`. A snapshot holds at most 256 MiB, and larger recordings are left out of it.
+The same media also stands in the [memory garden](garden-explorer.md)'s photo grove whenever you open `garden explore` without `--media`.
+
+The gallery uses the same single-use loopback link as the explorer, and it never calls out. Click an item to open it large, with its readings and provenance; the arrow keys step through them. It shows stripped derivatives where they exist and plays audio and video. Originals that carry embedded metadata are withheld unless you add `--originals`, which works for the garden too. A snapshot holds at most 256 MiB, and larger recordings are left out of it.
 
 ## Attaching a photo from a conversation
 

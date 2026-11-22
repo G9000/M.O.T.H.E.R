@@ -57,3 +57,59 @@ export function demoSnapshot(count = Number(new URLSearchParams(location.search)
   for (const r of records) if (rand() < 0.28) for (let i = 0; i < 1 + Math.floor(rand() * 3); i++) r.references.push(pick(records).id);
   return { workspaceId: 'demo', generatedAt: new Date(now).toISOString(), total: count + 12, shown: count, records };
 }
+
+/** Invented photos for the grove: little painted scenes, made here, with the fields the gallery listing carries. */
+export async function demoMedia(count = 14) {
+  const rand = seeded(7);
+  const skies = [
+    ['#7fb2e5', '#f8d9b0'],
+    ['#f1a77f', '#ffe3b5'],
+    ['#2f3d73', '#d17d8f'],
+    ['#9ad0e8', '#e8f3ea'],
+    ['#6f5aa8', '#f2b6c4'],
+  ];
+  const words = ['harbour at dusk', 'the old orchard', 'lanterns by the river', 'morning over the hill', 'a letter on the desk', 'snow on the ridge', 'the kitchen window'];
+  const out = [];
+  for (let i = 0; i < count; i++) {
+    const wide = rand() < 0.6;
+    const c = document.createElement('canvas');
+    c.width = wide ? 960 : 640;
+    c.height = wide ? 640 : 860;
+    const g = c.getContext('2d');
+    const [top, low] = skies[i % skies.length];
+    const sky = g.createLinearGradient(0, 0, 0, c.height);
+    sky.addColorStop(0, top);
+    sky.addColorStop(0.7, low);
+    g.fillStyle = sky;
+    g.fillRect(0, 0, c.width, c.height);
+    g.fillStyle = 'rgba(255, 245, 220, 0.9)';
+    g.beginPath();
+    g.arc(c.width * (0.2 + rand() * 0.6), c.height * (0.25 + rand() * 0.2), 30 + rand() * 40, 0, Math.PI * 2);
+    g.fill();
+    for (let h = 0; h < 3; h++) {
+      g.fillStyle = `hsl(${100 + rand() * 60}, ${30 + h * 10}%, ${45 - h * 10}%)`;
+      g.beginPath();
+      g.moveTo(0, c.height);
+      for (let x = 0; x <= c.width; x += 40) g.lineTo(x, c.height * (0.55 + h * 0.12) + Math.sin(x * 0.01 + h * 2 + i) * 30);
+      g.lineTo(c.width, c.height);
+      g.fill();
+    }
+    const blob = await new Promise((done) => c.toBlob(done, 'image/png'));
+    const title = words[i % words.length];
+    const at = new Date(Date.UTC(2026, 10, 20) - rand() * 300 * 86400000).toISOString();
+    out.push({
+      blob,
+      item: {
+        sha256: `demo${i.toString(16).padStart(60, '0')}`,
+        variant: i % 3 ? 'derivative' : 'original',
+        mediaType: 'image/png',
+        width: c.width,
+        height: c.height,
+        uses: 1 + (i % 3),
+        acquisitions: [{ originalFilename: `IMG_${2040 + i}.png`, acquiredAt: at, eventTime: { at, precision: 'day' }, origin: i % 4 ? 'captured' : 'screenshot' }],
+        interpretations: i % 2 ? [{ predicate: 'mother.media:caption', text: `Invented caption: ${title}`, attribution: { producer: { name: 'demo-model' } } }] : [],
+      },
+    });
+  }
+  return out;
+}
