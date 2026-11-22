@@ -20,7 +20,7 @@ export function createSounds(base = './audio/') {
   let begun = false;
   let lastStep = -1;
   let ambience = null;
-  let muted = false;
+  let muted = true;
 
   return {
     /** Fetches and decodes the recordings. Call while loading; resolves whether or not there is any sound to have. */
@@ -37,7 +37,7 @@ export function createSounds(base = './audio/') {
       try {
         ctx = new Ctx();
         master = ctx.createGain();
-        master.gain.value = 0.8;
+        master.gain.value = 0;
         master.connect(ctx.destination);
         await Promise.all(
           names.map(async (name) => {

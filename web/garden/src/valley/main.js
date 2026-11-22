@@ -485,7 +485,7 @@ await stage(0.48, 'Planting the garden');
 // the owner's photos and recordings, for the grove by the pool (invented ones under the dev server)
 const media = import.meta.env.DEV && snapshot.workspaceId === 'demo' ? await (await import('../garden/demo.js')).demoMedia() : await loadMedia();
 garden = createGarden({ snapshot, field, scene, canvas, goTo, media, chime: () => sounds.chime() });
-// sound on or off: the button by the search, or M; remembered in this browser only
+// sound on or off: the button by the search, or M; off until asked for, and remembered in this browser only
 {
   const button = $('soundBtn');
   const show = () => {
@@ -493,10 +493,11 @@ garden = createGarden({ snapshot, field, scene, canvas, goTo, media, chime: () =
     button.setAttribute('aria-label', sounds.muted ? 'Sound is off' : 'Sound is on');
     button.classList.toggle('off', sounds.muted);
   };
+  sounds.muted = true;
   try {
-    sounds.muted = localStorage.getItem('garden-sound') === 'off';
+    sounds.muted = localStorage.getItem('garden-sound') !== 'on';
   } catch {
-    // storage may be blocked: sound starts on
+    // storage may be blocked: the garden stays quiet
   }
   show();
   const flip = () => {

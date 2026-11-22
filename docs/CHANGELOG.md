@@ -2,7 +2,7 @@
 
 ## 22 November 2026
 
-- Described the memory garden's synthesized ambience and its sound button in the [explorer guide](garden-explorer.md): wind, leaves, birds, water and crickets made in the page in place of the recordings that can't be shipped, a chime when a record or photo opens, and `M` to turn sound off and on.
+- Described the memory garden's synthesized ambience and its sound button in the [explorer guide](garden-explorer.md): wind, leaves, birds, water and crickets made in the page in place of the recordings that can't be shipped, a chime when a record or photo opens, and `M` to turn sound on and off (off by default).
 
 - Added the memory garden's photo grove to the [explorer guide](garden-explorer.md): attached photos, recordings and videos on easels round the pool, a viewer for each, and search, map and list entries for them. Noted in the [visual memory guide](visual-memory.md) that the garden shows the same media, that `--originals` now works without `--media`, and that the restyled gallery opens items in a viewer. Checked with invented media only.
 
