@@ -9,7 +9,7 @@ use crate::{
 use chrono::SecondsFormat;
 use redb::{ReadableDatabase, ReadableTable};
 use serde_json::{Value, json};
-use std::collections::{BTreeMap, HashMap};
+use std::collections::{BTreeMap, HashMap, HashSet};
 
 /// Most records one explorer snapshot may carry.
 pub const MAX_VIEW_RECORDS: usize = 2_000;
@@ -63,63 +63,14 @@ impl GardenStore {
         records.sort_by_key(|r| !r["id"].as_str().is_some_and(|id| pins.contains_key(id)));
         records.truncate(limit);
 
-        // One pass over the immutable receipts gathers every shown record's revisions.
-        let mut snapshots: HashMap<String, BTreeMap<u64, (bool, Value)>> = records
-            .iter()
-            .filter_map(|r| Some((r["id"].as_str()?.to_owned(), BTreeMap::new())))
-            .collect();
-        for entry in tx
-            .open_table(OPERATIONS)
-            .map_err(unavailable)?
-            .iter()
-            .map_err(unavailable)?
-        {
-            let (_, bytes) = entry.map_err(unavailable)?;
-            let mut op: Value = serde_json::from_slice(bytes.value())?;
-            let current = op["generation"] == generation;
-            let record = op["receipt"]["record"].take();
-            let (Some(id), Some(revision)) = (record["id"].as_str(), record["revision"].as_u64())
-            else {
-                continue;
-            };
-            let Some(revisions) = snapshots.get_mut(id) else {
-                continue;
-            };
-            if revisions.get(&revision).is_none_or(|kept| !kept.0) {
-                revisions.insert(revision, (current, record));
-            }
-        }
+        let ids = records.iter().filter_map(|r| r["id"].as_str()).collect();
+        let mut snapshots = revisions(&tx, generation, ids)?;
 
         let shown = records
             .into_iter()
             .map(|r| {
                 let id = string(&r, "id")?;
-                let mut revisions = snapshots.remove(id).unwrap_or_default();
-                if let Some(revision) = r["revision"].as_u64() {
-                    revisions.entry(revision).or_insert((true, r.clone()));
-                }
-                let history = revisions
-                    .iter()
-                    .map(|(revision, (_, s))| {
-                        let previous = revision.checked_sub(1).and_then(|p| revisions.get(&p));
-                        let changed = previous.map_or(Value::Null, |(_, p)| {
-                            json!(
-                                CHANGED
-                                    .into_iter()
-                                    .filter(|k| p.get(*k) != s.get(*k))
-                                    .collect::<Vec<_>>()
-                            )
-                        });
-                        json!({
-                            "revision": revision,
-                            "actor": s["actor"],
-                            "at": s["updatedAt"],
-                            "changed": changed,
-                            "excerpt": excerpt(s["content"].as_str().unwrap_or_default(), 400),
-                        })
-                    })
-                    .collect::<Vec<_>>();
-                let omitted = history.len().saturating_sub(MAX_VIEW_REVISIONS);
+                let (history, omitted) = history(snapshots.remove(id), &r, MAX_VIEW_REVISIONS);
                 let content = r["content"].as_str().unwrap_or_default();
                 let mut out = json!({
                     "id": id,
@@ -133,9 +84,13 @@ impl GardenStore {
                     "createdAt": r["createdAt"],
                     "updatedAt": r["updatedAt"],
                     "references": r.get("references").cloned().unwrap_or_else(|| json!([])),
-                    "history": history[omitted..],
+                    "sources": r.get("sources").cloned().unwrap_or_else(|| json!([])),
+                    "history": history,
                     "historyOmitted": omitted,
                 });
+                if let Some(basis) = r.get("basis").filter(|v| v.is_string()) {
+                    out["basis"] = basis.clone();
+                }
                 if let Some(next) = r.get("nextStep").filter(|v| v.is_string()) {
                     out["nextStep"] = next.clone();
                 }
@@ -160,4 +115,77 @@ impl GardenStore {
             "records": shown,
         }))
     }
+}
+
+/// One record's kept revisions: revision -> (written in the current generation, record as written).
+pub(super) type Revisions = BTreeMap<u64, (bool, Value)>;
+
+/// Every kept revision of the named records, from one pass over the immutable receipts.
+pub(super) fn revisions(
+    tx: &redb::ReadTransaction,
+    generation: &str,
+    ids: HashSet<&str>,
+) -> Result<HashMap<String, Revisions>> {
+    let mut snapshots: HashMap<String, Revisions> = ids
+        .into_iter()
+        .map(|id| (id.to_owned(), BTreeMap::new()))
+        .collect();
+    for entry in tx
+        .open_table(OPERATIONS)
+        .map_err(unavailable)?
+        .iter()
+        .map_err(unavailable)?
+    {
+        let (_, bytes) = entry.map_err(unavailable)?;
+        let mut op: Value = serde_json::from_slice(bytes.value())?;
+        let current = op["generation"] == generation;
+        let record = op["receipt"]["record"].take();
+        let (Some(id), Some(revision)) = (record["id"].as_str(), record["revision"].as_u64())
+        else {
+            continue;
+        };
+        let Some(revisions) = snapshots.get_mut(id) else {
+            continue;
+        };
+        if revisions.get(&revision).is_none_or(|kept| !kept.0) {
+            revisions.insert(revision, (current, record));
+        }
+    }
+    Ok(snapshots)
+}
+
+/// The latest `max` revisions of `record`, oldest first, each with what changed and an excerpt,
+/// and how many earlier ones were left out.
+pub(super) fn history(
+    revisions: Option<Revisions>,
+    record: &Value,
+    max: usize,
+) -> (Vec<Value>, usize) {
+    let mut revisions = revisions.unwrap_or_default();
+    if let Some(revision) = record["revision"].as_u64() {
+        revisions.entry(revision).or_insert((true, record.clone()));
+    }
+    let history = revisions
+        .iter()
+        .map(|(revision, (_, s))| {
+            let previous = revision.checked_sub(1).and_then(|p| revisions.get(&p));
+            let changed = previous.map_or(Value::Null, |(_, p)| {
+                json!(
+                    CHANGED
+                        .into_iter()
+                        .filter(|k| p.get(*k) != s.get(*k))
+                        .collect::<Vec<_>>()
+                )
+            });
+            json!({
+                "revision": revision,
+                "actor": s["actor"],
+                "at": s["updatedAt"],
+                "changed": changed,
+                "excerpt": excerpt(s["content"].as_str().unwrap_or_default(), 400),
+            })
+        })
+        .collect::<Vec<_>>();
+    let omitted = history.len().saturating_sub(max);
+    (history[omitted..].to_vec(), omitted)
 }

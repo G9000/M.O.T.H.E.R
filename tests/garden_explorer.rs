@@ -366,6 +366,18 @@ fn live_explorer_observes_writes_through_the_same_running_owner() {
     let after = parse(get(&poll, session));
     assert_eq!(after["records"][0]["id"], written["record"]["id"]);
     assert_ne!(after["liveRevision"], initial["liveRevision"]);
+    let written_id = written["record"]["id"].as_str().unwrap();
+    let reading = parse(get(&format!("/api/garden/records/{written_id}"), session));
+    assert_eq!(reading["content"], "Written while the view is open.");
+    assert_eq!(reading["account"]["form"], "captured_paraphrase");
+    assert_eq!(
+        get(&format!("/api/garden/records/{}", Uuid::new_v4()), session).0,
+        404
+    );
+    assert_eq!(
+        get(&format!("/api/garden/records/{written_id}"), token).0,
+        401
+    );
     assert_eq!(after["liveMediaRevision"], initial["liveMediaRevision"]);
     assert_eq!(parse(get("/api/media", session))["images"], json!([]));
     assert_eq!(

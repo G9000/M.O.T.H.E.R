@@ -69,6 +69,9 @@ const GALLERY_HTML: &[u8] = include_bytes!("../assets/media-gallery/index.html")
 const GALLERY_JS: &[u8] = include_bytes!("../assets/media-gallery/gallery.js");
 /// Total image bytes one gallery snapshot may hold in memory.
 const GALLERY_BYTES: u64 = 256 * 1024 * 1024;
+/// Total bytes of full record readings an offline snapshot keeps after releasing the database.
+const READING_BYTES: usize = 64 * 1024 * 1024;
+const READINGS: &str = "/api/garden/records/";
 
 /// One owner snapshot of attached images, loaded before the database is released.
 #[derive(Debug, Default)]
@@ -96,6 +99,10 @@ impl LiveView {
         self.store.upgrade().ok_or_else(|| {
             Error::domain("STORE_UNAVAILABLE", "The Garden owner service has stopped.")
         })
+    }
+
+    fn reading(&self, id: &str) -> Result<Vec<u8>> {
+        Ok(serde_json::to_vec(&self.store()?.v1_garden_reader(id)?)?)
     }
 
     fn snapshot(&self, since: Option<&str>) -> Result<Vec<u8>> {
@@ -147,6 +154,8 @@ struct Site {
     launch: Mutex<Option<String>>,
     session: Mutex<Option<String>>,
     snapshot: Vec<u8>,
+    /// Offline only: each shown record's full reading, taken with the snapshot.
+    readings: BTreeMap<String, Vec<u8>>,
     gallery: Mutex<Option<Gallery>>,
     live: Option<LiveView>,
     /// True when "/" is the media gallery page rather than the garden.
@@ -161,6 +170,7 @@ impl Site {
             launch: Mutex::new(Some(launch)),
             session: Mutex::new(None),
             snapshot,
+            readings: BTreeMap::new(),
             gallery: Mutex::new(None),
             live: None,
             gallery_page: false,
@@ -310,6 +320,26 @@ impl Site {
                     status: 200,
                     kind: JSON,
                     body: Cow::Owned(snapshot),
+                }
+            }
+            ("GET", path) if path.starts_with(READINGS) => {
+                if !self.signed_in(bearer) {
+                    return Reply::refuse(401, "Open the garden from the link in your terminal.");
+                }
+                let id = &path[READINGS.len()..];
+                let reading = match &self.live {
+                    None => self.readings.get(id).cloned().ok_or(None),
+                    Some(live) => live.reading(id).map_err(|e| Some(e.code() == "NOT_FOUND")),
+                };
+                match reading {
+                    Ok(body) => Reply {
+                        status: 200,
+                        kind: JSON,
+                        body: Cow::Owned(body),
+                    },
+                    // Unknown, malformed and outside-the-snapshot IDs all read alike.
+                    Err(None | Some(true)) => Reply::refuse(404, "Not found."),
+                    Err(Some(false)) => Reply::refuse(503, "The live Garden is unavailable."),
                 }
             }
             ("GET" | "POST", _) => Reply::refuse(404, "Not found."),
@@ -466,6 +496,7 @@ pub(crate) fn run(
     } else {
         let store = GardenStore::open_active(db)?;
         let view = store.v1_garden_view(limit)?;
+        let readings = offline_readings(&store, &view)?;
         // The garden's photo grove: attached media, read in the same visit to the store.
         let media = gallery(&store, originals).unwrap_or_else(|error| {
             eprintln!("Attached media could not be read for this snapshot: {error}");
@@ -479,12 +510,9 @@ pub(crate) fn run(
                 "images": listing["images"].as_array().map_or(0, Vec::len),
                 "withheld": listing["withheld"], "readOnly": true})
         );
-        Arc::new(Site::with_media(
-            port,
-            launch,
-            serde_json::to_vec(&view)?,
-            media,
-        ))
+        let mut site = Site::with_media(port, launch, serde_json::to_vec(&view)?, media);
+        site.readings = readings;
+        Arc::new(site)
     };
     std::io::stdout().flush()?;
     eprintln!(
@@ -494,6 +522,34 @@ pub(crate) fn run(
         open_browser(&url);
     }
     serve_site(listener, site)
+}
+
+/// Full readings of the snapshot's records, kept so the reader works after the database is
+/// released. Past the byte budget, later records keep only their snapshot preview.
+fn offline_readings(
+    store: &GardenStore,
+    view: &serde_json::Value,
+) -> Result<BTreeMap<String, Vec<u8>>> {
+    let ids: Vec<&str> = view["records"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .filter_map(|r| r["id"].as_str())
+        .collect();
+    let mut kept = BTreeMap::new();
+    let mut total = 0;
+    for reading in store.v1_garden_readers(&ids)? {
+        let bytes = serde_json::to_vec(&reading)?;
+        total += bytes.len();
+        if total > READING_BYTES {
+            eprintln!("Some long records show only their beginning in this offline snapshot.");
+            break;
+        }
+        if let Some(id) = reading["recordId"].as_str() {
+            kept.insert(id.to_owned(), bytes);
+        }
+    }
+    Ok(kept)
 }
 
 #[derive(Serialize, Deserialize)]
