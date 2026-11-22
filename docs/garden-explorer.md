@@ -14,7 +14,7 @@ Each record of the native v1 view is one tall flower beside the path, drawn in f
 | Action | pink rose |
 | Pinned (any kind) | a stone lantern in the ring round the start, not on the path |
 
-A flower stands taller the more often its record has been revised. Retracted, superseded and cancelled records are grey and low; tasks in progress or blocked, and actions pending or unknown, slowly pulse. A wooden signpost beside the path marks where each month begins, and the month you are walking through is shown at the bottom left. The path is as long as the records need, so the hill grows with the garden. The garden opens in the gold light of a summer evening and stays there; the lanterns' windows glow, and fireflies come out over the flowers as the sun goes down.
+Each record's flower stands in a small clump of smaller blooms of its own kind, away from the path, so the path runs between full borders. A flower stands taller the more often its record has been revised. Retracted, superseded and cancelled records are grey and low; tasks in progress or blocked, and actions pending or unknown, slowly pulse. A wooden signpost beside the path marks where each month begins, and the month you are walking through is shown at the bottom left. The path is as long as the records need, so the hill grows with the garden. The garden opens in the gold light of a summer evening and stays there; the lanterns' windows glow, and fireflies come out over the flowers as the sun goes down.
 
 ## Open it
 
@@ -34,7 +34,13 @@ Use the [Living Memory Graph](living-memory-graph.md) to follow directed relatio
 
 - Click the picture to walk: the mouse looks, `W A S D` move, Shift runs, Space jumps. Esc gives the mouse back.
 - Look at a flower within a few steps and press `E`, or click, to read its record: text, status, handoff, next step, linked records and recent revisions. Linked records are buttons that take you to them.
-- `L` opens the list of every record, grouped by kind, with a search box; choosing one stands you on the path beside its flower. The list works from the keyboard and needs no walking.
+- `/` (or the small lens at the top right) opens the search box. Every word must appear in a record's title, text, status or kind. Found flowers are lit and a soft light hangs over each, the rest fade and shrink back into the meadow, and Enter stands you beside each found flower in turn (Shift+Enter goes back). Esc clears the search.
+- A record's card shows the records it names and those that name it; threads of light run from its flower to theirs while the card is open.
+- The kinds are a column of coloured dots at the left edge; hover it to open the legend and filter: click a kind to set it aside or bring it back. The harness menu keeps only records that harness wrote or revised, and "Set aside retired records" does what it says. Set-aside flowers stay where they are, faded.
+- The timeline at the bottom (faint until you hover it) shows the garden as it stood on any day: later flowers are not yet grown. ▶ replays the garden growing to today.
+- The map at the bottom right (larger while you hover it) shows the hill from above: the path, every record as a dot and where you stand, facing which way. Click a dot to walk to that record.
+- `L` opens the list of every record, grouped by kind; it follows the search. Choosing one stands you on the path beside its flower. The list works from the keyboard and needs no walking.
+- The panels hide while you walk with the mouse captured; Esc brings them back. The record count appears when you hover the title.
 - `T` and `1`–`4` change the time of day, `0` lets the evening pass on to sunset, and `,` and `.` nudge the hour; `P` turns the paint finish off and on.
 
 Nothing can be changed from the garden. Pinning, handoffs and review stay with the existing owner tools.
@@ -51,11 +57,14 @@ Nothing can be changed from the garden. Pinning, handoffs and review stay with t
 - The page needs WebGL 2 and a capable graphics card. It has been run on one machine only (an RTX 5090); its frame rate with the garden planted was not measured, and integrated graphics, phones, Safari and Firefox are untested. Adding `?quality=low` or `?quality=medium` to the address before the `#` draws less.
 - The page is about 2.6 MB and takes several seconds to paint the land and sky on first load.
 - Checked with a synthetic garden of 500 records. The record list, the card and standing beside a chosen flower were exercised; walking with the mouse captured was not driven by the automated check.
-- Records are ordered by when they were first created. Not carried over from the first version: the time slider, the harness filter and threads drawn between linked flowers. "Similar in meaning" links are still not drawn.
+- Records are ordered by when they were first created. Threads are drawn for the open record only, not for the whole garden at once. "Similar in meaning" links are still not drawn.
 - Long records show their first 4,000 characters, and each record its latest 20 revisions.
 - Sound is footsteps only (see `web/garden/MISSING_ASSETS.md`).
 
 ## Trying it without real data
+
+To work on the page itself, run `npm run dev` in `web/garden` and open the address it prints: in the development server only, the page fills itself with invented records (`?records=<n>` changes how many). The production build never contains them.
+
 
 ```
 MOTHER_EXPLORER_DEMO=<new file> cargo test --locked --test garden_explorer demo -- --ignored

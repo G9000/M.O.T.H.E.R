@@ -71,7 +71,7 @@ const offThread = (message, here) =>
     }
   });
 // The owner's records come first: the path through the garden is as long as they need, and the land is made round it.
-const snapshot = await loadSnapshot();
+const snapshot = (await loadSnapshot()) ?? (import.meta.env.DEV ? (await import('../garden/demo.js')).demoSnapshot() : null);
 if (!snapshot) {
   $('loading').firstElementChild.textContent = 'This garden link has already been used, or the garden was closed. Run the command again for a new link.';
   throw new Error('no snapshot');
