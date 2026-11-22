@@ -8,7 +8,7 @@
 import * as THREE from 'three';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 import { COMMON } from '../lib/index.js';
-import { pathAt, pathLength, START } from '../valley/world.js';
+import { gardenRadius, pathAt, pathLength, START } from '../valley/world.js';
 
 const TAU = Math.PI * 2;
 const KINDS = ['memory', 'decision', 'task', 'checkpoint', 'artifact', 'action'];
@@ -96,6 +96,11 @@ function readRecords(snapshot) {
         hiddenRefs: (r.references ?? []).length - refs.length,
         assigned: r.assignment ? [r.assignment.assignee, r.assignment.assignedBy, r.assignment.assignedAt] : null,
         next: r.nextStep ?? '',
+        actors: [...new Set([r.actor, ...r.history.map((e) => e.actor)].filter(Boolean))],
+        text: `${r.title}
+${r.content}
+${r.status}
+${r.kind}`.toLowerCase(),
         h: r.history.map((e) => [e.revision, e.actor, e.at, e.changed, e.revision !== r.revision && (!e.changed || e.changed.includes('content')) ? e.excerpt : '']),
       };
     });
@@ -309,7 +314,9 @@ in vec3 aLit;
 in vec3 aShade;
 in float aInk;
 in float aState;
+in vec2 aMark;
 out vec3 vWorld;
+out float vMark;
 out vec3 vN;
 out vec3 vLit;
 out vec3 vShade;
@@ -320,7 +327,9 @@ void main() {
   vFocus = abs(float(gl_InstanceID) - uFocus) < 0.5 ? 1.0 : 0.0;
   mat4 m = modelMatrix * instanceMatrix;
   // (the flower you are looking at stands a little taller)
-  vec4 w = m * vec4(position * (1.0 + 0.1 * vFocus), 1.0);
+  // (grown: 0 before its time on the timeline, 1 once it is there; marked: 1 found, -1 set aside by a filter)
+  vMark = aMark.y;
+  vec4 w = m * vec4(position * aMark.x * (1.0 + 0.1 * vFocus + 0.08 * max(aMark.y, 0.0) - 0.3 * max(-aMark.y, 0.0)), 1.0);
   vec3 foot = m[3].xyz;
   // a slow nod in the wind, more at the head than the foot
   float up = max(w.y - foot.y, 0.0);
@@ -348,6 +357,7 @@ in vec3 vShade;
 in float vInk;
 in float vState;
 in float vFocus;
+in float vMark;
 layout(location = 0) out vec4 outC;
 void main() {
   vec3 N = normalize(vN);
@@ -376,6 +386,10 @@ void main() {
   // unsettled work breathes
   if (vState > 1.5 && vState < 2.5) col *= 1.0 + 0.22 * sin(uTime * 2.6 + vWorld.x);
   col *= 1.0 + 0.3 * vFocus;
+  // found by a search: lit warmly from within; set aside by a filter: faded into the meadow
+  col = mix(col, col * 1.25 + litPaint * 0.18, max(vMark, 0.0));
+  float aside = max(-vMark, 0.0);
+  col = mix(col, mix(vec3(dot(col, vec3(0.333))), col, 0.25) * 0.82, aside * 0.85);
   outC = vec4(applyFog(col, vWorld), vInk);
 }
 `;
@@ -394,7 +408,11 @@ void main() {
   vec3 p = aHome.xyz;
   float seed = aHome.w;
   float dusk = 1.0 - smoothstep(0.04, 0.32, uSunDir.y);
-  if (aInfo.y > 0.5) {
+  if (aInfo.y > 1.5) {
+    // a search's beacon: a soft light hanging over the flower that was found, rising and falling slowly
+    p.y += sin(uTime * 1.6 + seed * 6.0) * 0.12;
+    vBright = 0.85 + 0.15 * sin(uTime * 3.0 + seed * 9.0);
+  } else if (aInfo.y > 0.5) {
     // a firefly wanders round its home, blinking slowly, and only once the light goes
     float t = uTime * (0.25 + 0.2 * fract(seed * 7.3)) + seed * 40.0;
     p += vec3(sin(t) * 0.9 + sin(t * 2.3) * 0.25, sin(t * 1.7) * 0.35, cos(t * 0.8) * 0.9);
@@ -411,7 +429,7 @@ void main() {
   float size = vBright < 0.01 ? 0.0 : aInfo.x;
   vec3 c = (modelMatrix * vec4(p, 1.0)).xyz;
   // (brought a little towards the eye, so the stone round a lantern's window does not hide the glow's heart)
-  c += normalize(cameraPosition - c) * (aInfo.y > 0.5 ? 0.0 : 0.35);
+  c += normalize(cameraPosition - c) * (aInfo.y > 0.5 && aInfo.y < 1.5 ? 0.0 : 0.35);
   vec3 w = c + (right * position.x + up * position.y) * size;
   gl_Position = projectionMatrix * viewMatrix * vec4(w, 1.0);
 }
@@ -427,7 +445,7 @@ void main() {
   if (r > 1.0) discard;
   float core = exp(-r * 18.0);
   float halo = exp(-r * 3.0) * (1.0 - r);
-  vec3 warm = vKind > 0.5 ? vec3(0.8, 1.0, 0.4) : vec3(1.0, 0.66, 0.3);
+  vec3 warm = vKind > 1.5 ? vec3(1.0, 0.86, 0.6) : vKind > 0.5 ? vec3(0.8, 1.0, 0.4) : vec3(1.0, 0.66, 0.3);
   outC = vec4(warm * (core * 4.0 + halo * 1.1) * vBright, 0.0);
 }
 `;
@@ -466,6 +484,9 @@ function layOut(records, heightAt) {
     // (across the path is square to the way it runs)
     r.x = p.x + p.tz * off;
     r.z = p.z - p.tx * off;
+    // (which way is away from the path, and along it: where the record's companions grow)
+    r.away = [p.tz * side, -p.tx * side];
+    r.along = [p.tx, p.tz];
     const name = month(r.created);
     if (name !== last) {
       marks.push({ s: Math.max(2, r.s - STEP / 2), text: i ? name : `Today · ${name}`, post: true });
@@ -474,6 +495,19 @@ function layOut(records, heightAt) {
   });
   if (line.length) marks.push({ s: Math.min(pathLength(), HEAD + line.length * STEP + 2), text: 'The first record', post: true });
   for (const r of records) r.y = heightAt(r.x, r.z);
+  // each flower on the path stands in a little clump of its own kind: smaller blooms round it, away from the path
+  const companions = [];
+  for (const r of line) {
+    const n = 3 + Math.floor(((r.s * 13.7) % 1) * 4);
+    for (let k = 0; k < n; k++) {
+      const h = Math.sin((r.s + k) * 91.7) * 0.5 + 0.5;
+      const out = 0.35 + 0.5 * ((k * 0.618 + h) % 1);
+      const side = (k % 2 ? 1 : -1) * (0.28 + 0.3 * h);
+      const x = r.x + r.away[0] * out + r.along[0] * side;
+      const z = r.z + r.away[1] * out + r.along[1] * side;
+      companions.push({ of: r, x, z, y: heightAt(x, z), small: 0.32 + 0.22 * ((h * 7.1) % 1), turn: h * TAU });
+    }
+  }
   for (const m of marks) {
     const p = pathAt(m.s);
     // the signpost stands on the path's outer side, clear of the flowers
@@ -481,7 +515,7 @@ function layOut(records, heightAt) {
     const pz = p.z + p.oz * 3.6;
     Object.assign(m, { x: p.x, z: p.z, y: heightAt(p.x, p.z), px, pz, py: heightAt(px, pz), ox: p.ox, oz: p.oz });
   }
-  return { marks, line };
+  return { marks, line, companions };
 }
 
 // ---- the page -------------------------------------------------------------------------------------------------
@@ -501,7 +535,7 @@ export function createGarden({ snapshot, field, scene, canvas, goTo }) {
   const records = readRecords(snapshot);
   const byId = new Map(records.map((r) => [r.id, r]));
   const refBy = (id) => records.filter((r) => r.refs.includes(id)).map((r) => r.id);
-  const { marks, line } = layOut(records, field.heightAt);
+  const { marks, line, companions } = layOut(records, field.heightAt);
 
   // one mesh per kind of flower, however many records there are
   const meshes = [];
@@ -509,8 +543,9 @@ export function createGarden({ snapshot, field, scene, canvas, goTo }) {
   for (const kind of [...KINDS, 'pinned']) {
     const items = records.filter((r) => (kind === 'pinned' ? r.pinned : r.kind === kind && !r.pinned));
     if (!items.length) continue;
+    const buds = kind === 'pinned' ? [] : companions.filter((c) => c.of.kind === kind);
     const geometry = flowerGeometry(kind);
-    const state = new Float32Array(items.length);
+    const state = new Float32Array(items.length + buds.length);
     const material = new THREE.ShaderMaterial({
       glslVersion: THREE.GLSL3,
       side: THREE.DoubleSide,
@@ -518,7 +553,7 @@ export function createGarden({ snapshot, field, scene, canvas, goTo }) {
       vertexShader: vertex,
       fragmentShader: fragment,
     });
-    const mesh = new THREE.InstancedMesh(geometry, material, items.length);
+    const mesh = new THREE.InstancedMesh(geometry, material, items.length + buds.length);
     items.forEach((r, i) => {
       const retired = RETIRED.has(r.status);
       // taller the more often it has been revised; a retired record has sunk back
@@ -532,7 +567,23 @@ export function createGarden({ snapshot, field, scene, canvas, goTo }) {
       dummy.updateMatrix();
       mesh.setMatrixAt(i, dummy.matrix);
     });
+    buds.forEach((c, j) => {
+      const i = items.length + j;
+      state[i] = state[c.of.index];
+      dummy.position.set(c.x, c.y - 0.02, c.z);
+      dummy.rotation.set(0, c.turn, 0);
+      dummy.scale.setScalar(c.of.tall * c.small);
+      dummy.updateMatrix();
+      mesh.setMatrixAt(i, dummy.matrix);
+    });
     geometry.setAttribute('aState', new THREE.InstancedBufferAttribute(state, 1));
+    // grown and marked, eased toward where the filters, the search and the timeline want them
+    const mark = new Float32Array((items.length + buds.length) * 2);
+    for (let i = 0; i < items.length + buds.length; i++) mark[i * 2] = 1;
+    const markAttr = new THREE.InstancedBufferAttribute(mark, 2);
+    markAttr.setUsage(THREE.DynamicDrawUsage);
+    geometry.setAttribute('aMark', markAttr);
+    mesh.userData = { owners: [...items, ...buds.map((c) => c.of)], mark, want: mark.slice(), markAttr };
     mesh.frustumCulled = false;
     scene.add(mesh);
     meshes.push(mesh);
@@ -550,6 +601,7 @@ export function createGarden({ snapshot, field, scene, canvas, goTo }) {
     });
     const geometry = signGeometry();
     geometry.setAttribute('aState', new THREE.InstancedBufferAttribute(new Float32Array(signs.length).fill(3), 1));
+    geometry.setAttribute('aMark', new THREE.InstancedBufferAttribute(new Float32Array(signs.length * 2).map((_, i) => (i % 2 ? 0 : 1)), 2));
     const mesh = new THREE.InstancedMesh(geometry, material, signs.length);
     signs.forEach((m, i) => {
       dummy.position.set(m.px, m.py - 0.05, m.pz);
@@ -614,6 +666,93 @@ export function createGarden({ snapshot, field, scene, canvas, goTo }) {
     }
   }
 
+  // beacons over what a search finds: the lanterns' light, hung over each found flower
+  const beacons = (() => {
+    const max = records.length || 1;
+    const g = new THREE.InstancedBufferGeometry();
+    g.setAttribute('position', new THREE.Float32BufferAttribute([-1, -1, 0, 1, -1, 0, 1, 1, 0, -1, 1, 0], 3));
+    g.setIndex([0, 1, 2, 0, 2, 3]);
+    const home = new THREE.InstancedBufferAttribute(new Float32Array(max * 4), 4);
+    const info = new THREE.InstancedBufferAttribute(new Float32Array(max * 2), 2);
+    g.setAttribute('aHome', home);
+    g.setAttribute('aInfo', info);
+    g.instanceCount = 0;
+    const mesh = new THREE.Mesh(g, new THREE.ShaderMaterial({ glslVersion: THREE.GLSL3, uniforms: glow, vertexShader: glowVertex, fragmentShader: glowFragment, transparent: true,
+    depthWrite: false,
+    // light adds to the picture, and leaves its alpha (the paint finish and the ink read it) alone
+    blending: THREE.CustomBlending,
+    blendEquation: THREE.AddEquation,
+    blendSrc: THREE.OneFactor,
+    blendDst: THREE.OneFactor,
+    blendSrcAlpha: THREE.ZeroFactor,
+    blendDstAlpha: THREE.OneFactor, }));
+    mesh.frustumCulled = false;
+    mesh.renderOrder = 7;
+    scene.add(mesh);
+    return (found) => {
+      found.forEach((r, i) => {
+        home.array.set([r.x, r.y + r.tall * 1.25 + 0.35, r.z, (i * 0.618) % 1], i * 4);
+        info.array.set([0.6, 2], i * 2);
+      });
+      g.instanceCount = found.length;
+      home.needsUpdate = info.needsUpdate = true;
+    };
+  })();
+
+  // threads of light from the open record to the records it names and the records that name it
+  const threadMaterial = new THREE.ShaderMaterial({
+    glslVersion: THREE.GLSL3,
+    uniforms: { uTime: field.uniforms.uTime },
+    vertexShader: /* glsl */ `
+      in float aT;
+      out float vT;
+      void main() { vT = aT; gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0); }`,
+    fragmentShader: /* glsl */ `
+      precision highp float;
+      uniform float uTime;
+      in float vT;
+      layout(location = 0) out vec4 outC;
+      void main() {
+        // a bead of light running along the thread, from the record to what it names
+        float bead = pow(0.5 + 0.5 * sin((vT * 5.0 - uTime * 0.9) * 6.2832), 8.0);
+        float ends = smoothstep(0.0, 0.05, vT) * smoothstep(1.0, 0.95, vT);
+        outC = vec4(vec3(1.0, 0.82, 0.5) * (0.35 + bead * 1.4) * ends, 0.0);
+      }`,
+    transparent: true,
+    depthWrite: false,
+    // light adds to the picture, and leaves its alpha (the paint finish and the ink read it) alone
+    blending: THREE.CustomBlending,
+    blendEquation: THREE.AddEquation,
+    blendSrc: THREE.OneFactor,
+    blendDst: THREE.OneFactor,
+    blendSrcAlpha: THREE.ZeroFactor,
+    blendDstAlpha: THREE.OneFactor,
+    side: THREE.DoubleSide,
+  });
+  const threads = new THREE.Group();
+  threads.renderOrder = 7;
+  scene.add(threads);
+  function showThreads(r) {
+    for (const m of threads.children) m.geometry.dispose();
+    threads.clear();
+    if (!r) return;
+    const top = (o) => new THREE.Vector3(o.x, o.y + o.tall * 1.02, o.z);
+    for (const [from, to] of [...r.refs.map((id) => [r, byId.get(id)]), ...refBy(r.id).map((id) => [byId.get(id), r])]) {
+      const a = top(from);
+      const b = top(to);
+      const mid = a.clone().add(b).multiplyScalar(0.5);
+      mid.y += 1.5 + a.distanceTo(b) * 0.18;
+      const g = new THREE.TubeGeometry(new THREE.QuadraticBezierCurve3(a, mid, b), 64, 0.016, 5, false);
+      const t = new Float32Array(g.attributes.position.count);
+      for (let i = 0; i < t.length; i++) t[i] = Math.floor(i / 6) / 64;
+      g.setAttribute('aT', new THREE.BufferAttribute(t, 1));
+      const m = new THREE.Mesh(g, threadMaterial);
+      m.frustumCulled = false;
+      m.renderOrder = 7;
+      threads.add(m);
+    }
+  }
+
   // ---- what is said on the page ---------------------------------------------------------------------------------
   const n = records.length;
   $('count').textContent = !n ? 'Read-only · no records yet' : n < snapshot.total ? `Read-only · ${n} of ${snapshot.total} records` : `Read-only · ${n} ${n === 1 ? 'record' : 'records'}`;
@@ -641,6 +780,7 @@ export function createGarden({ snapshot, field, scene, canvas, goTo }) {
 
   function showCard(r) {
     open = r;
+    showThreads(r);
     list.hidden = true;
     const warn = r.status === 'blocked' || r.status === 'unknown' || r.status === 'pending';
     const last = r.h[r.h.length - 1];
@@ -664,15 +804,16 @@ export function createGarden({ snapshot, field, scene, canvas, goTo }) {
   }
   function closePanels() {
     open = null;
+    showThreads(null);
     card.hidden = list.hidden = true;
   }
   function renderList() {
-    const q = search.value.trim().toLowerCase();
+    const q = want.words.length;
     const groups = [['Pinned core', records.filter((r) => r.pinned)], ...KINDS.map((k) => [BED[k], records.filter((r) => r.kind === k && !r.pinned)])];
     $('items').innerHTML =
       groups
         .map(([name, rs]) => {
-          const items = rs.filter((r) => !q || `${r.title} ${r.content}`.toLowerCase().includes(q));
+          const items = rs.filter((r) => !q || matches(r));
           if (!items.length) return '';
           return `<h3>${name}</h3>${items.map((r) => `<button class="item ${RETIRED.has(r.status) ? 'off' : ''}" data-go="${esc(r.id)}">${dot(r)}${esc(r.title)}</button>`).join('')}`;
         })
@@ -680,6 +821,7 @@ export function createGarden({ snapshot, field, scene, canvas, goTo }) {
   }
   function showList() {
     open = null;
+    showThreads(null);
     card.hidden = true;
     renderList();
     list.hidden = false;
@@ -721,19 +863,211 @@ export function createGarden({ snapshot, field, scene, canvas, goTo }) {
       else if (e.target.closest('[data-close]')) closePanels();
     });
   }
-  search.addEventListener('input', renderList);
+  // ---- finding things: search, the beds' filter, the timeline and the map ----------------------------------------
+  const want = { kinds: new Set([...KINDS, 'pinned']), harness: '', retired: false, cutoff: Infinity, words: [] };
+  let found = [];
+  let foundAt = -1;
+  const passes = (r) => want.kinds.has(r.pinned ? 'pinned' : r.kind) && (!want.harness || r.actors.includes(want.harness)) && !(want.retired && RETIRED.has(r.status));
+  const shown = (r) => r.pinned || r.created <= want.cutoff;
+  const matches = (r) => want.words.length > 0 && want.words.every((w) => r.text.includes(w));
+  /** Says to every flower (and its companions) how grown and how marked it should be, and lights the beacons. */
+  function apply() {
+    want.words = search.value.trim().toLowerCase().split(/\s+/).filter(Boolean);
+    found = want.words.length ? records.filter((r) => matches(r) && passes(r) && shown(r)).sort((a, b) => b.created - a.created) : [];
+    foundAt = -1;
+    for (const mesh of meshes) {
+      const { owners, want: target } = mesh.userData;
+      owners.forEach((r, i) => {
+        target[i * 2] = shown(r) ? 1 : 0;
+        target[i * 2 + 1] = !passes(r) || (want.words.length && !matches(r)) ? -1 : matches(r) ? 1 : 0;
+      });
+    }
+    beacons(found);
+    const note = $('found');
+    note.hidden = !want.words.length;
+    note.textContent = found.length ? `${found.length} found · Enter to go to each` : 'Nothing found';
+    if (!list.hidden) renderList();
+  }
+  search.addEventListener('input', apply);
   search.addEventListener('keydown', (e) => {
-    if (e.key !== 'Enter') return;
-    const first = $('items').querySelector('[data-go]');
-    if (first) visit(byId.get(first.dataset.go));
+    if (e.key === 'Escape') {
+      if (search.value) {
+        search.value = '';
+        apply();
+      } else search.blur();
+      return;
+    }
+    if (e.key !== 'Enter' || !found.length) return;
+    foundAt = (foundAt + (e.shiftKey ? -1 : 1) + found.length) % found.length;
+    $('found').textContent = `${foundAt + 1} of ${found.length} · Enter for the next`;
+    visit(found[foundAt]);
+  });
+
+  // the beds: a legend that is also the filter
+  const counts = Object.fromEntries([...KINDS, 'pinned'].map((k) => [k, records.filter((r) => (k === 'pinned' ? r.pinned : !r.pinned && r.kind === k)).length]));
+  $('legend').innerHTML = [...KINDS, 'pinned']
+    .filter((k) => counts[k])
+    .map((k) => `<button class="kind" data-kind="${k}" aria-pressed="true">${dot(k === 'pinned' ? { pinned: true } : { kind: k })}<span class="kn">${BED[k]}</span><span class="kf">${FLOWER[k]}</span><span class="kc">${counts[k]}</span></button>`)
+    .join('');
+  $('legend').addEventListener('click', (e) => {
+    const b = e.target.closest('[data-kind]');
+    if (!b) return;
+    const k = b.dataset.kind;
+    if (want.kinds.has(k)) want.kinds.delete(k);
+    else want.kinds.add(k);
+    b.setAttribute('aria-pressed', want.kinds.has(k));
+    apply();
+  });
+  const harnesses = [...new Set(records.flatMap((r) => r.actors))].sort();
+  $('harness').innerHTML = `<option value="">Every harness</option>${harnesses.map((h) => `<option value="${esc(h)}">${esc(h)}</option>`).join('')}`;
+  $('harness').addEventListener('change', (e) => {
+    want.harness = e.target.value;
+    apply();
+  });
+  $('retired').addEventListener('change', (e) => {
+    want.retired = e.target.checked;
+    apply();
+  });
+
+  // the timeline: the garden as it stood on a day, and a replay of it growing
+  const dated = line.filter((r) => r.created);
+  const first = dated.length ? dated[dated.length - 1].created : 0;
+  const lastDay = dated.length ? dated[0].created : 0;
+  const slider = $('time');
+  const DAYMONTH = { day: 'numeric', month: 'short', year: 'numeric' };
+  function setTime(v) {
+    slider.value = v;
+    want.cutoff = v >= 1000 ? Infinity : first + ((lastDay - first) * v) / 1000;
+    $('timeLabel').textContent = v >= 1000 ? 'Today' : new Date(want.cutoff).toLocaleDateString('en-GB', DAYMONTH);
+    slider.style.setProperty('--p', `${v / 10}%`);
+    apply();
+  }
+  let playing = 0;
+  const stop = () => {
+    cancelAnimationFrame(playing);
+    playing = 0;
+    $('play').setAttribute('aria-pressed', 'false');
+  };
+  slider.addEventListener('input', () => {
+    stop();
+    setTime(Number(slider.value));
+  });
+  $('play').addEventListener('click', () => {
+    if (playing) return stop();
+    let v = Number(slider.value) >= 1000 ? 0 : Number(slider.value);
+    let then = performance.now();
+    $('play').setAttribute('aria-pressed', 'true');
+    const step = (now) => {
+      v = Math.min(1000, v + ((now - then) / 15000) * 1000);
+      then = now;
+      setTime(Math.round(v));
+      if (v >= 1000) return stop();
+      playing = requestAnimationFrame(step);
+    };
+    playing = requestAnimationFrame(step);
+  });
+  if (lastDay > first) {
+    $('ticks').innerHTML = marks
+      .filter((m) => m.post && m.text !== 'The first record')
+      .map((m) => {
+        const r = line[Math.min(line.length - 1, Math.max(0, Math.round((m.s - HEAD) / STEP)))];
+        return r?.created ? `<span style="left:${(((r.created - first) / (lastDay - first)) * 100).toFixed(2)}%"></span>` : '';
+      })
+      .join('');
+  } else $('timeline').hidden = true;
+
+  // the map: the hill from above, the path, every record and where you stand
+  const map = $('map');
+  const ctx = map.getContext('2d');
+  const reach = gardenRadius() + 14;
+  const trail = [];
+  for (let t = 0; t <= pathLength(); t += 1.5) {
+    const p = pathAt(t);
+    trail.push([p.x, p.z]);
+  }
+  const toMap = (x, z, size) => [size / 2 + ((x - START[0]) / reach) * (size / 2), size / 2 + ((z - START[1]) / reach) * (size / 2)];
+  function drawMap() {
+    const size = map.clientWidth;
+    if (!size) return;
+    const px = devicePixelRatio || 1;
+    if (map.width !== Math.round(size * px)) map.width = map.height = Math.round(size * px);
+    ctx.setTransform(px, 0, 0, px, 0, 0);
+    ctx.clearRect(0, 0, size, size);
+    ctx.save();
+    ctx.beginPath();
+    ctx.arc(size / 2, size / 2, size / 2 - 1, 0, TAU);
+    ctx.clip();
+    ctx.fillStyle = 'rgba(92, 132, 72, 0.92)';
+    ctx.fillRect(0, 0, size, size);
+    ctx.strokeStyle = 'rgba(244, 236, 214, 0.9)';
+    ctx.lineWidth = 3;
+    ctx.lineCap = ctx.lineJoin = 'round';
+    ctx.beginPath();
+    trail.forEach(([x, z], i) => {
+      const [u, w] = toMap(x, z, size);
+      if (i) ctx.lineTo(u, w);
+      else ctx.moveTo(u, w);
+    });
+    ctx.stroke();
+    for (const r of records) {
+      if (!shown(r)) continue;
+      const [u, w] = toMap(r.x, r.z, size);
+      ctx.globalAlpha = passes(r) && (!want.words.length || matches(r)) ? 1 : 0.25;
+      ctx.fillStyle = CSS[r.pinned ? 'pinned' : r.kind];
+      ctx.beginPath();
+      ctx.arc(u, w, matches(r) ? 3 : 1.7, 0, TAU);
+      ctx.fill();
+    }
+    ctx.globalAlpha = 1;
+    if (open) {
+      const [u, w] = toMap(open.x, open.z, size);
+      ctx.strokeStyle = '#fff8e8';
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      ctx.arc(u, w, 5, 0, TAU);
+      ctx.stroke();
+    }
+    const [u, w] = toMap(eye.x, eye.z, size);
+    const a = Math.atan2(gaze.z, gaze.x);
+    ctx.fillStyle = 'rgba(255, 255, 255, 0.35)';
+    ctx.beginPath();
+    ctx.moveTo(u, w);
+    ctx.arc(u, w, 22, a - 0.5, a + 0.5);
+    ctx.closePath();
+    ctx.fill();
+    ctx.fillStyle = '#fff8e8';
+    ctx.strokeStyle = 'rgba(0, 0, 0, 0.45)';
+    ctx.lineWidth = 1.5;
+    ctx.beginPath();
+    ctx.arc(u, w, 3.5, 0, TAU);
+    ctx.fill();
+    ctx.stroke();
+    ctx.restore();
+  }
+  map.addEventListener('click', (e) => {
+    const b = map.getBoundingClientRect();
+    let best = null;
+    let near = 8;
+    for (const r of records) {
+      if (!shown(r)) continue;
+      const [u, w] = toMap(r.x, r.z, b.width);
+      const d = Math.hypot(u - (e.clientX - b.left), w - (e.clientY - b.top));
+      if (d < near) {
+        near = d;
+        best = r;
+      }
+    }
+    if (best) visit(best);
   });
   $('listBtn').addEventListener('click', () => (list.hidden ? showList() : closePanels()));
   document.addEventListener('keydown', (e) => {
-    if (e.target === search) {
-      if (e.key === 'Escape') closePanels();
-      return;
-    }
-    if (e.code === 'KeyE') read();
+    if (e.target instanceof HTMLInputElement || e.target instanceof HTMLSelectElement) return;
+    if (e.key === '/') {
+      e.preventDefault();
+      unlock();
+      search.focus();
+      search.select();
+    } else if (e.code === 'KeyE') read();
     else if (e.code === 'KeyL') {
       e.preventDefault();
       unlock();
@@ -771,6 +1105,7 @@ export function createGarden({ snapshot, field, scene, canvas, goTo }) {
     let best = null;
     let bestScore = 0.94; // within about twenty degrees of where you look
     for (const r of records) {
+      if (!shown(r)) continue;
       to.set(r.x - eye.x, r.y + r.tall * 0.9 - eye.y, r.z - eye.z);
       const d = to.length();
       if (d > 16 || d < 0.3) continue;
@@ -808,7 +1143,24 @@ export function createGarden({ snapshot, field, scene, canvas, goTo }) {
     }
     const text = near ? month(near.created) : '';
     if (era.textContent !== text) era.textContent = text;
+    // ease each flower toward how grown and marked it should be
+    const k = 1 - Math.exp(-dt * 5);
+    for (const mesh of meshes) {
+      const { mark, want: target, markAttr } = mesh.userData;
+      let moved = false;
+      for (let i = 0; i < mark.length; i++) {
+        const d = target[i] - mark[i];
+        if (d === 0) continue;
+        mark[i] = Math.abs(d) < 0.002 ? target[i] : mark[i] + d * k;
+        moved = true;
+      }
+      if (moved) markAttr.needsUpdate = true;
+    }
+    drawMap();
+    document.body.classList.toggle('listing', !list.hidden);
   }
+
+  setTime(1000);
 
   return {
     records,
@@ -816,7 +1168,7 @@ export function createGarden({ snapshot, field, scene, canvas, goTo }) {
     update,
     visit,
     /** True while the owner is typing in the search box: the walker must not take the letters as steps. */
-    typing: () => document.activeElement === search,
+    typing: () => ['INPUT', 'SELECT'].includes(document.activeElement?.tagName),
     flowers: FLOWER,
   };
 }

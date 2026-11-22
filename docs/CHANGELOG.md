@@ -2,6 +2,8 @@
 
 ## 22 November 2026
 
+- Described the memory garden's new finding tools in the [explorer guide](garden-explorer.md): word search with lit flowers and beacons, threads between linked records, the beds legend and harness filter, the timeline and its replay, the map, and the clumps of companion blooms along the path. Checked with invented records in Chromium only.
+
 - Documented resuming an interrupted staged ingest by re-running the same command, and the `resumedChunks` report field, in the [visual memory guide](visual-memory.md).
 
 - Added the [visual-memory harness skill](../skills/visual-memory/SKILL.md) and described it in the [visual memory guide](visual-memory.md), along with interpretations shown in media listings and the gallery.
