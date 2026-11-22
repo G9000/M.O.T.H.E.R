@@ -2,6 +2,8 @@
 
 ## 22 November 2026
 
+- Added the memory garden's photo grove to the [explorer guide](garden-explorer.md): attached photos, recordings and videos on easels round the pool, a viewer for each, and search, map and list entries for them. Noted in the [visual memory guide](visual-memory.md) that the garden shows the same media, that `--originals` now works without `--media`, and that the restyled gallery opens items in a viewer. Checked with invented media only.
+
 - Described the memory garden's new finding tools in the [explorer guide](garden-explorer.md): word search with lit flowers and beacons, threads between linked records, the beds legend and harness filter, the timeline and its replay, the map, and the clumps of companion blooms along the path. Checked with invented records in Chromium only.
 
 - Documented resuming an interrupted staged ingest by re-running the same command, and the `resumedChunks` report field, in the [visual memory guide](visual-memory.md).

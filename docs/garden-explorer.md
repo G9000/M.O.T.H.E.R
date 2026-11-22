@@ -26,7 +26,9 @@ The command prints one line of JSON with a `url`, then keeps running until you p
 
 Like the other owner commands that take `--db`, it opens the database directly, so [stop the owner service](garden-service.md) first. It reads one snapshot and closes the database straight away; the service can be started again while the garden stays open. The garden does not refresh: run the command again to see newer records.
 
-The database must have the v1 view enabled (`garden compat-init`). Graph-only objects, proposals waiting in the inbox, the owner persona and credentials are not part of the snapshot.
+The database must have the v1 view enabled (`garden compat-init`). Other graph-only objects, proposals waiting in the inbox, the owner persona and credentials are not part of the snapshot.
+
+Attached photos, recordings and videos from [visual memory](visual-memory.md) are read in the same visit, with the same rules as the `--media` gallery: stripped copies are shown where they exist, originals carrying embedded location or device data are withheld unless you add `--originals`, and a snapshot holds at most 256 MiB of them. The command's JSON line reports `images` and `withheld`. If the store's media can't be read, the garden opens without them and says so on stderr.
 
 Use the [Living Memory Graph](living-memory-graph.md) to follow directed relationships and review source evidence for an authorized graph representation of a memory.
 
@@ -39,6 +41,7 @@ Use the [Living Memory Graph](living-memory-graph.md) to follow directed relatio
 - The kinds are a column of coloured dots at the left edge; hover it to open the legend and filter: click a kind to set it aside or bring it back. The harness menu keeps only records that harness wrote or revised, and "Set aside retired records" does what it says. Set-aside flowers stay where they are, faded.
 - The timeline at the bottom (faint until you hover it) shows the garden as it stood on any day: later flowers are not yet grown. ▶ replays the garden growing to today.
 - The map at the bottom right (larger while you hover it) shows the hill from above: the path, every record as a dot and where you stand, facing which way. Click a dot to walk to that record.
+- **The photo grove:** each attached photo, recording and video stands on a wooden easel in a ring round the pool at the path's end, its picture facing the water. A video shows a frame from its first seconds, and a recording a painted stand-in. Look at one and press E, or click, to open the viewer: the item large, its captions, descriptions, OCR text or transcripts with who wrote them, its date, file and source, which copy is shown, and how many memories cite it. Audio and video play there. The arrow keys step through the grove, and Esc closes it. Search finds photos by their words too, the map shows them as small white squares, and the list has them at the top.
 - `L` opens the list of every record, grouped by kind; it follows the search. Choosing one stands you on the path beside its flower. The list works from the keyboard and needs no walking.
 - The panels hide while you walk with the mouse captured; Esc brings them back. The record count appears when you hover the title.
 - `T` and `1`–`4` change the time of day, `0` lets the evening pass on to sunset, and `,` and `.` nudge the hour; `P` turns the paint finish off and on.
