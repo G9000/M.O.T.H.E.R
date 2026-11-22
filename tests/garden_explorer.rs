@@ -1,5 +1,10 @@
 //! The read-only memory garden explorer: owner snapshot and loopback serving, on synthetic data.
-use mother::{access::ClientAccess, contracts::Auth, garden::store::GardenStore};
+use mother::{
+    access::ClientAccess,
+    contracts::Auth,
+    garden::store::GardenStore,
+    service::{LocalClient, ServiceClientConfig},
+};
 use serde_json::{Value, json};
 use std::{
     io::{BufRead, BufReader, Read, Write},
@@ -264,6 +269,108 @@ fn command_serves_one_snapshot_on_loopback_and_releases_the_database() {
         )
         .0,
         403
+    );
+}
+
+#[test]
+fn live_explorer_observes_writes_through_the_same_running_owner() {
+    let parent = std::fs::canonicalize(std::env::temp_dir()).unwrap();
+    let dir = tempfile::tempdir_in(parent).unwrap();
+    let db = dir.path().join("garden.redb");
+    let endpoint = dir.path().join("service.json");
+    let garden = Garden::new(&db);
+    let config = ServiceClientConfig {
+        version: 3,
+        backend: "garden_service".into(),
+        endpoint_path: endpoint.clone(),
+        workspace_id: garden.workspace,
+        generation: garden.generation,
+        client_id: garden.auth.client_id,
+        token: garden.auth.token,
+    };
+    drop(garden.store);
+
+    let mut child = Command::new(env!("CARGO_BIN_EXE_mother"))
+        .args(["garden", "service", "--db"])
+        .arg(&db)
+        .arg("--endpoint")
+        .arg(&endpoint)
+        .arg("--explore")
+        .env("MOTHER_HOME", dir.path())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::inherit())
+        .spawn()
+        .unwrap();
+    let mut stdout = BufReader::new(child.stdout.take().unwrap());
+    let _running = Running(child);
+    let mut lines = (&mut stdout).lines();
+    let owner: Value = serde_json::from_str(&lines.next().unwrap().unwrap()).unwrap();
+    let launch: Value = serde_json::from_str(&lines.next().unwrap().unwrap()).unwrap();
+    assert_eq!(launch["live"], true);
+    let reopen = Command::new(env!("CARGO_BIN_EXE_mother"))
+        .args(["garden", "explore", "--endpoint"])
+        .arg(&endpoint)
+        .output()
+        .unwrap();
+    assert!(
+        reopen.status.success(),
+        "{}",
+        String::from_utf8_lossy(&reopen.stderr)
+    );
+    assert_eq!(
+        serde_json::from_slice::<Value>(&reopen.stdout).unwrap(),
+        launch
+    );
+    assert!(GardenStore::open_active(&db).is_err());
+    let (address, token) = launch["url"].as_str().unwrap().split_once("/#").unwrap();
+    let authority = address.strip_prefix("http://").unwrap();
+    let port = authority.rsplit(':').next().unwrap().parse().unwrap();
+
+    let get = |path: &str, token: &str| {
+        http(
+            port,
+            &format!(
+                "GET {path} HTTP/1.1\r\nHost: {authority}\r\nAuthorization: Bearer {token}\r\n\r\n"
+            ),
+        )
+    };
+    let parse = |(status, response): (u16, String)| -> Value {
+        assert_eq!(status, 200);
+        serde_json::from_str(response.split_once("\r\n\r\n").unwrap().1).unwrap()
+    };
+    assert_eq!(get("/api/garden", token).0, 401);
+    let exchange = parse(http(
+        port,
+        &format!(
+            "POST /api/session HTTP/1.1\r\nHost: {authority}\r\nOrigin: {address}\r\nAuthorization: Bearer {token}\r\nContent-Length: 0\r\n\r\n"
+        ),
+    ));
+    let session = exchange["session"].as_str().unwrap();
+    let initial = parse(get("/api/garden", session));
+    let revision = initial["liveRevision"].as_str().unwrap();
+    let poll = format!("/api/garden?since={revision}");
+    assert_eq!(initial["shown"], 0);
+    assert_eq!(parse(get(&poll, session)), json!({"unchanged":true}));
+
+    let client = LocalClient::new(config).unwrap();
+    let written = client
+        .call(
+            "mother_write_record",
+            &json!({
+                "workspaceId":owner["workspaceId"],"generation":owner["generation"],
+                "operationId":Uuid::new_v4().to_string(),"expectedRevision":0,
+                "record":memory("Live synthetic memory", "Written while the view is open.")
+            }),
+        )
+        .unwrap();
+    let after = parse(get(&poll, session));
+    assert_eq!(after["records"][0]["id"], written["record"]["id"]);
+    assert_ne!(after["liveRevision"], initial["liveRevision"]);
+    assert_eq!(after["liveMediaRevision"], initial["liveMediaRevision"]);
+    assert_eq!(parse(get("/api/media", session))["images"], json!([]));
+    assert_eq!(
+        client.info().service_id,
+        owner["serviceId"].as_str().unwrap()
     );
 }
 

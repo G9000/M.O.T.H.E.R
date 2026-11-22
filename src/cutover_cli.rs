@@ -40,17 +40,31 @@ pub enum MigrationCommand {
 fn absolute(path: &Path) -> Result<PathBuf> {
     Ok(std::path::absolute(path)?)
 }
-pub fn service(db: PathBuf, endpoint: PathBuf, recall_profiles: Option<PathBuf>) -> Result<()> {
+pub fn service(
+    db: PathBuf,
+    endpoint: PathBuf,
+    recall_profiles: Option<PathBuf>,
+    explore: bool,
+    open: bool,
+) -> Result<()> {
     let profiles = recall_profiles
         .as_deref()
         .map(RecallProfiles::load)
         .transpose()?
         .unwrap_or_default();
-    let service =
-        LocalService::bind_with_recall_profiles(&absolute(&db)?, &absolute(&endpoint)?, profiles)?;
+    let endpoint = absolute(&endpoint)?;
+    let service = LocalService::bind_with_recall_profiles(&absolute(&db)?, &endpoint, profiles)?;
+    let explorer = explore
+        .then(|| crate::explorer::start_live(&service, &endpoint))
+        .transpose()?;
     println!("{}", serde_json::to_string(service.info())?);
     std::io::stdout().flush()?;
-    service.run()
+    if let Some(explorer) = &explorer {
+        explorer.announce(open)?;
+    }
+    let result = service.run();
+    drop(explorer);
+    result
 }
 pub fn service_config(config: PathBuf, endpoint: PathBuf, out: PathBuf) -> Result<()> {
     let source = load_garden_config(&absolute(&config)?)?;

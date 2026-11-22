@@ -4,7 +4,7 @@
 // still reports its progress through patch-block, which here goes nowhere.)
 import { patchBlock } from 'patch-block';
 import * as THREE from 'three';
-import { createGarden, loadMedia, loadSnapshot, pathLengthFor } from '../garden/garden.js';
+import { createGarden, fetchSnapshot, loadMedia, loadSnapshot, pathLengthFor } from '../garden/garden.js';
 import { bakeGround, createField, createFrame, loadGroundTextures } from '../lib/index.js';
 import { createFluff, createStones } from './dressing.js';
 import { createFloor, FLOOR, paintFloor } from './floor.js';
@@ -71,12 +71,14 @@ const offThread = (message, here) =>
     }
   });
 // The owner's records come first: the path through the garden is as long as they need, and the land is made round it.
-const snapshot = (await loadSnapshot()) ?? (import.meta.env.DEV ? (await import('../garden/demo.js')).demoSnapshot() : null);
+let snapshot = (await loadSnapshot()) ?? (import.meta.env.DEV ? (await import('../garden/demo.js')).demoSnapshot() : null);
 if (!snapshot) {
   $('loading').firstElementChild.textContent = 'This garden link has already been used, or the garden was closed. Run the command again for a new link.';
   throw new Error('no snapshot');
 }
-const WORLD = { length: pathLengthFor(snapshot) };
+const needed = pathLengthFor(snapshot);
+// Leave room for new flowers so ordinary updates don't have to repaint the terrain.
+const WORLD = { length: snapshot.liveRevision ? Math.ceil((needed + 16) / 32) * 32 : needed };
 configure(WORLD);
 const quality = params.get('quality') ?? 'high';
 const EXTENT = 1280;
@@ -483,8 +485,9 @@ function tick(dt) {
 mark('land');
 await stage(0.48, 'Planting the garden');
 // the owner's photos and recordings, for the grove by the pool (invented ones under the dev server)
-const media = import.meta.env.DEV && snapshot.workspaceId === 'demo' ? await (await import('../garden/demo.js')).demoMedia() : await loadMedia();
-garden = createGarden({ snapshot, field, scene, canvas, goTo, media, chime: () => sounds.chime() });
+let media = import.meta.env.DEV && snapshot.workspaceId === 'demo' ? await (await import('../garden/demo.js')).demoMedia() : await loadMedia();
+const plantGarden = (kinds) => createGarden({ snapshot, field, scene, canvas, goTo, media, chime: () => sounds.chime(), kinds });
+garden = plantGarden();
 // sound on or off: the button by the search, or M; off until asked for, and remembered in this browser only
 {
   const button = $('soundBtn');
@@ -551,6 +554,16 @@ await stage(0.9, 'Warming up');
 }
 mark('warm');
 
+if (snapshot.liveRevision) {
+  try {
+    const walk = JSON.parse(sessionStorage.getItem('garden-walk') ?? 'null');
+    sessionStorage.removeItem('garden-walk');
+    if (walk?.length === 4 && walk.every(Number.isFinite)) goTo(...walk);
+  } catch {
+    // Visiting still works without browser storage.
+  }
+}
+
 // for tests and filming: everything the page is made of, and a clock to drive by hand
 window.__tg = { garden, goTo, sounds, pickTime, timings, view: null, wind, THREE, renderer, scene, camera, field, frame, sky, trees, stones, player, keys, tick, setHour, setWind, fromValley, ready: true };
 
@@ -582,3 +595,35 @@ document.body.classList.add('ready');
 block.ready();
 // for the measuring tools
 window.__block = { ready: true, block, timings };
+
+async function refreshGarden() {
+  try {
+    if (document.hidden || !garden.canRefresh()) return;
+    const next = await fetchSnapshot(snapshot.liveRevision);
+    if (!next || next.unchanged || !garden.canRefresh()) return;
+    if (pathLengthFor(next) > WORLD.length) {
+      if (document.pointerLockElement) return;
+      try {
+        sessionStorage.setItem('garden-walk', JSON.stringify([player.x, player.z, player.yaw, player.pitch]));
+      } catch {
+        // A new hill can still be loaded if browser storage is unavailable.
+      }
+      location.reload();
+      return;
+    }
+    const nextMedia = next.liveMediaRevision === snapshot.liveMediaRevision ? media : await loadMedia();
+    if (!garden.canRefresh()) return;
+    const kinds = garden.selectedKinds();
+    garden.dispose();
+    snapshot = next;
+    media = nextMedia;
+    garden = plantGarden(kinds);
+    window.__tg.garden = garden;
+  } catch {
+    // Keep the current view if the owner or browser is temporarily unavailable.
+  } finally {
+    setTimeout(refreshGarden, 5000);
+  }
+}
+
+if (snapshot.liveRevision) setTimeout(refreshGarden, 5000);

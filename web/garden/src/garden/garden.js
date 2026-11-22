@@ -57,7 +57,7 @@ export async function loadSnapshot() {
       // storage may be blocked: this page still has the session it is about to be given
     }
     if (launch) {
-      history.replaceState(null, '', location.pathname);
+      history.replaceState(null, '', location.pathname + location.search);
       const res = await fetch('./api/session', { method: 'POST', headers: { Authorization: `Bearer ${launch}` } });
       if (res.ok) {
         session = (await res.json()).session;
@@ -68,12 +68,17 @@ export async function loadSnapshot() {
         }
       }
     }
-    if (!session) return null;
-    const res = await fetch('./api/garden', { headers: { Authorization: `Bearer ${session}` } });
-    return res.ok ? await res.json() : null;
+    return await fetchSnapshot();
   } catch {
     return null;
   }
+}
+
+export async function fetchSnapshot(since) {
+  if (!session) return null;
+  const path = since ? `./api/garden?since=${encodeURIComponent(since)}` : './api/garden';
+  const res = await fetch(path, { headers: { Authorization: `Bearer ${session}` } });
+  return res.ok ? res.json() : null;
 }
 
 /** The attached photos, recordings and videos of the same snapshot, each with its bytes: [{ item, blob }]. */
@@ -552,7 +557,12 @@ const $ = (id) => document.getElementById(id);
  * @param field the valley's meadow: its uniforms are the light the flowers stand in
  * @param goTo (x, z, yaw, pitch) stands the walker somewhere, looking a way
  */
-export function createGarden({ snapshot, field, scene, canvas, goTo, media = [], chime = () => {} }) {
+export function createGarden({ snapshot, field, scene, canvas, goTo, media = [], chime = () => {}, kinds = [...KINDS, 'pinned'] }) {
+  const lifecycle = new AbortController();
+  const { signal } = lifecycle;
+  const listen = (target, event, handler) => target.addEventListener(event, handler, { signal });
+  const plantings = new THREE.Group();
+  scene.add(plantings);
   const records = readRecords(snapshot);
   const byId = new Map(records.map((r) => [r.id, r]));
   const refBy = (id) => records.filter((r) => r.refs.includes(id)).map((r) => r.id);
@@ -606,7 +616,7 @@ export function createGarden({ snapshot, field, scene, canvas, goTo, media = [],
     geometry.setAttribute('aMark', markAttr);
     mesh.userData = { owners: [...items, ...buds.map((c) => c.of)], mark, want: mark.slice(), markAttr };
     mesh.frustumCulled = false;
-    scene.add(mesh);
+    plantings.add(mesh);
     meshes.push(mesh);
   }
 
@@ -633,7 +643,7 @@ export function createGarden({ snapshot, field, scene, canvas, goTo, media = [],
       mesh.setMatrixAt(i, dummy.matrix);
     });
     mesh.frustumCulled = false;
-    scene.add(mesh);
+    plantings.add(mesh);
   }
 
   // lantern windows that glow, and fireflies over the flowers as the light goes
@@ -683,7 +693,7 @@ export function createGarden({ snapshot, field, scene, canvas, goTo, media = [],
       );
       lights.frustumCulled = false;
       lights.renderOrder = 7;
-      scene.add(lights);
+    plantings.add(lights);
     }
   }
 
@@ -709,7 +719,7 @@ export function createGarden({ snapshot, field, scene, canvas, goTo, media = [],
     blendDstAlpha: THREE.OneFactor, }));
     mesh.frustumCulled = false;
     mesh.renderOrder = 7;
-    scene.add(mesh);
+    plantings.add(mesh);
     return (found) => {
       found.forEach((r, i) => {
         home.array.set([r.x, r.y + r.tall * 1.25 + 0.35, r.z, (i * 0.618) % 1], i * 4);
@@ -752,7 +762,7 @@ export function createGarden({ snapshot, field, scene, canvas, goTo, media = [],
   });
   const threads = new THREE.Group();
   threads.renderOrder = 7;
-  scene.add(threads);
+  plantings.add(threads);
   function showThreads(r) {
     for (const m of threads.children) m.geometry.dispose();
     threads.clear();
@@ -856,9 +866,13 @@ export function createGarden({ snapshot, field, scene, canvas, goTo, media = [],
       stands.setMatrixAt(i, dummy.matrix);
     });
     stands.frustumCulled = false;
-    scene.add(stands);
+    plantings.add(stands);
     // each picture on its board, as soon as its image is ready
     const hang = (p, source, w, h, flip) => {
+      if (signal.aborted) {
+        source.close?.();
+        return;
+      }
       const texture = source instanceof HTMLCanvasElement ? new THREE.CanvasTexture(source) : new THREE.Texture(source);
       texture.colorSpace = THREE.SRGBColorSpace;
       texture.flipY = flip;
@@ -873,15 +887,18 @@ export function createGarden({ snapshot, field, scene, canvas, goTo, media = [],
         fragmentShader: pictureFragment,
       });
       if (p.picture) {
+        const previous = p.picture.material.uniforms.tPhoto.value;
+        previous.source.data.close?.();
+        previous.dispose();
         p.picture.material.dispose();
         p.picture.geometry.dispose();
-        scene.remove(p.picture);
+        plantings.remove(p.picture);
       }
       const mesh = new THREE.Mesh(new THREE.PlaneGeometry(w * k, h * k), material);
       mesh.position.set(p.x + Math.sin(p.yaw) * 0.09, p.y + 1.31, p.z + Math.cos(p.yaw) * 0.09);
       mesh.rotation.set(0, p.yaw, 0);
       mesh.frustumCulled = false;
-      scene.add(mesh);
+      plantings.add(mesh);
       p.picture = mesh;
     };
     for (const p of photos) {
@@ -892,8 +909,10 @@ export function createGarden({ snapshot, field, scene, canvas, goTo, media = [],
           .then((full) => {
             const scale = Math.min(1, 1024 / Math.max(full.width, full.height));
             if (scale === 1) return full;
+            const w = Math.round(full.width * scale);
+            const h = Math.round(full.height * scale);
             full.close();
-            return createImageBitmap(p.blob, { imageOrientation: 'flipY', resizeWidth: Math.round(full.width * scale), resizeHeight: Math.round(full.height * scale), resizeQuality: 'high' });
+            return createImageBitmap(p.blob, { imageOrientation: 'flipY', resizeWidth: w, resizeHeight: h, resizeQuality: 'high' });
           })
           .then((bitmap) => hang(p, bitmap, bitmap.width, bitmap.height, false))
           .catch(() => {});
@@ -903,7 +922,7 @@ export function createGarden({ snapshot, field, scene, canvas, goTo, media = [],
         film.muted = true;
         film.preload = 'auto';
         film.src = p.url;
-        film.addEventListener('loadeddata', () => (film.currentTime = Math.min(1, (film.duration || 2) / 3)), { once: true });
+        film.addEventListener('loadeddata', () => (film.currentTime = Math.min(1, (film.duration || 2) / 3)), { once: true, signal });
         film.addEventListener(
           'seeked',
           () => {
@@ -914,12 +933,12 @@ export function createGarden({ snapshot, field, scene, canvas, goTo, media = [],
             c.getContext('2d').drawImage(film, 0, 0, c.width, c.height);
             hang(p, c, c.width, c.height, true);
           },
-          { once: true },
+          { once: true, signal },
         );
       }
     }
   }
-  const viewer = createViewer($('viewer'));
+  const viewer = createViewer($('viewer'), signal);
   function openPhoto(p) {
     chime();
     document.pointerLockElement && document.exitPointerLock();
@@ -1043,7 +1062,7 @@ export function createGarden({ snapshot, field, scene, canvas, goTo, media = [],
     unlock();
   }
   for (const panel of [card, list]) {
-    panel.addEventListener('click', (e) => {
+    listen(panel, 'click', (e) => {
       const go = e.target.closest('[data-go]');
       const pic = e.target.closest('[data-photo]');
       if (go) visit(byId.get(go.dataset.go));
@@ -1052,7 +1071,7 @@ export function createGarden({ snapshot, field, scene, canvas, goTo, media = [],
     });
   }
   // ---- finding things: search, the beds' filter, the timeline and the map ----------------------------------------
-  const want = { kinds: new Set([...KINDS, 'pinned']), harness: '', retired: false, cutoff: Infinity, words: [] };
+  const want = { kinds: new Set(kinds), harness: $('harness').value, retired: $('retired').checked, cutoff: Infinity, words: [] };
   let found = [];
   let foundAt = -1;
   const passes = (r) => r.photo || want.kinds.has(r.pinned ? 'pinned' : r.kind) && (!want.harness || r.actors.includes(want.harness)) && !(want.retired && RETIRED.has(r.status));
@@ -1071,14 +1090,14 @@ export function createGarden({ snapshot, field, scene, canvas, goTo, media = [],
         target[i * 2 + 1] = !passes(r) || (want.words.length && !matches(r)) ? -1 : matches(r) ? 1 : 0;
       });
     }
-    beacons(found);
+    beacons(found.filter((r) => !r.photo));
     const note = $('found');
     note.hidden = !want.words.length;
     note.textContent = found.length ? `${found.length} found · Enter to go to each` : 'Nothing found';
     if (!list.hidden) renderList();
   }
-  search.addEventListener('input', apply);
-  search.addEventListener('keydown', (e) => {
+  listen(search, 'input', apply);
+  listen(search, 'keydown', (e) => {
     if (e.key === 'Escape') {
       if (search.value) {
         search.value = '';
@@ -1096,9 +1115,9 @@ export function createGarden({ snapshot, field, scene, canvas, goTo, media = [],
   const counts = Object.fromEntries([...KINDS, 'pinned'].map((k) => [k, records.filter((r) => (k === 'pinned' ? r.pinned : !r.pinned && r.kind === k)).length]));
   $('legend').innerHTML = [...KINDS, 'pinned']
     .filter((k) => counts[k])
-    .map((k) => `<button class="kind" data-kind="${k}" aria-pressed="true">${dot(k === 'pinned' ? { pinned: true } : { kind: k })}<span class="kn">${BED[k]}</span><span class="kf">${FLOWER[k]}</span><span class="kc">${counts[k]}</span></button>`)
+    .map((k) => `<button class="kind" data-kind="${k}" aria-pressed="${want.kinds.has(k)}">${dot(k === 'pinned' ? { pinned: true } : { kind: k })}<span class="kn">${BED[k]}</span><span class="kf">${FLOWER[k]}</span><span class="kc">${counts[k]}</span></button>`)
     .join('');
-  $('legend').addEventListener('click', (e) => {
+  listen($('legend'), 'click', (e) => {
     const b = e.target.closest('[data-kind]');
     if (!b) return;
     const k = b.dataset.kind;
@@ -1109,11 +1128,12 @@ export function createGarden({ snapshot, field, scene, canvas, goTo, media = [],
   });
   const harnesses = [...new Set(records.flatMap((r) => r.actors))].sort();
   $('harness').innerHTML = `<option value="">Every harness</option>${harnesses.map((h) => `<option value="${esc(h)}">${esc(h)}</option>`).join('')}`;
-  $('harness').addEventListener('change', (e) => {
+  $('harness').value = want.harness = harnesses.includes(want.harness) ? want.harness : '';
+  listen($('harness'), 'change', (e) => {
     want.harness = e.target.value;
     apply();
   });
-  $('retired').addEventListener('change', (e) => {
+  listen($('retired'), 'change', (e) => {
     want.retired = e.target.checked;
     apply();
   });
@@ -1137,11 +1157,11 @@ export function createGarden({ snapshot, field, scene, canvas, goTo, media = [],
     playing = 0;
     $('play').setAttribute('aria-pressed', 'false');
   };
-  slider.addEventListener('input', () => {
+  listen(slider, 'input', () => {
     stop();
     setTime(Number(slider.value));
   });
-  $('play').addEventListener('click', () => {
+  listen($('play'), 'click', () => {
     if (playing) return stop();
     let v = Number(slider.value) >= 1000 ? 0 : Number(slider.value);
     let then = performance.now();
@@ -1155,6 +1175,7 @@ export function createGarden({ snapshot, field, scene, canvas, goTo, media = [],
     };
     playing = requestAnimationFrame(step);
   });
+  $('timeline').hidden = lastDay <= first;
   if (lastDay > first) {
     $('ticks').innerHTML = marks
       .filter((m) => m.post && m.text !== 'The first record')
@@ -1163,7 +1184,7 @@ export function createGarden({ snapshot, field, scene, canvas, goTo, media = [],
         return r?.created ? `<span style="left:${(((r.created - first) / (lastDay - first)) * 100).toFixed(2)}%"></span>` : '';
       })
       .join('');
-  } else $('timeline').hidden = true;
+  }
 
   // the map: the hill from above, the path, every record and where you stand
   const map = $('map');
@@ -1240,7 +1261,7 @@ export function createGarden({ snapshot, field, scene, canvas, goTo, media = [],
     ctx.stroke();
     ctx.restore();
   }
-  map.addEventListener('click', (e) => {
+  listen(map, 'click', (e) => {
     const b = map.getBoundingClientRect();
     let best = null;
     let near = 8;
@@ -1255,8 +1276,8 @@ export function createGarden({ snapshot, field, scene, canvas, goTo, media = [],
     }
     if (best) visit(best);
   });
-  $('listBtn').addEventListener('click', () => (list.hidden ? showList() : closePanels()));
-  document.addEventListener('keydown', (e) => {
+  listen($('listBtn'), 'click', () => (list.hidden ? showList() : closePanels()));
+  listen(document, 'keydown', (e) => {
     if (e.target instanceof HTMLInputElement || e.target instanceof HTMLSelectElement) return;
     if (e.key === '/') {
       e.preventDefault();
@@ -1272,11 +1293,11 @@ export function createGarden({ snapshot, field, scene, canvas, goTo, media = [],
     } else if (e.key === 'Escape') closePanels();
   });
   // a click while walking reads the flower in front of you
-  canvas.addEventListener('mousedown', (e) => {
+  listen(canvas, 'mousedown', (e) => {
     if (e.button === 0 && document.pointerLockElement === canvas) read();
   });
   // walking on puts the reading away
-  document.addEventListener('pointerlockchange', () => {
+  listen(document, 'pointerlockchange', () => {
     if (document.pointerLockElement === canvas) closePanels();
   });
 
@@ -1367,15 +1388,40 @@ export function createGarden({ snapshot, field, scene, canvas, goTo, media = [],
     document.body.classList.toggle('listing', !list.hidden);
   }
 
+  const typing = () => ['INPUT', 'SELECT'].includes(document.activeElement?.tagName);
   setTime(1000);
+
+  function dispose() {
+    lifecycle.abort();
+    stop();
+    viewer.close();
+    markLabels.forEach(({ el }) => el.remove());
+    focusLabel.remove();
+    photos.forEach(({ url }) => URL.revokeObjectURL(url));
+    const materials = new Set([threadMaterial]);
+    plantings.traverse((object) => {
+      object.geometry?.dispose();
+      if (object.isInstancedMesh) object.dispose();
+      if (object.material) materials.add(object.material);
+    });
+    for (const material of materials) {
+      const texture = material.uniforms?.tPhoto?.value;
+      texture?.source.data.close?.();
+      texture?.dispose();
+      material.dispose();
+    }
+    scene.remove(plantings);
+  }
 
   return {
     records,
     marks,
     update,
     visit,
-    /** True while the owner is typing in the search box: the walker must not take the letters as steps. */
-    typing: () => ['INPUT', 'SELECT'].includes(document.activeElement?.tagName),
+    typing,
+    selectedKinds: () => [...want.kinds],
+    canRefresh: () => !viewer.isOpen && card.hidden && list.hidden && !typing() && !playing && want.cutoff === Infinity,
+    dispose,
     flowers: FLOWER,
   };
 }

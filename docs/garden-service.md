@@ -1,6 +1,6 @@
 # Local Garden owner service
 
-One owner process holds the native Garden database open. Each harness connects through its own private service credential and an MCP stdio bridge. Bridges never open the database, start another owner or automatically retry a mutation. The service uses local Windows named pipes with remote clients rejected, or a Unix-domain socket. It opens no TCP listener.
+One owner process holds the native Garden database open. Each harness connects through its own private service credential and an MCP stdio bridge. Bridges never open the database, start another owner or automatically retry a mutation. The service uses local Windows named pipes with remote clients rejected, or a Unix-domain socket. The optional `--explore` flag also serves the [read-only Garden](garden-explorer.md) on a separate loopback listener.
 
 ## Build and private paths
 

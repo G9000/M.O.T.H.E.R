@@ -42,7 +42,7 @@ export function describe(item, blob) {
 }
 
 /** The viewer: one item large over a dimmed garden, with what is known about it beside it. */
-export function createViewer(root) {
+export function createViewer(root, signal) {
   let list = [];
   let at = -1;
   let onClose = () => {};
@@ -97,7 +97,7 @@ export function createViewer(root) {
     const step = e.target.closest('[data-step]');
     if (step) show(at + Number(step.dataset.step));
     else if (e.target.closest('[data-close]')) close();
-  });
+  }, { signal });
   document.addEventListener('keydown', (e) => {
     if (root.hidden) return;
     if (e.key === 'Escape') close();
@@ -106,7 +106,7 @@ export function createViewer(root) {
     else return;
     e.preventDefault();
     e.stopImmediatePropagation();
-  }, true);
+  }, { capture: true, signal });
   return {
     open(items, index, after = () => {}) {
       list = items;

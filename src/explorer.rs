@@ -1,19 +1,21 @@
-//! Read-only loopback web view of one owner snapshot of the memory garden.
-//! It serves embedded files and one JSON snapshot; it never writes and never calls out.
+//! Read-only loopback web view of the memory garden, offline or from the running owner.
 use mother::{
     error::{Error, Result},
     garden::store::GardenStore,
+    service::LocalService,
 };
 use rand::RngCore;
+use serde::{Deserialize, Serialize};
 use serde_json::json;
+use sha2::{Digest, Sha256};
 use std::{
     borrow::Cow,
     collections::BTreeMap,
     io::{Read, Write},
     net::{Ipv4Addr, TcpListener, TcpStream},
-    path::Path,
+    path::{Path, PathBuf},
     sync::{
-        Arc, Mutex,
+        Arc, Mutex, Weak,
         atomic::{AtomicUsize, Ordering},
     },
     thread,
@@ -84,6 +86,38 @@ impl Gallery {
     }
 }
 
+struct LiveView {
+    store: Weak<GardenStore>,
+    limit: usize,
+}
+
+impl LiveView {
+    fn store(&self) -> Result<Arc<GardenStore>> {
+        self.store.upgrade().ok_or_else(|| {
+            Error::domain("STORE_UNAVAILABLE", "The Garden owner service has stopped.")
+        })
+    }
+
+    fn snapshot(&self, since: Option<&str>) -> Result<Vec<u8>> {
+        let store = self.store()?;
+        let mut view = store.v1_garden_view(self.limit)?;
+        let generated_at = view["generatedAt"].take();
+        let media = store.media_owner_list(None).ok();
+        let media_revision = format!("{:x}", Sha256::digest(serde_json::to_vec(&media)?));
+        let revision = format!(
+            "{:x}",
+            Sha256::digest(serde_json::to_vec(&(&view, &media_revision))?)
+        );
+        if since == Some(&revision) {
+            return Ok(br#"{"unchanged":true}"#.to_vec());
+        }
+        view["generatedAt"] = generated_at;
+        view["liveRevision"] = json!(revision);
+        view["liveMediaRevision"] = json!(media_revision);
+        Ok(serde_json::to_vec(&view)?)
+    }
+}
+
 fn secret() -> String {
     let mut bytes = [0; 32];
     rand::rng().fill_bytes(&mut bytes);
@@ -106,14 +140,15 @@ impl Reply {
     }
 }
 
-/// One launch: a single-use link token that is traded for the only session.
+/// Offline links are single-use. Live links are kept alongside the owner-private endpoint.
 struct Site {
     authority: [String; 2],
     origin: [String; 2],
     launch: Mutex<Option<String>>,
     session: Mutex<Option<String>>,
     snapshot: Vec<u8>,
-    gallery: Option<Gallery>,
+    gallery: Mutex<Option<Gallery>>,
+    live: Option<LiveView>,
     /// True when "/" is the media gallery page rather than the garden.
     gallery_page: bool,
 }
@@ -126,21 +161,22 @@ impl Site {
             launch: Mutex::new(Some(launch)),
             session: Mutex::new(None),
             snapshot,
-            gallery: None,
+            gallery: Mutex::new(None),
+            live: None,
             gallery_page: false,
         }
     }
     /// The media gallery page on its own (`--media`).
     fn with_gallery(port: u16, launch: String, gallery: Gallery) -> Self {
         let mut site = Self::new(port, launch, gallery.listing.clone());
-        site.gallery = Some(gallery);
+        site.gallery = Mutex::new(Some(gallery));
         site.gallery_page = true;
         site
     }
     /// The garden, with its attached media served under the same session for the photo grove.
     fn with_media(port: u16, launch: String, snapshot: Vec<u8>, gallery: Gallery) -> Self {
         let mut site = Self::new(port, launch, snapshot);
-        site.gallery = Some(gallery);
+        site.gallery = Mutex::new(Some(gallery));
         site
     }
     fn signed_in(&self, bearer: Option<&str>) -> bool {
@@ -149,7 +185,25 @@ impl Site {
     }
     /// Gallery routes; `None` falls through to the shared session and snapshot routes.
     fn gallery_reply(&self, method: &str, path: &str, bearer: Option<&str>) -> Option<Reply> {
-        let gallery = self.gallery.as_ref()?;
+        if method != "GET" || !(self.gallery_page || path.starts_with("/api/media")) {
+            return None;
+        }
+        if path.starts_with("/api/media") && !self.signed_in(bearer) {
+            return Some(Reply::refuse(
+                401,
+                "Open the gallery from your launch link.",
+            ));
+        }
+        let mut stored = self.gallery.lock().unwrap_or_else(|e| e.into_inner());
+        if path == "/api/media"
+            && let Some(live) = &self.live
+        {
+            match live.store().and_then(|store| gallery(&store, false)) {
+                Ok(current) => *stored = Some(current),
+                Err(_) => return Some(Reply::refuse(503, "Garden media is unavailable.")),
+            }
+        }
+        let gallery = stored.as_ref()?;
         let page = |kind, body: &'static [u8]| Reply {
             status: 200,
             kind,
@@ -158,18 +212,12 @@ impl Site {
         Some(match (method, path) {
             ("GET", "/") if self.gallery_page => page(HTML, GALLERY_HTML),
             ("GET", "/gallery.js") if self.gallery_page => page(JS, GALLERY_JS),
-            ("GET", "/api/media") if self.signed_in(bearer) => Reply {
+            ("GET", "/api/media") => Reply {
                 status: 200,
                 kind: JSON,
                 body: Cow::Owned(gallery.listing.clone()),
             },
             ("GET", path) if path.starts_with("/api/media") => {
-                if !self.signed_in(bearer) {
-                    return Some(Reply::refuse(
-                        401,
-                        "Open the gallery from the link in your terminal.",
-                    ));
-                }
                 let sha = path.strip_prefix("/api/media/").unwrap_or_default();
                 match gallery.images.get(sha) {
                     Some((kind, bytes)) => Reply {
@@ -214,7 +262,7 @@ impl Site {
         }
         let bearer = header("authorization").and_then(|value| value.strip_prefix("Bearer "));
         // (the page reads its own drawing options, such as ?quality=low, from the address)
-        let path = path.split_once('?').map_or(path, |(path, _)| path);
+        let (path, query) = path.split_once('?').unwrap_or((path, ""));
         if let Some(reply) = self.gallery_reply(method, path, bearer) {
             return reply;
         }
@@ -235,10 +283,12 @@ impl Site {
                 if !matches(launch.as_deref(), bearer) {
                     return Reply::refuse(401, "This link has already been used or is not valid.");
                 }
-                *launch = None;
-                let session = secret();
+                if self.live.is_none() {
+                    *launch = None;
+                }
+                let mut session = self.session.lock().unwrap_or_else(|e| e.into_inner());
+                let session = session.get_or_insert_with(secret);
                 let body = Cow::Owned(json!({ "session": session }).to_string().into_bytes());
-                *self.session.lock().unwrap_or_else(|e| e.into_inner()) = Some(session);
                 Reply {
                     status: 200,
                     kind: JSON,
@@ -246,14 +296,20 @@ impl Site {
                 }
             }
             ("GET", "/api/garden") => {
-                let session = self.session.lock().unwrap_or_else(|e| e.into_inner());
-                if !matches(session.as_deref(), bearer) {
+                if !self.signed_in(bearer) {
                     return Reply::refuse(401, "Open the garden from the link in your terminal.");
                 }
+                let snapshot = match &self.live {
+                    None => self.snapshot.clone(),
+                    Some(live) => match live.snapshot(query.strip_prefix("since=")) {
+                        Ok(snapshot) => snapshot,
+                        Err(_) => return Reply::refuse(503, "The live Garden is unavailable."),
+                    },
+                };
                 Reply {
                     status: 200,
                     kind: JSON,
-                    body: Cow::Owned(self.snapshot.clone()),
+                    body: Cow::Owned(snapshot),
                 }
             }
             ("GET" | "POST", _) => Reply::refuse(404, "Not found."),
@@ -298,6 +354,7 @@ fn serve(site: &Site, mut stream: TcpStream) {
         401 => "Unauthorized",
         403 => "Forbidden",
         404 => "Not Found",
+        503 => "Service Unavailable",
         _ => "Method Not Allowed",
     };
     let head = format!(
@@ -436,6 +493,121 @@ pub(crate) fn run(
     if open {
         open_browser(&url);
     }
+    serve_site(listener, site)
+}
+
+#[derive(Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct LiveAddress {
+    port: u16,
+    token: String,
+}
+
+impl LiveAddress {
+    fn announce(&self, open: bool) -> Result<()> {
+        let url = format!("http://127.0.0.1:{}/#{}", self.port, self.token);
+        println!("{}", json!({"url": url, "live": true, "readOnly": true}));
+        std::io::stdout().flush()?;
+        if open {
+            open_browser(&url);
+        }
+        Ok(())
+    }
+}
+
+pub(crate) struct LiveLaunch {
+    path: PathBuf,
+    address: LiveAddress,
+}
+
+impl LiveLaunch {
+    pub(crate) fn announce(&self, open: bool) -> Result<()> {
+        self.address.announce(open)
+    }
+}
+
+impl Drop for LiveLaunch {
+    fn drop(&mut self) {
+        let _ = std::fs::remove_file(&self.path);
+    }
+}
+
+fn live_address_path(endpoint: &Path, service_id: &str) -> Result<PathBuf> {
+    let id = uuid::Uuid::parse_str(service_id)
+        .map_err(|_| Error::domain("INVALID_ENDPOINT", "Invalid local service identity."))?;
+    Ok(endpoint.with_added_extension(format!("{id}.explorer")))
+}
+
+pub(crate) fn open_live(endpoint: &Path, open: bool) -> Result<()> {
+    mother::config::check_private_output(endpoint)?;
+    let info: mother::service::ServiceInfo =
+        serde_json::from_value(mother::config::read_json(endpoint, 16_384)?)?;
+    let path = live_address_path(endpoint, &info.service_id)?;
+    mother::config::check_private_output(&path)?;
+    if !path.try_exists()? {
+        return Err(Error::domain(
+            "NOT_FOUND",
+            "This owner has no live Garden. Start the owner with --explore to enable it.",
+        ));
+    }
+    let address: LiveAddress = serde_json::from_value(mother::config::read_json(&path, 1024)?)?;
+    if address.port == 0
+        || address.token.len() != 64
+        || !address.token.bytes().all(|byte| byte.is_ascii_hexdigit())
+    {
+        return Err(Error::domain(
+            "INVALID_ENDPOINT",
+            "Invalid live Garden address.",
+        ));
+    }
+    address.announce(open)
+}
+
+pub(crate) fn start_live(service: &LocalService, endpoint: &Path) -> Result<LiveLaunch> {
+    if !service.info().v1_available {
+        return Err(Error::domain(
+            "COMPAT_NOT_INITIALIZED",
+            "The live Garden requires the native v1 view.",
+        ));
+    }
+    let listener = TcpListener::bind((Ipv4Addr::LOCALHOST, 0))?;
+    let address = LiveAddress {
+        port: listener.local_addr()?.port(),
+        token: secret(),
+    };
+    let path = live_address_path(endpoint, &service.info().service_id)?;
+    mother::config::check_private_output(&path)?;
+    let parent = path
+        .parent()
+        .ok_or_else(|| Error::domain("INVALID_ENDPOINT", "Missing owner directory."))?;
+    let mut file = tempfile::Builder::new()
+        .prefix(".garden-explorer-")
+        .tempfile_in(parent)?;
+    serde_json::to_writer(file.as_file_mut(), &address)?;
+    file.as_file().sync_all()?;
+    file.persist_noclobber(&path).map_err(|error| error.error)?;
+    let mut site = Site::with_media(
+        address.port,
+        address.token.clone(),
+        Vec::new(),
+        Gallery::empty(),
+    );
+    site.live = Some(LiveView {
+        store: service.explorer_store(),
+        limit: 500,
+    });
+    let launch = LiveLaunch { path, address };
+    thread::Builder::new()
+        .name("mother-explorer".into())
+        .spawn(move || {
+            if let Err(error) = serve_site(listener, Arc::new(site)) {
+                eprintln!("Live Garden listener closed: {error}");
+            }
+        })?;
+    Ok(launch)
+}
+
+fn serve_site(listener: TcpListener, site: Arc<Site>) -> Result<()> {
     let busy = Arc::new(AtomicUsize::new(0));
     for stream in listener.incoming() {
         let Ok(stream) = stream else { continue };
@@ -709,6 +881,58 @@ mod tests {
             .status,
             401
         );
+    }
+
+    #[test]
+    fn live_snapshots_refresh_and_reopen_under_the_owner() {
+        let dir = tempfile::tempdir().unwrap();
+        let workspace = uuid::Uuid::new_v4().to_string();
+        let generation = uuid::Uuid::new_v4().to_string();
+        let store = Arc::new(
+            GardenStore::initialize(dir.path().join("garden.redb"), &workspace, &generation)
+                .unwrap(),
+        );
+        store.v1_initialize("Synthetic persona").unwrap();
+        let auth = store
+            .v1_grant(
+                "synthetic",
+                &["read".into(), "memory:write".into()],
+                &mother::access::ClientAccess::default(),
+                None,
+            )
+            .unwrap();
+        let mut site = site();
+        site.live = Some(LiveView {
+            store: Arc::downgrade(&store),
+            limit: 500,
+        });
+        let token = session(&site);
+        assert_eq!(session(&site), token);
+        let bearer = format!("Authorization: Bearer {token}");
+        let read = |path: &str| {
+            let reply = site.respond(&request("GET", path, &[&bearer]));
+            assert_eq!(reply.status, 200);
+            serde_json::from_slice::<serde_json::Value>(&reply.body).unwrap()
+        };
+        let first = read("/api/garden");
+        let poll = format!(
+            "/api/garden?since={}",
+            first["liveRevision"].as_str().unwrap()
+        );
+        assert_eq!(read(&poll), json!({"unchanged":true}));
+        assert_eq!(first["shown"], 0);
+        store.v1_call(&auth, "mother_write_record", json!({
+            "workspaceId": workspace,
+            "generation": generation,
+            "operationId": uuid::Uuid::new_v4().to_string(),
+            "expectedRevision": 0,
+            "record": {"kind":"memory","title":"Synthetic bloom","content":"One new memory.","status":"active","basis":"owner_statement"}
+        })).unwrap();
+        let next = read(&poll);
+        assert_eq!(next["records"][0]["title"], "Synthetic bloom");
+        assert_ne!(next["liveRevision"], first["liveRevision"]);
+        drop(store);
+        assert_eq!(site.respond(&request("GET", &poll, &[&bearer])).status, 503);
     }
 
     #[test]

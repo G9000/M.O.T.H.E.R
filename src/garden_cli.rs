@@ -69,6 +69,12 @@ pub(crate) enum GardenCommand {
         /// Owner-private recall profile policy used by all bridges to this owner.
         #[arg(long)]
         recall_profiles: Option<PathBuf>,
+        /// Also serve the live, read-only Garden on loopback.
+        #[arg(long)]
+        explore: bool,
+        /// Open the live Garden in the default browser.
+        #[arg(long, requires = "explore")]
+        open: bool,
     },
     /// Bind an existing native credential to the running local owner.
     ServiceConfig {
@@ -202,22 +208,30 @@ pub(crate) enum GardenCommand {
         #[arg(long)]
         db: PathBuf,
     },
-    /// Open the read-only memory garden: a local web view of one snapshot of the v1 view.
+    /// Open the read-only memory garden from the running owner or an offline snapshot.
     Explore {
+        /// Read an offline snapshot directly from a database.
+        #[arg(
+            long,
+            required_unless_present = "endpoint",
+            conflicts_with = "endpoint"
+        )]
+        db: Option<PathBuf>,
+        /// Open the live Garden served by this local owner endpoint.
         #[arg(long)]
-        db: PathBuf,
+        endpoint: Option<PathBuf>,
         /// Most records to show; pinned records first, then the most recently updated.
-        #[arg(long, default_value_t = 500, value_parser = clap::value_parser!(u16).range(1..=2000))]
+        #[arg(long, conflicts_with = "endpoint", default_value_t = 500, value_parser = clap::value_parser!(u16).range(1..=2000))]
         limit: u16,
-        /// Also open the one-time link in the default browser.
+        /// Also open the link in the default browser.
         #[arg(long)]
         open: bool,
         /// Show the attached media gallery page instead of the 3D garden (the garden shows the
         /// same media in its photo grove); stripped copies are preferred.
-        #[arg(long)]
+        #[arg(long, conflicts_with = "endpoint")]
         media: bool,
         /// Also show originals that carry location or device metadata.
-        #[arg(long)]
+        #[arg(long, conflicts_with = "endpoint")]
         originals: bool,
     },
     /// Serve graph MCP tools using graph-only private credentials.
@@ -343,7 +357,7 @@ pub(crate) fn execute_garden(command: GardenCommand) -> Result<()> {
         | GardenCommand::ImportV1 { db, .. }
         | GardenCommand::Inbox { db, .. }
         | GardenCommand::V1Inbox { db, .. }
-        | GardenCommand::Explore { db, .. }
+        | GardenCommand::Explore { db: Some(db), .. }
         | GardenCommand::Service { db, .. } => Some(db),
         _ => None,
     };
@@ -371,7 +385,9 @@ pub(crate) fn execute_garden(command: GardenCommand) -> Result<()> {
             db,
             endpoint,
             recall_profiles,
-        } => crate::cutover_cli::service(db, endpoint, recall_profiles),
+            explore,
+            open,
+        } => crate::cutover_cli::service(db, endpoint, recall_profiles, explore, open),
         GardenCommand::ServiceConfig {
             config,
             endpoint,
@@ -556,11 +572,20 @@ pub(crate) fn execute_garden(command: GardenCommand) -> Result<()> {
         GardenCommand::Inbox { db } => run_graph_inbox(absolute(&db)?),
         GardenCommand::Explore {
             db,
+            endpoint,
             limit,
             open,
             media,
             originals,
-        } => crate::explorer::run(&absolute(&db)?, usize::from(limit), open, media, originals),
+        } => {
+            if let Some(endpoint) = endpoint {
+                crate::explorer::open_live(&absolute(&endpoint)?, open)
+            } else {
+                let db = db
+                    .ok_or_else(|| Error::domain("INVALID_INPUT", "Provide --db or --endpoint."))?;
+                crate::explorer::run(&absolute(&db)?, usize::from(limit), open, media, originals)
+            }
+        }
         GardenCommand::Mcp { .. } => unreachable!("Graph MCP is dispatched asynchronously"),
     }
 }

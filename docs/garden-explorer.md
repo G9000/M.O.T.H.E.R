@@ -18,17 +18,33 @@ Each record's flower stands in a small clump of smaller blooms of its own kind, 
 
 ## Open it
 
+Add `--explore` to the owner service's startup command to keep the Garden open alongside your connected apps:
+
+```powershell
+mother garden service --db <garden.redb> --endpoint <service.json> --explore --open
+```
+
+Use your existing database and endpoint paths. The service prints its usual endpoint descriptor, then a separate JSON line with the Garden URL. Once it is running, open or reopen the Garden at any time:
+
+```powershell
+mother garden explore --endpoint <service.json> --open
+```
+
+Leave out `--open` to print the URL. The browser gets read-only snapshots from the owner's existing database handle. It checks for changes every five seconds while the tab is visible and you are walking or free from an open panel. If growth needs a longer path, the page repaints the hill after you stop walking and restores your position when session storage is available. The live Garden shows up to 500 records, following the usual pinned-first ordering.
+
+The offline snapshot command is still available:
+
 ```
 mother garden explore --db <path to the garden database>
 ```
 
 The command prints one line of JSON with a `url`, then keeps running until you press Ctrl+C. Open the link in a browser on the same machine. Add `--open` to have the default browser opened for you, and `--limit <1-2000>` to change how many records are shown (default 500: pinned records first, then the most recently updated).
 
-Like the other owner commands that take `--db`, it opens the database directly, so [stop the owner service](garden-service.md) first. It reads one snapshot and closes the database straight away; the service can be started again while the garden stays open. The garden does not refresh: run the command again to see newer records.
+The offline command opens the database directly. Use it when the owner service is offline. It reads one snapshot and releases the file straight away. Run the command again to refresh an offline snapshot.
 
 The database must have the v1 view enabled (`garden compat-init`). Other graph-only objects, proposals waiting in the inbox, the owner persona and credentials are not part of the snapshot.
 
-Attached photos, recordings and videos from [visual memory](visual-memory.md) are read in the same visit, with the same rules as the `--media` gallery: stripped copies are shown where they exist, originals carrying embedded location or device data are withheld unless you add `--originals`, and a snapshot holds at most 256 MiB of them. The command's JSON line reports `images` and `withheld`. If the store's media can't be read, the garden opens without them and says so on stderr.
+Attached photos, recordings and videos from [visual memory](visual-memory.md) are shown in the photo grove. Stripped copies are preferred, and the gallery holds at most 256 MiB. To show originals with embedded location or device data, use the offline command with `--originals`. The offline command's JSON line reports `images` and `withheld`.
 
 Use the [Living Memory Graph](living-memory-graph.md) to follow directed relationships and review source evidence for an authorized graph representation of a memory.
 
@@ -51,9 +67,9 @@ Nothing can be changed from the garden. Pinning, handoffs and review stay with t
 ## Safety
 
 - The server listens on `127.0.0.1` only, on a random port, and serves files embedded in the executable. The page loads nothing from the network; a content security policy enforces that.
-- The link carries a single-use token after the `#`. The page trades it once for a session held by that browser tab and removes it from the address bar. A used link, another tab or another site gets no records.
+- The page exchanges the token after the `#` for a browser session and removes it from the address bar. An offline link works once. A live link works until the owner service exits and is stored alongside the owner-private descriptor, so you can reopen the Garden. Keep the live link private.
 - Requests are refused unless they name the server's own local address, and requests from other origins are refused.
-- Only `GET` of the page files and the snapshot, and the one token exchange, are answered.
+- The server answers `GET` for the page files, snapshots and gallery, and `POST` for the one token exchange.
 
 ## Limits
 

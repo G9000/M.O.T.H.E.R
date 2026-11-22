@@ -351,7 +351,7 @@ impl LocalClient {
 /// One local process retaining the native database and an exclusive owner lease.
 #[derive(Debug)]
 pub struct LocalService {
-    store: GardenStore,
+    store: Arc<GardenStore>,
     listener: Listener,
     info: ServiceInfo,
     endpoint_path: PathBuf,
@@ -446,7 +446,7 @@ impl LocalService {
         file.persist_noclobber(endpoint_path)
             .map_err(|_| unavailable())?;
         Ok(Self {
-            store,
+            store: Arc::new(store),
             listener,
             info,
             endpoint_path: endpoint_path.to_owned(),
@@ -463,6 +463,10 @@ impl LocalService {
     /// Access trusted owner operations inside this process; never expose this through IPC.
     pub fn store(&self) -> &GardenStore {
         &self.store
+    }
+    /// Lend the browser explorer a read source within this owner process.
+    pub fn explorer_store(&self) -> std::sync::Weak<GardenStore> {
+        Arc::downgrade(&self.store)
     }
     /// Serve until this process is stopped by its owner.
     /// # Errors
