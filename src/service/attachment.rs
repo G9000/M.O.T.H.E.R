@@ -12,7 +12,7 @@ use serde_json::{Value, json};
 use sha2::{Digest, Sha256};
 use std::{
     fs,
-    io::Write,
+    io::{Read, Write},
     path::{Path, PathBuf},
 };
 use uuid::Uuid;
@@ -201,6 +201,43 @@ fn enforce_quota(root: &Path) -> Result<()> {
     Ok(())
 }
 
+/// Hand bytes to the authenticated owner without sending a large JSON frame through a Windows pipe.
+pub fn submit(client: &LocalClient, mut metadata: Value, bytes: &[u8]) -> Result<Value> {
+    if bytes.is_empty() || bytes.len() > MAX_BYTES {
+        return Err(invalid());
+    }
+    let root = client_root(client.config())?;
+    if !enabled(&root) {
+        return Err(denied());
+    }
+    let lock_path = root.join("transfer.lock");
+    config::check_private_output(&lock_path)?;
+    let mut options = fs::OpenOptions::new();
+    options.read(true).write(true).create(true).truncate(false);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        options.mode(0o600);
+    }
+    let lock = options.open(lock_path)?;
+    fs2::FileExt::try_lock_exclusive(&lock).map_err(|_| {
+        Error::domain(
+            "RESOURCE_LIMIT",
+            "Another transfer is in progress for this credential.",
+        )
+    })?;
+    let path = root.join("transfer.bin");
+    config::check_private_output(&path)?;
+    let mut file = tempfile::NamedTempFile::new_in(&root)?;
+    file.write_all(bytes)?;
+    file.persist(&path).map_err(|e| e.error)?;
+    metadata["transferDigest"] = json!(format!("{:x}", Sha256::digest(bytes)));
+    let response = client.call("local_media_stage", &metadata);
+    // There is only one bounded transfer slot. A crash leaves a file that the next submission replaces.
+    fs::remove_file(&path)?;
+    response
+}
+
 fn stage(store: &GardenStore, auth: &Auth, root: &Path, dir: &Path, args: &Value) -> Result<()> {
     let memory = field(args, "memoryId")?;
     let record = target(store, auth, memory)?;
@@ -217,12 +254,17 @@ fn stage(store: &GardenStore, auth: &Auth, root: &Path, dir: &Path, args: &Value
     {
         return Err(invalid());
     }
-    let encoded = field(args, "content")?;
-    if encoded.len() > MAX_BYTES.div_ceil(3) * 4 {
-        return Err(invalid());
-    }
-    let bytes = base64::decode(encoded).map_err(|_| invalid())?;
-    if bytes.is_empty() || bytes.len() > MAX_BYTES {
+    let digest = field(args, "transferDigest")?;
+    let path = root.join("transfer.bin");
+    crate::private_paths::single_link(&path)?;
+    let mut bytes = Vec::new();
+    fs::File::open(path)?
+        .take((MAX_BYTES + 1) as u64)
+        .read_to_end(&mut bytes)?;
+    if bytes.is_empty()
+        || bytes.len() > MAX_BYTES
+        || format!("{:x}", Sha256::digest(&bytes)) != digest
+    {
         return Err(invalid());
     }
     let media = crate::media::inspect(&bytes).map_err(|_| invalid())?;
@@ -237,7 +279,7 @@ fn stage(store: &GardenStore, auth: &Auth, root: &Path, dir: &Path, args: &Value
         if existing.plan.memory_id != memory
             || existing.plan.source_file_id.as_deref() != Some(source)
             || existing.plan.original_filename.as_deref() != name
-            || existing.plan.sha256 != format!("{:x}", Sha256::digest(&bytes))
+            || existing.plan.sha256 != digest
         {
             return Err(Error::domain(
                 "OPERATION_REUSED",
@@ -385,7 +427,8 @@ mod tests {
             .clone();
         let bytes = include_bytes!("../../tests/fixtures/attachment-sample.mp4");
         let mut args = json!({"memoryId":memory,"expectedRevision":1,"fileId":"file-synthetic","fileName":"clip.mp4",
-            "mimeType":"video/mp4","content":base64::encode(bytes)});
+            "mimeType":"video/mp4","transferDigest":format!("{:x}",Sha256::digest(bytes))});
+        fs::write(root.join("transfer.bin"), bytes).unwrap();
         let dir = root.join(Uuid::new_v4().to_string());
         stage(&store, &writer, &root, &dir, &args).unwrap();
         let plan = entry(&dir).unwrap().plan;

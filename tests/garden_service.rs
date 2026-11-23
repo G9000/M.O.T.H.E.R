@@ -131,20 +131,24 @@ fn scoped_attachment_waits_for_owner_and_verifies_the_live_link() {
     let client = LocalClient::new(fixture.config.clone()).unwrap();
     let id = Uuid::new_v4().to_string();
     let query = json!({"proposalId":id});
+    let mut clip = include_bytes!("fixtures/attachment-sample.mp4").to_vec();
+    // A valid synthetic MP4 with an ISO BMFF free-space box exercises a realistic phone upload.
+    let total: usize = 726_107;
+    clip.extend_from_slice(&((total - clip.len()) as u32).to_be_bytes());
+    clip.extend_from_slice(b"free");
+    clip.resize(total, 0);
+    let submit = |metadata: &Value| attachment::submit(&client, metadata.clone(), &clip);
     let mut upload = json!({"proposalId":id,"memoryId":memory,"expectedRevision":1,"fileId":"file-synthetic","fileName":"clip.mp4",
-        "mimeType":"video/mp4","content":base64::encode(include_bytes!("fixtures/attachment-sample.mp4"))});
-    assert_eq!(
-        client
-            .call("local_media_stage", &upload)
-            .unwrap_err()
-            .code(),
-        "FORBIDDEN"
-    );
+        "mimeType":"video/mp4"});
+    assert_eq!(submit(&upload).unwrap_err().code(), "FORBIDDEN");
     attachment::set_enabled(&client, true).unwrap();
-    let item = client.call("local_media_stage", &upload).unwrap();
+    let item = submit(&upload).unwrap();
     assert_eq!(item["status"], "pending_owner_review");
     assert!(item["verification"].is_null());
-    assert_eq!(client.call("local_media_stage", &upload).unwrap(), item);
+    assert_eq!(item["sizeBytes"], total);
+    assert_eq!(item["fileName"], "clip.mp4");
+    assert_eq!(item["proposedBy"], "file-reader");
+    assert_eq!(submit(&upload).unwrap(), item);
     assert_eq!(
         client
             .call("local_media_finish_review", &query)
@@ -162,13 +166,7 @@ fn scoped_attachment_waits_for_owner_and_verifies_the_live_link() {
         "NOT_FOUND"
     );
     upload["fileId"] = json!("a-different-file");
-    assert_eq!(
-        client
-            .call("local_media_stage", &upload)
-            .unwrap_err()
-            .code(),
-        "OPERATION_REUSED"
-    );
+    assert_eq!(submit(&upload).unwrap_err().code(), "OPERATION_REUSED");
     let review = item["reviewId"].as_str().unwrap();
     assert!(attachment::review(&client, &id, "wrong", true).is_err());
     let approved = attachment::review(&client, &id, review, true).unwrap();
@@ -181,7 +179,7 @@ fn scoped_attachment_waits_for_owner_and_verifies_the_live_link() {
     );
     let other_id = Uuid::new_v4().to_string();
     upload["proposalId"] = json!(other_id);
-    let pending = client.call("local_media_stage", &upload).unwrap();
+    let pending = submit(&upload).unwrap();
     assert_eq!(
         attachment::review(
             &client,

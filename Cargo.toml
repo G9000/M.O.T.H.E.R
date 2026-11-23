@@ -1,6 +1,6 @@
 [package]
 name = "mother-workspace"
-version = "0.5.0"
+version = "0.6.0"
 edition = "2024"
 rust-version = "1.93"
 license = "MIT"
@@ -15,7 +15,6 @@ name = "mother"
 path = "src/main.rs"
 
 [dependencies]
-base64 = "=0.13.1"
 hmac = "=0.12.1"
 interprocess = "=2.4.8"
 redb = "=4.6.0"

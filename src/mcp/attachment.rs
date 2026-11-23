@@ -152,9 +152,12 @@ pub(super) fn propose(client: &LocalClient, args: Value) -> Result<Value> {
         &json!({"memoryId":p.memory_id.to_string()}),
     )?;
     let bytes = download(&url)?;
-    client.call("local_media_stage",&json!({"proposalId":p.proposal_id.to_string(),"memoryId":p.memory_id.to_string(),
-        "expectedRevision":target["revision"],"fileId":p.file.file_id,"fileName":p.file.file_name,"mimeType":p.file.mime_type,
-        "content":base64::encode(bytes)}))
+    mother::service::attachment::submit(
+        client,
+        json!({"proposalId":p.proposal_id,"memoryId":p.memory_id,
+        "expectedRevision":target["revision"],"fileId":p.file.file_id,"fileName":p.file.file_name,"mimeType":p.file.mime_type}),
+        &bytes,
+    )
 }
 
 #[cfg(test)]
