@@ -46,17 +46,23 @@ if (!$argsMatch.Success) { throw 'Cannot preserve the existing owner launch argu
 $ownerArgs = $argsMatch.Groups[1].Value
 $serviceBefore = Get-Content -LiteralPath $endpoint -Raw | ConvertFrom-Json
 if (!$serviceBefore.workspaceId -or !$serviceBefore.generation) {throw 'Missing existing Garden identity.'}
-$configs = @()
-if ($Config) {
-    $configs = @((Get-Item -LiteralPath $Config))
-} else {
-    $configs = @(Get-ChildItem -LiteralPath $clients -Filter '*.json' -File | Where-Object {
-        try {
-            $profile = Get-Content -LiteralPath $_.FullName -Raw | ConvertFrom-Json
-            $profile.backend -eq 'garden_service' -and $profile.workspaceId -eq $serviceBefore.workspaceId -and $profile.generation -eq $serviceBefore.generation -and $profile.endpointPath -eq $endpoint
-        } catch { $false }
-    })
+function Comparable-Path([string]$value) {
+    if (!$value) { return '' }
+    $full = [IO.Path]::GetFullPath($value)
+    if ($full.StartsWith('\\?\')) { return $full.Substring(4) }
+    return $full
 }
+$choices = if ($Config) {
+    Get-Item -LiteralPath $Config
+} else {
+    Get-ChildItem -LiteralPath $clients -Filter '*.json' -File
+}
+$configs = @($choices | Where-Object {
+    try {
+        $profile = Get-Content -LiteralPath $_.FullName -Raw | ConvertFrom-Json
+        $profile.backend -eq 'garden_service' -and $profile.workspaceId -eq $serviceBefore.workspaceId -and $profile.generation -eq $serviceBefore.generation -and (Comparable-Path $profile.endpointPath) -eq (Comparable-Path $endpoint)
+    } catch { $false }
+})
 if (!$configs.Count) { throw 'No existing service credential for this Garden. Supply its path with -Config.' }
 $runtimeStatus = $null
 if ($tunnel) {
