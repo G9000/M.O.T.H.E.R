@@ -3,6 +3,8 @@
 //!
 //! Original bytes live in the content-addressed blob tables of the same database
 //! and are never rewritten. Interpretations are ordinary attributed assertions.
+#[path = "media_backfill.rs"]
+mod backfill;
 use super::{
     CURRENT, GardenStore, Principal, Result,
     backup::{BLOB_BYTES, BLOBS, BlobInfo, put_blob_tx},
@@ -14,6 +16,7 @@ use crate::{
     contracts::{self, Auth},
     garden::{access::GardenAction, contracts::*},
 };
+pub use backfill::AttachmentPlan;
 use redb::{Durability, ReadableDatabase, ReadableTable, TableDefinition, TableHandle};
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
@@ -1679,12 +1682,21 @@ impl GardenStore {
         tx: &redb::WriteTransaction,
         items: Vec<BatchItem>,
     ) -> Result<OutcomeResponse> {
+        self.owner_apply_with_id(tx, items, Uuid::new_v4().to_string())
+    }
+
+    fn owner_apply_with_id(
+        &self,
+        tx: &redb::WriteTransaction,
+        items: Vec<BatchItem>,
+        operation_id: String,
+    ) -> Result<OutcomeResponse> {
         let state = state_write(tx)?;
         let request = BatchRequest {
             version: 2,
             workspace_id: state.workspace_id.clone(),
             generation: state.generation.clone(),
-            operation_id: Uuid::new_v4().to_string(),
+            operation_id,
             required_extensions: BTreeMap::new(),
             items,
         };
@@ -2018,6 +2030,7 @@ impl GardenStore {
             let cited = uses(&tx, &asset)?;
             out.push(json!({"asset":asset,"evidenceId":evidence,
                 "interpretations":interpretations(&tx, None, &cited)?,
+                "memoryLinks":backfill::memory_links(&tx,&cited)?,
                 "uses":cited,
                 "derivatives":derivatives(&derivative_table, &asset.sha256)?,
                 "acquisitions":acquisitions(&acquisition_table, &asset.sha256)?}));

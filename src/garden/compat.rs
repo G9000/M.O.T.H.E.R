@@ -29,7 +29,7 @@ use subtle::ConstantTimeEq;
 use uuid::Uuid;
 
 pub(crate) const V1_META: TableDefinition<&str, &[u8]> = TableDefinition::new("garden_v1_meta");
-const RECORDS: TableDefinition<&str, &[u8]> = TableDefinition::new("garden_v1_records");
+pub(super) const RECORDS: TableDefinition<&str, &[u8]> = TableDefinition::new("garden_v1_records");
 const OPERATIONS: TableDefinition<&str, &[u8]> = TableDefinition::new("garden_v1_operations");
 const PROPOSALS: TableDefinition<&str, &[u8]> = TableDefinition::new("garden_v1_proposals");
 const INBOX_OPERATIONS: TableDefinition<&str, &[u8]> =

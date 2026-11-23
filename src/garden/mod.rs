@@ -26,8 +26,8 @@ pub mod search {
 /// Visual evidence: owner ingest and attachment types, plus scoped MCP media tools.
 pub mod media_tools {
     pub use super::store::media::{
-        Acquisition, AcquisitionInput, AttachRequest, AttachSource, AttachmentReview,
-        DEFAULT_MAX_BYTES, DEFAULT_STAGE_ABOVE, DerivativeReport, GET_TOOL,
+        Acquisition, AcquisitionInput, AttachRequest, AttachSource, AttachmentPlan,
+        AttachmentReview, DEFAULT_MAX_BYTES, DEFAULT_STAGE_ABOVE, DerivativeReport, GET_TOOL,
         INTERPRETATION_EXTENSION, INTERPRETATION_PREDICATES, IngestOptions, IngestReport,
         LIST_TOOL, MAX_REPLY_BYTES, MediaAsset, MediaOrigin, PENDING_EXTENSION, PENDING_URI,
         PendingAttachment, USE_EXTENSION, add_capabilities,

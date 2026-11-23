@@ -24,6 +24,11 @@ pub(crate) struct Media {
 
 #[derive(Debug, Subcommand)]
 enum MediaCommand {
+    /// Review and attach an exported file to an existing v1 memory.
+    Backfill {
+        #[command(subcommand)]
+        command: BackfillCommand,
+    },
     /// Ingest one image with provenance; the original bytes are never modified.
     Add {
         #[arg(long)]
@@ -114,6 +119,60 @@ enum MediaCommand {
     },
 }
 
+#[derive(Debug, Subcommand)]
+enum BackfillCommand {
+    /// Print the proposed binding for private review. Redirect stdout into a manifest.
+    Plan {
+        #[arg(long)]
+        db: PathBuf,
+        #[arg(long)]
+        root: PathBuf,
+        /// Relative path inside the private import root, using forward slashes.
+        #[arg(long)]
+        file: String,
+        #[arg(long)]
+        memory: String,
+        #[arg(long)]
+        source_file_id: Option<String>,
+        /// Show the selection and prompt for immediate owner approval in a terminal.
+        #[arg(long)]
+        interactive: bool,
+        /// Permit this original, including its embedded metadata, in the private owner Garden.
+        #[arg(long)]
+        allow_original_in_owner_garden: bool,
+    },
+    /// Withdraw an approved link and retain its history.
+    Revoke {
+        #[arg(long)]
+        db: PathBuf,
+        #[arg(long)]
+        manifest: PathBuf,
+        /// The original reviewed attachment UUID.
+        #[arg(long)]
+        approve: String,
+    },
+    /// Check source bytes, stored bytes, and the approved association.
+    Verify {
+        #[arg(long)]
+        db: PathBuf,
+        #[arg(long)]
+        root: PathBuf,
+        #[arg(long)]
+        manifest: PathBuf,
+    },
+    /// Apply exactly the selection identified by the reviewed operation UUID.
+    Apply {
+        #[arg(long)]
+        db: PathBuf,
+        #[arg(long)]
+        root: PathBuf,
+        #[arg(long)]
+        manifest: PathBuf,
+        #[arg(long)]
+        approve: String,
+    },
+}
+
 #[derive(Debug, Args)]
 struct Provenance {
     /// captured, uploaded, imported, screenshot or ai_generated.
@@ -175,6 +234,21 @@ impl Provenance {
     }
 }
 
+fn read_attachment_plan(path: &Path) -> Result<mother::garden::media_tools::AttachmentPlan> {
+    use std::io::Read;
+    let mut data = Vec::new();
+    std::fs::File::open(path)?
+        .take(32769)
+        .read_to_end(&mut data)?;
+    if data.len() > 32768 {
+        return Err(Error::domain(
+            "INVALID_INPUT",
+            "Attachment manifest exceeds 32 KiB.",
+        ));
+    }
+    Ok(serde_json::from_slice(&data)?)
+}
+
 fn absolute(path: &Path) -> Result<PathBuf> {
     Ok(std::path::absolute(path)?)
 }
@@ -190,6 +264,85 @@ fn print(value: Value) -> Result<()> {
 
 pub(crate) fn run(args: Media) -> Result<()> {
     match *args.command {
+        MediaCommand::Backfill { command } => match command {
+            BackfillCommand::Plan {
+                db,
+                root,
+                file,
+                memory,
+                source_file_id,
+                interactive,
+                allow_original_in_owner_garden,
+            } => {
+                use std::io::{IsTerminal, Write};
+                let store = open(&db)?;
+                let plan = store
+                    .plan_attachment(
+                        &root,
+                        &file,
+                        &memory,
+                        source_file_id,
+                        allow_original_in_owner_garden,
+                    )
+                    .map_err(domain_error)?;
+                print(serde_json::to_value(&plan)?)?;
+                if !interactive {
+                    return Ok(());
+                }
+                if !std::io::stdin().is_terminal() || !std::io::stdout().is_terminal() {
+                    return Err(Error::domain(
+                        "INVALID_INPUT",
+                        "Interactive approval requires an owner terminal.",
+                    ));
+                }
+                eprint!("Attach this file to the displayed memory? [y/N] ");
+                std::io::stderr().flush()?;
+                let mut answer = String::new();
+                std::io::stdin().read_line(&mut answer)?;
+                if answer.trim().eq_ignore_ascii_case("y") {
+                    print(
+                        store
+                            .apply_attachment(&root, &plan, &plan.operation_id)
+                            .map_err(domain_error)?,
+                    )
+                } else {
+                    print(json!({"status":"skipped"}))
+                }
+            }
+            BackfillCommand::Revoke {
+                db,
+                manifest,
+                approve,
+            } => {
+                let plan = read_attachment_plan(&manifest)?;
+                print(
+                    open(&db)?
+                        .revoke_attachment(&plan, &approve)
+                        .map_err(domain_error)?,
+                )
+            }
+            BackfillCommand::Verify { db, root, manifest } => {
+                let plan = read_attachment_plan(&manifest)?;
+                print(
+                    open(&db)?
+                        .verify_attachment(&root, &plan)
+                        .map_err(domain_error)?,
+                )
+            }
+            BackfillCommand::Apply {
+                db,
+                root,
+                manifest,
+                approve,
+            } => {
+                let plan = read_attachment_plan(&manifest)?;
+                print(
+                    open(&db)?
+                        .apply_attachment(&root, &plan, &approve)
+                        .map_err(domain_error)?,
+                )
+            }
+        },
         MediaCommand::Add {
             db,
             file,
