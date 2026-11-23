@@ -9,7 +9,9 @@ M.O.T.H.E.R keeps the original media as evidence. Your descriptions are attribut
 
 ## Keep media from this conversation
 
-You almost never have the original file. What you see in the conversation may be a resized copy, and tool arguments are text. Never paste encoded image bytes into a tool call or claim they are the original.
+For an existing narrative memory, read its ID with your current credential and check `mediaAttachmentBridge.available` in `mother_get_capabilities`. Use `mother_propose_media_attachment` with actual selected file bytes supplied by your harness. Use `mother_propose_media_attachment_from_file` when ChatGPT provides a selected file reference. Preserve the proposal UUID. Show the owner the pending proposal, then use `mother_get_media_attachment` to verify the stored bytes and active link after owner review. Treat a resized preview as a preview and ask for the original when needed.
+
+For a graph assertion where the owner will select the source file during review:
 
 1. Find the memory it belongs with. Search or read with the graph tools until you have the target assertion's exact ID and current revision. If you are unsure which memory, ask the owner.
 2. Propose one pending attachment with `mother_garden_propose`: a single `create` evidence item whose `source` is `{"type":"uri","uri":"urn:mother:media:pending"}` and whose `excerpt` is null. Its extensions hold `mother.media:pending` (schemaVersion 1) with `target` (`{"kind":"assertion","id":...}`), `expectedRevision`, and optionally `description` and `eventTime`. Put your description of the media in `description`, not in the excerpt. Preserve the operation UUID if you retry.
