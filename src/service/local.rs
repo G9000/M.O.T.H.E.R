@@ -585,6 +585,22 @@ impl LocalService {
         };
         let name = request.method.as_str();
         let args = request.arguments;
+        let bridge_root = super::attachment::root(
+            &self.endpoint_path,
+            &self.info.workspace_id,
+            &self.info.generation,
+            &auth.client_id,
+            &auth.token,
+        )?;
+        if matches!(
+            name,
+            "local_media_target"
+                | "local_media_stage"
+                | "local_media_finish_review"
+                | super::attachment::STATUS
+        ) {
+            return super::attachment::dispatch(&self.store, auth, &bridge_root, name, &args);
+        }
         if name == "mother_get_capabilities" {
             if args.as_object().is_none_or(|object| !object.is_empty()) {
                 return Err(invalid());
@@ -600,6 +616,9 @@ impl LocalService {
                     "definedTools":GRAPH_TOOLS,
                     "reason":if !graph_available {"native_context_only_current_grant"} else if self.info.v1_available {"native_v1_compatibility_with_independent_graph_authority"} else {"graph_only_prototype_without_v1_compatibility_or_migration"}}}))
             .map(|mut value| {
+                let enabled = self.info.v1_available && super::attachment::enabled(&bridge_root);
+                value["mediaAttachmentBridge"] = json!({"available":enabled, "maxFileBytes":super::attachment::MAX_BYTES,
+                    "availableTools":if enabled {vec![super::attachment::PROPOSE, super::attachment::STATUS]} else {vec![]}});
                 crate::garden::media_tools::add_capabilities(
                     &mut value,
                     &self.store.media_tools(auth).unwrap_or_default(),

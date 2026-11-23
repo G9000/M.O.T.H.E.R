@@ -1,0 +1,82 @@
+[
+  {
+    "name": "mother_propose_media_attachment",
+    "title": "Propose a memory attachment",
+    "description": "Stage one selected ChatGPT image, audio file or video up to 2 MiB for local owner review. Use a fresh proposal UUID and retain it for status or an exact retry. The memory receives the file only after owner approval.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "proposalId": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "memoryId": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "file": {
+          "type": "object",
+          "properties": {
+            "download_url": {
+              "type": "string"
+            },
+            "file_id": {
+              "type": "string"
+            },
+            "mime_type": {
+              "type": "string"
+            },
+            "file_name": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "download_url",
+            "file_id"
+          ],
+          "additionalProperties": false
+        }
+      },
+      "required": [
+        "proposalId",
+        "memoryId",
+        "file"
+      ],
+      "additionalProperties": false
+    },
+    "annotations": {
+      "readOnlyHint": false,
+      "destructiveHint": false,
+      "idempotentHint": true,
+      "openWorldHint": true
+    },
+    "_meta": {
+      "openai/fileParams": [
+        "file"
+      ]
+    }
+  },
+  {
+    "name": "mother_get_media_attachment",
+    "title": "Check a memory attachment",
+    "description": "Read this connection’s proposal status and verify its approved media link against the current Garden.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "proposalId": {
+          "type": "string",
+          "format": "uuid"
+        }
+      },
+      "required": [
+        "proposalId"
+      ],
+      "additionalProperties": false
+    },
+    "annotations": {
+      "readOnlyHint": true,
+      "destructiveHint": false,
+      "openWorldHint": false
+    }
+  }
+]

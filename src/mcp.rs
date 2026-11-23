@@ -1,4 +1,5 @@
 //! Official MCP SDK adapter for the standalone native garden.
+mod attachment;
 mod discovery;
 mod garden;
 mod read_output;

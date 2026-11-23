@@ -24,6 +24,13 @@ pub(crate) struct Media {
 
 #[derive(Debug, Subcommand)]
 enum MediaCommand {
+    /// Enable the file bridge for one service credential or review a staged proposal.
+    Bridge {
+        #[arg(long)]
+        config: PathBuf,
+        #[command(subcommand)]
+        command: BridgeCommand,
+    },
     /// Review and attach an exported file to an existing v1 memory.
     Backfill {
         #[command(subcommand)]
@@ -116,6 +123,16 @@ enum MediaCommand {
         sha256: String,
         #[arg(long)]
         out: PathBuf,
+    },
+}
+
+#[derive(Debug, Subcommand)]
+enum BridgeCommand {
+    Enable,
+    Disable,
+    Review {
+        #[arg(long)]
+        proposal: String,
     },
 }
 
@@ -264,6 +281,53 @@ fn print(value: Value) -> Result<()> {
 
 pub(crate) fn run(args: Media) -> Result<()> {
     match *args.command {
+        MediaCommand::Bridge { config, command } => {
+            use mother::service::{LocalClient, attachment, load_service_config};
+            use std::io::{IsTerminal, Write};
+            let client = LocalClient::new(load_service_config(&config)?)?;
+            match command {
+                BridgeCommand::Enable => print(attachment::set_enabled(&client, true)?),
+                BridgeCommand::Disable => print(attachment::set_enabled(&client, false)?),
+                BridgeCommand::Review { proposal } => {
+                    let item = client.call(attachment::STATUS, &json!({"proposalId":proposal}))?;
+                    print(item.clone())?;
+                    if item["status"] == "owner_decision_recorded" {
+                        return print(
+                            client.call(
+                                "local_media_finish_review",
+                                &json!({"proposalId":proposal}),
+                            )?,
+                        );
+                    }
+                    if item["status"] != "pending_owner_review" {
+                        return Ok(());
+                    }
+                    if !std::io::stdin().is_terminal() || !std::io::stdout().is_terminal() {
+                        return Err(Error::domain(
+                            "INVALID_INPUT",
+                            "Review requires an owner terminal.",
+                        ));
+                    }
+                    eprint!("Attach these bytes to the displayed memory? [approve/reject/skip] ");
+                    std::io::stderr().flush()?;
+                    let mut answer = String::new();
+                    std::io::stdin().read_line(&mut answer)?;
+                    let approve = match answer.trim() {
+                        "approve" => true,
+                        "reject" => false,
+                        _ => return Ok(()),
+                    };
+                    print(attachment::review(
+                        &client,
+                        &proposal,
+                        item["reviewId"]
+                            .as_str()
+                            .ok_or_else(|| Error::domain("INVALID_INPUT", "Missing review ID."))?,
+                        approve,
+                    )?)
+                }
+            }
+        }
         MediaCommand::Backfill { command } => match command {
             BackfillCommand::Plan {
                 db,

@@ -15,6 +15,7 @@ name = "mother"
 path = "src/main.rs"
 
 [dependencies]
+base64 = "=0.13.1"
 hmac = "=0.12.1"
 interprocess = "=2.4.8"
 redb = "=4.6.0"

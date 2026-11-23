@@ -105,6 +105,97 @@ impl Fixture {
     }
 }
 
+#[test]
+fn scoped_attachment_waits_for_owner_and_verifies_the_live_link() {
+    use mother::service::attachment::{self, STATUS};
+    let mut fixture = Fixture::new();
+    let store = GardenStore::open(&fixture.db).unwrap();
+    store.v1_initialize("Synthetic transfer owner").unwrap();
+    let grant = |id, scopes: &[String]| {
+        store
+            .v1_grant(id, scopes, &ClientAccess::default(), None)
+            .unwrap()
+    };
+    let writer = grant("fixture-writer", &["read".into(), "memory:write".into()]);
+    let reader = grant("file-reader", &["read".into()]);
+    let other = grant("other-reader", &["read".into()]);
+    let memory = store.v1_call(&writer, "mother_write_record", json!({
+        "workspaceId":fixture.config.workspace_id,"generation":fixture.config.generation,
+        "operationId":Uuid::new_v4().to_string(),"expectedRevision":0,
+        "record":{"kind":"memory","title":"Synthetic attachment target","content":"Synthetic bytes.","status":"active","basis":"source"}
+    })).unwrap()["record"]["id"].clone();
+    drop(store);
+    fixture.config.client_id = reader.client_id;
+    fixture.config.token = reader.token;
+    let _owner = fixture.start();
+    let client = LocalClient::new(fixture.config.clone()).unwrap();
+    let id = Uuid::new_v4().to_string();
+    let query = json!({"proposalId":id});
+    let mut upload = json!({"proposalId":id,"memoryId":memory,"expectedRevision":1,"fileId":"file-synthetic","fileName":"clip.mp4",
+        "mimeType":"video/mp4","content":base64::encode(include_bytes!("fixtures/attachment-sample.mp4"))});
+    assert_eq!(
+        client
+            .call("local_media_stage", &upload)
+            .unwrap_err()
+            .code(),
+        "FORBIDDEN"
+    );
+    attachment::set_enabled(&client, true).unwrap();
+    let item = client.call("local_media_stage", &upload).unwrap();
+    assert_eq!(item["status"], "pending_owner_review");
+    assert!(item["verification"].is_null());
+    assert_eq!(client.call("local_media_stage", &upload).unwrap(), item);
+    assert_eq!(
+        client
+            .call("local_media_finish_review", &query)
+            .unwrap_err()
+            .code(),
+        "FORBIDDEN"
+    );
+    let mut other_config = fixture.config.clone();
+    other_config.client_id = other.client_id;
+    other_config.token = other.token;
+    let other_client = LocalClient::new(other_config).unwrap();
+    attachment::set_enabled(&other_client, true).unwrap();
+    assert_eq!(
+        other_client.call(STATUS, &query).unwrap_err().code(),
+        "NOT_FOUND"
+    );
+    upload["fileId"] = json!("a-different-file");
+    assert_eq!(
+        client
+            .call("local_media_stage", &upload)
+            .unwrap_err()
+            .code(),
+        "OPERATION_REUSED"
+    );
+    let review = item["reviewId"].as_str().unwrap();
+    assert!(attachment::review(&client, &id, "wrong", true).is_err());
+    let approved = attachment::review(&client, &id, review, true).unwrap();
+    assert_eq!(approved["verification"]["verified"], true);
+    assert_eq!(approved["verification"]["link"]["memoryId"], memory);
+    assert_eq!(client.call(STATUS, &query).unwrap(), approved);
+    assert_eq!(
+        attachment::review(&client, &id, review, true).unwrap(),
+        approved
+    );
+    let other_id = Uuid::new_v4().to_string();
+    upload["proposalId"] = json!(other_id);
+    let pending = client.call("local_media_stage", &upload).unwrap();
+    assert_eq!(
+        attachment::review(
+            &client,
+            &other_id,
+            pending["reviewId"].as_str().unwrap(),
+            false
+        )
+        .unwrap()["status"],
+        "rejected"
+    );
+    attachment::set_enabled(&client, false).unwrap();
+    assert_eq!(client.call(STATUS, &query).unwrap_err().code(), "FORBIDDEN");
+}
+
 #[cfg(unix)]
 fn fixture_with_private_parent_length(length: usize) -> Fixture {
     use std::os::unix::ffi::OsStrExt;

@@ -198,6 +198,28 @@ fn two_stdio_harnesses_share_one_local_owner_and_reconcile_the_same_write() {
         second.call("mother_get_context", json!({}))["inventory"]["totalRecords"],
         1
     );
+    let authority =
+        mother::service::LocalClient::new(mother::service::load_service_config(&config).unwrap())
+            .unwrap();
+    mother::service::attachment::set_enabled(&authority, true).unwrap();
+    let mut enabled = Harness::new(&config);
+    let catalog = discovery::collect(|params| enabled.rpc("tools/list", params));
+    let file_tool = catalog
+        .iter()
+        .find(|t| t["name"] == mother::service::attachment::PROPOSE)
+        .unwrap();
+    assert_eq!(file_tool["_meta"]["openai/fileParams"], json!(["file"]));
+    assert!(
+        catalog
+            .iter()
+            .all(|t| !t["name"].as_str().unwrap().starts_with("local_media_"))
+    );
+    let denied = enabled.rpc(
+        "tools/call",
+        json!({"name":"local_media_finish_review","arguments":{}}),
+    );
+    assert!(denied["error"].is_object());
+    drop(enabled);
     drop(first);
     drop(second);
     drop(owner);
