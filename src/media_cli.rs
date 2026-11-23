@@ -24,7 +24,7 @@ pub(crate) struct Media {
 
 #[derive(Debug, Subcommand)]
 enum MediaCommand {
-    /// Enable the file bridge for one service credential or review a staged proposal.
+    /// Manage the shared Garden media bridge or review one harness proposal.
     Bridge {
         #[arg(long)]
         config: PathBuf,
@@ -128,8 +128,22 @@ enum MediaCommand {
 
 #[derive(Debug, Subcommand)]
 enum BridgeCommand {
+    /// Enable selected media proposals across this Garden.
     Enable,
     Disable,
+    /// Show whether this Garden accepts media proposals.
+    Policy,
+    /// Submit a selected file from this harness using its existing credential.
+    Propose {
+        #[arg(long)]
+        file: PathBuf,
+        #[arg(long)]
+        memory: String,
+        #[arg(long)]
+        proposal: String,
+        #[arg(long)]
+        source_file_id: Option<String>,
+    },
     Review {
         #[arg(long)]
         proposal: String,
@@ -282,22 +296,44 @@ fn print(value: Value) -> Result<()> {
 pub(crate) fn run(args: Media) -> Result<()> {
     match *args.command {
         MediaCommand::Bridge { config, command } => {
-            use mother::service::{LocalClient, attachment, load_service_config};
+            use mother::service::attachment;
             use std::io::{IsTerminal, Write};
-            let client = LocalClient::new(load_service_config(&config)?)?;
+            let transport = attachment::client(&config)?;
+            let client = transport.as_ref();
             match command {
-                BridgeCommand::Enable => print(attachment::set_enabled(&client, true)?),
-                BridgeCommand::Disable => print(attachment::set_enabled(&client, false)?),
+                BridgeCommand::Enable => print(attachment::set_enabled(client, true)?),
+                BridgeCommand::Disable => print(attachment::set_enabled(client, false)?),
+                BridgeCommand::Policy => print(client.request("local_media_policy", &json!({}))?),
+                BridgeCommand::Propose {
+                    file,
+                    memory,
+                    proposal,
+                    source_file_id,
+                } => {
+                    use std::io::Read;
+                    let target =
+                        client.request("local_media_target", &json!({"memoryId":memory}))?;
+                    let mut bytes = Vec::new();
+                    std::fs::File::open(&file)?
+                        .take((attachment::MAX_BYTES + 1) as u64)
+                        .read_to_end(&mut bytes)?;
+                    let name = file.file_name().and_then(|n| n.to_str());
+                    print(attachment::submit(
+                        client,
+                        json!({"proposalId":proposal,"memoryId":memory,"expectedRevision":target["revision"],
+                        "fileId":source_file_id,"fileName":name}),
+                        &bytes,
+                    )?)
+                }
                 BridgeCommand::Review { proposal } => {
-                    let item = client.call(attachment::STATUS, &json!({"proposalId":proposal}))?;
+                    let item =
+                        client.request(attachment::STATUS, &json!({"proposalId":proposal}))?;
                     print(item.clone())?;
                     if item["status"] == "owner_decision_recorded" {
-                        return print(
-                            client.call(
-                                "local_media_finish_review",
-                                &json!({"proposalId":proposal}),
-                            )?,
-                        );
+                        return print(client.request(
+                            "local_media_finish_review",
+                            &json!({"proposalId":proposal}),
+                        )?);
                     }
                     if item["status"] != "pending_owner_review" {
                         return Ok(());
@@ -318,7 +354,7 @@ pub(crate) fn run(args: Media) -> Result<()> {
                         _ => return Ok(()),
                     };
                     print(attachment::review(
-                        &client,
+                        client,
                         &proposal,
                         item["reviewId"]
                             .as_str()

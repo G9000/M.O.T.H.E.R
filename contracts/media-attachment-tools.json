@@ -2,7 +2,50 @@
   {
     "name": "mother_propose_media_attachment",
     "title": "Propose a memory attachment",
-    "description": "Stage one selected ChatGPT image, audio file or video up to 2 MiB for local owner review. Use a fresh proposal UUID and retain it for status or an exact retry. The memory receives the file only after owner approval.",
+    "description": "Stage selected media bytes for owner review from any harness. Supply actual base64 file bytes from a host file reader. Up to 2 MiB. Use a stable proposal UUID for status and exact retries. When ChatGPT supplies a file reference, use mother_propose_media_attachment_from_file.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "proposalId": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "memoryId": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "contentBase64": {
+          "type": "string",
+          "maxLength": 2796204
+        },
+        "fileName": {
+          "type": "string"
+        },
+        "mediaType": {
+          "type": "string"
+        },
+        "sourceFileId": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "proposalId",
+        "memoryId",
+        "contentBase64"
+      ],
+      "additionalProperties": false
+    },
+    "annotations": {
+      "readOnlyHint": false,
+      "destructiveHint": false,
+      "idempotentHint": true,
+      "openWorldHint": false
+    }
+  },
+  {
+    "name": "mother_propose_media_attachment_from_file",
+    "title": "Propose a host file attachment",
+    "description": "Stage one user-selected ChatGPT file, up to 2 MiB, for local owner review. For other hosts use mother_propose_media_attachment with selected file bytes. Retain the proposal UUID to check the verified link after approval.",
     "inputSchema": {
       "type": "object",
       "properties": {
@@ -59,7 +102,7 @@
   {
     "name": "mother_get_media_attachment",
     "title": "Check a memory attachment",
-    "description": "Read this connection’s proposal status and verify its approved media link against the current Garden.",
+    "description": "Read this connection's proposal status and verify its approved media link against the current Garden.",
     "inputSchema": {
       "type": "object",
       "properties": {

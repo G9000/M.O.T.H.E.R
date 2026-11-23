@@ -160,11 +160,20 @@ fn scoped_attachment_waits_for_owner_and_verifies_the_live_link() {
     other_config.client_id = other.client_id;
     other_config.token = other.token;
     let other_client = LocalClient::new(other_config).unwrap();
-    attachment::set_enabled(&other_client, true).unwrap();
+    assert_eq!(
+        other_client
+            .call("mother_get_capabilities", &json!({}))
+            .unwrap()["mediaAttachmentBridge"]["available"],
+        true
+    );
     assert_eq!(
         other_client.call(STATUS, &query).unwrap_err().code(),
         "NOT_FOUND"
     );
+    let independent = attachment::submit(&other_client, upload.clone(), &clip).unwrap();
+    assert_eq!(independent["proposedBy"], "other-reader");
+    assert_eq!(independent["status"], "pending_owner_review");
+    assert_ne!(independent["reviewId"], item["reviewId"]);
     upload["fileId"] = json!("a-different-file");
     assert_eq!(submit(&upload).unwrap_err().code(), "OPERATION_REUSED");
     let review = item["reviewId"].as_str().unwrap();

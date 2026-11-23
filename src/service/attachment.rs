@@ -1,6 +1,7 @@
 //! Authenticated, credential-specific transfer inbox. The owner service serializes all
 //! proposal operations. Only the owner CLI writes a decision into its private directory.
-use super::{LocalClient, ServiceClientConfig};
+use super::{LocalClient, load_service_config};
+use crate::garden::config::{GardenClientConfig, load_garden_config};
 use crate::{
     config,
     contracts::Auth,
@@ -18,6 +19,7 @@ use std::{
 use uuid::Uuid;
 
 pub const PROPOSE: &str = "mother_propose_media_attachment";
+pub const HOST_FILE: &str = "mother_propose_media_attachment_from_file";
 pub const STATUS: &str = "mother_get_media_attachment";
 pub const MAX_BYTES: usize = 2 * 1024 * 1024;
 const FILE: &str = "selected-media";
@@ -37,65 +39,116 @@ fn conflict() -> Error {
     Error::domain("CONFLICT", "The review or proposal has changed.")
 }
 
-/// A rotated credential or restored Garden has its own disabled inbox.
+/// All transports use the same generation-specific Garden switch. Each credential has a private inbox.
 pub(super) fn root(
-    endpoint: &Path,
+    database: &Path,
     workspace: &str,
     generation: &str,
     client: &str,
     token: &str,
 ) -> Result<PathBuf> {
-    let key = serde_json::to_vec(&(workspace, generation, client, token))?;
-    Ok(endpoint
+    let garden = Sha256::digest(serde_json::to_vec(&(workspace, generation))?);
+    let sender = Sha256::digest(serde_json::to_vec(&(client, token))?);
+    Ok(database
         .parent()
         .ok_or_else(invalid)?
-        .join(format!("media-bridge-{:x}", Sha256::digest(key))))
-}
-fn client_root(config: &ServiceClientConfig) -> Result<PathBuf> {
-    root(
-        &config.endpoint_path,
-        &config.workspace_id,
-        &config.generation,
-        &config.client_id,
-        &config.token,
-    )
+        .join(format!("media-inbox-{garden:x}"))
+        .join(format!("client-{sender:x}")))
 }
 pub(super) fn enabled(root: &Path) -> bool {
-    root.join("enabled").is_file() && config::check_private_output(&root.join("enabled")).is_ok()
+    root.parent().is_some_and(|garden| {
+        let marker = garden.join("enabled");
+        marker.is_file() && config::check_private_output(&marker).is_ok()
+    })
 }
-pub fn set_enabled(client: &LocalClient, enable: bool) -> Result<Value> {
-    let root = client_root(client.config())?;
+fn private_directory(path: &Path) -> Result<()> {
+    let builder = fs::DirBuilder::new();
+    #[cfg(unix)]
+    let builder = {
+        use std::os::unix::fs::DirBuilderExt;
+        let mut b = builder;
+        b.mode(0o700);
+        b
+    };
+    match builder.create(path) {
+        Ok(()) => (),
+        Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => (),
+        Err(e) => return Err(e.into()),
+    }
+    crate::private_paths::owner_directory(path)
+}
+pub trait AttachmentClient {
+    fn request(&self, method: &str, args: &Value) -> Result<Value>;
+    fn inbox_root(&self) -> Result<PathBuf> {
+        let location = self.request("local_media_location", &json!({}))?;
+        Ok(PathBuf::from(field(&location, "directory")?))
+    }
+}
+impl AttachmentClient for LocalClient {
+    fn request(&self, method: &str, args: &Value) -> Result<Value> {
+        self.call(method, args)
+    }
+}
+impl AttachmentClient for GardenClientConfig {
+    fn request(&self, method: &str, args: &Value) -> Result<Value> {
+        let store = GardenStore::open_active(&self.database_path)?;
+        self.authorize(&store)?;
+        let auth = self.auth();
+        let identity = store.v1_identity(&auth)?;
+        let root = root(
+            &self.database_path,
+            field(&identity, "workspaceId")?,
+            field(&identity, "generation")?,
+            &auth.client_id,
+            &auth.token,
+        )?;
+        dispatch(&store, &auth, &root, method, args)
+    }
+}
+pub fn client(config: &Path) -> Result<Box<dyn AttachmentClient>> {
+    match crate::config::read_json(config, 16_384)?["backend"].as_str() {
+        Some("garden_service") => Ok(Box::new(LocalClient::new(load_service_config(config)?)?)),
+        Some("garden_redb") => Ok(Box::new(load_garden_config(config)?)),
+        _ => Err(invalid()),
+    }
+}
+pub fn capabilities(available: bool) -> Value {
+    json!({"available":available,"scope":"garden","maxFileBytes":MAX_BYTES,
+        "availableTools":if available {vec![PROPOSE,HOST_FILE,STATUS]} else {vec![]}})
+}
+pub fn direct_capabilities(store: &GardenStore, config: &GardenClientConfig) -> Result<Value> {
+    let auth = config.auth();
+    if !store.v1_initialized()? || store.v1_authorize(&auth, "read").is_err() {
+        return Ok(capabilities(false));
+    }
+    let id = store.v1_identity(&auth)?;
+    let path = root(
+        &config.database_path,
+        field(&id, "workspaceId")?,
+        field(&id, "generation")?,
+        &auth.client_id,
+        &auth.token,
+    )?;
+    Ok(capabilities(enabled(&path)))
+}
+pub fn set_enabled(client: &dyn AttachmentClient, enable: bool) -> Result<Value> {
+    let root = client.inbox_root()?;
+    let garden = root.parent().ok_or_else(invalid)?;
+    let marker = garden.join("enabled");
     if enable {
-        crate::private_paths::owner_directory(root.parent().ok_or_else(invalid)?)?;
-        let builder = fs::DirBuilder::new();
-        #[cfg(unix)]
-        let builder = {
-            use std::os::unix::fs::DirBuilderExt;
-            let mut private = builder;
-            private.mode(0o700);
-            private
-        };
-        match builder.create(&root) {
-            Ok(()) => (),
-            Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => (),
-            Err(e) => return Err(e.into()),
-        }
-        let marker = root.join("enabled");
+        private_directory(garden)?;
         config::check_private_output(&marker)?;
         if !marker.exists() {
             publish(&marker, b"1")?;
         }
     } else if enabled(&root) {
-        fs::remove_file(root.join("enabled"))?;
+        fs::remove_file(marker)?;
     }
-    let caps = client.call("mother_get_capabilities", &json!({}))?;
-    if caps["mediaAttachmentBridge"]["available"].as_bool() != Some(enable) {
-        return Err(Error::domain(
-            "RESTART_REQUIRED",
-            "Install the new owner service and restart it to load the media bridge.",
-        ));
+    let observed = client.request("local_media_policy", &json!({}))?;
+    if observed["available"].as_bool() != Some(enable) {
+        return Err(conflict());
     }
-    Ok(json!({"enabled":enable,"clientId":client.config().client_id}))
+    Ok(observed)
 }
 fn publish(path: &Path, bytes: &[u8]) -> Result<()> {
     let mut file = tempfile::NamedTempFile::new_in(path.parent().ok_or_else(invalid)?)?;
@@ -148,17 +201,17 @@ fn read_decision(dir: &Path) -> Result<Decision> {
 }
 
 pub fn review(
-    client: &LocalClient,
+    client: &dyn AttachmentClient,
     proposal: &str,
     operation: &str,
     approve: bool,
 ) -> Result<Value> {
-    let root = client_root(client.config())?;
+    let root = client.inbox_root()?;
     if !enabled(&root) {
         return Err(denied());
     }
     let args = json!({"proposalId":proposal});
-    let current = client.call(STATUS, &args)?;
+    let current = client.request(STATUS, &args)?;
     if current["reviewId"] != operation {
         return Err(conflict());
     }
@@ -177,7 +230,7 @@ pub fn review(
             return Err(conflict());
         }
     }
-    client.call("local_media_finish_review", &args)
+    client.request("local_media_finish_review", &args)
 }
 
 fn enforce_quota(root: &Path) -> Result<()> {
@@ -202,14 +255,15 @@ fn enforce_quota(root: &Path) -> Result<()> {
 }
 
 /// Hand bytes to the authenticated owner without sending a large JSON frame through a Windows pipe.
-pub fn submit(client: &LocalClient, mut metadata: Value, bytes: &[u8]) -> Result<Value> {
+pub fn submit(client: &dyn AttachmentClient, mut metadata: Value, bytes: &[u8]) -> Result<Value> {
     if bytes.is_empty() || bytes.len() > MAX_BYTES {
         return Err(invalid());
     }
-    let root = client_root(client.config())?;
+    let root = client.inbox_root()?;
     if !enabled(&root) {
         return Err(denied());
     }
+    private_directory(&root)?;
     let lock_path = root.join("transfer.lock");
     config::check_private_output(&lock_path)?;
     let mut options = fs::OpenOptions::new();
@@ -231,8 +285,12 @@ pub fn submit(client: &LocalClient, mut metadata: Value, bytes: &[u8]) -> Result
     let mut file = tempfile::NamedTempFile::new_in(&root)?;
     file.write_all(bytes)?;
     file.persist(&path).map_err(|e| e.error)?;
-    metadata["transferDigest"] = json!(format!("{:x}", Sha256::digest(bytes)));
-    let response = client.call("local_media_stage", &metadata);
+    let digest = format!("{:x}", Sha256::digest(bytes));
+    if metadata["fileId"].is_null() {
+        metadata["fileId"] = json!(format!("urn:sha256:{digest}"));
+    }
+    metadata["transferDigest"] = json!(digest);
+    let response = client.request("local_media_stage", &metadata);
     // There is only one bounded transfer slot. A crash leaves a file that the next submission replaces.
     fs::remove_file(&path)?;
     response
@@ -349,6 +407,14 @@ pub(super) fn dispatch(
     method: &str,
     args: &Value,
 ) -> Result<Value> {
+    if method == "local_media_location" {
+        store.v1_authorize(auth, "read")?;
+        return Ok(json!({"directory":root}));
+    }
+    if method == "local_media_policy" {
+        store.v1_authorize(auth, "read")?;
+        return Ok(capabilities(enabled(root)));
+    }
     if !enabled(root) {
         return Err(denied());
     }

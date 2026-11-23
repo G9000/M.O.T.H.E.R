@@ -1,8 +1,8 @@
-//! ChatGPT supplies a short-lived download URL through its file parameter.
+//! Portable selected-byte proposals and optional host file references.
 use super::input_error;
 use mother::{
     error::{Error, Result},
-    service::{LocalClient, attachment::MAX_BYTES},
+    service::attachment::{self, AttachmentClient, MAX_BYTES},
 };
 use serde::Deserialize;
 use serde_json::{Value, json};
@@ -19,7 +19,7 @@ static DOWNLOADING: Mutex<()> = Mutex::new(());
 
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
-struct Proposal {
+struct HostProposal {
     proposal_id: String,
     memory_id: String,
     file: HostFile,
@@ -136,28 +136,89 @@ fn download(url: &Url) -> Result<Vec<u8>> {
     result
 }
 
-pub(super) fn propose(client: &LocalClient, args: Value) -> Result<Value> {
-    let p: Proposal = serde_json::from_value(args).map_err(|_| input_error())?;
-    for id in [&p.proposal_id, &p.memory_id] {
-        if Uuid::parse_str(id).map_err(|_| input_error())?.to_string() != *id {
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct BytesProposal {
+    proposal_id: String,
+    memory_id: String,
+    content_base64: String,
+    file_name: Option<String>,
+    media_type: Option<String>,
+    source_file_id: Option<String>,
+}
+
+pub(super) fn call(client: &dyn AttachmentClient, name: &str, args: Value) -> Result<Value> {
+    if name == attachment::STATUS {
+        return client.request(name, &args);
+    }
+    let proposal_id = args["proposalId"].as_str().ok_or_else(input_error)?;
+    let memory = args["memoryId"].as_str().ok_or_else(input_error)?;
+    for id in [proposal_id, memory] {
+        if Uuid::parse_str(id).map_err(|_| input_error())?.to_string() != id {
             return Err(input_error());
         }
     }
-    let url = allowed_url(&p.file.download_url)?;
-    let _slot = DOWNLOADING
-        .try_lock()
-        .map_err(|_| Error::domain("RESOURCE_LIMIT", "Another media transfer is in progress."))?;
-    let target = client.call(
-        "local_media_target",
-        &json!({"memoryId":p.memory_id.to_string()}),
-    )?;
-    let bytes = download(&url)?;
-    mother::service::attachment::submit(
-        client,
-        json!({"proposalId":p.proposal_id,"memoryId":p.memory_id,
-        "expectedRevision":target["revision"],"fileId":p.file.file_id,"fileName":p.file.file_name,"mimeType":p.file.mime_type}),
-        &bytes,
+    let target = client.request("local_media_target", &json!({"memoryId":memory}))?;
+    let (metadata, bytes) = match name {
+        attachment::HOST_FILE => {
+            let item: HostProposal = serde_json::from_value(args).map_err(|_| input_error())?;
+            let url = allowed_url(&item.file.download_url)?;
+            let _slot = DOWNLOADING.try_lock().map_err(|_| {
+                Error::domain(
+                    "RESOURCE_LIMIT",
+                    "Another host file download is in progress.",
+                )
+            })?;
+            let bytes = download(&url)?;
+            (
+                json!({"proposalId":item.proposal_id,"memoryId":item.memory_id,"expectedRevision":target["revision"],
+                "fileId":item.file.file_id,"fileName":item.file.file_name,"mimeType":item.file.mime_type}),
+                bytes,
+            )
+        }
+        attachment::PROPOSE => {
+            let item: BytesProposal = serde_json::from_value(args).map_err(|_| input_error())?;
+            if item.content_base64.len() > MAX_BYTES.div_ceil(3) * 4 {
+                return Err(input_error());
+            }
+            let bytes = base64::decode(item.content_base64).map_err(|_| input_error())?;
+            (
+                json!({"proposalId":item.proposal_id,"memoryId":item.memory_id,"expectedRevision":target["revision"],
+                "fileId":item.source_file_id,"fileName":item.file_name,"mimeType":item.media_type}),
+                bytes,
+            )
+        }
+        _ => return Err(input_error()),
+    };
+    attachment::submit(client, metadata, &bytes)
+}
+pub(super) fn is_tool(name: &str) -> bool {
+    matches!(
+        name,
+        attachment::PROPOSE | attachment::HOST_FILE | attachment::STATUS
     )
+}
+pub(super) fn add_tools(tools: &mut Vec<rmcp::model::Tool>) -> Result<()> {
+    let added: Vec<rmcp::model::Tool> =
+        serde_json::from_str(include_str!("../../contracts/media-attachment-tools.json"))?;
+    tools.extend(added);
+    Ok(())
+}
+pub(super) async fn list_tools(
+    base: &[rmcp::model::Tool],
+    page: Option<rmcp::model::PaginatedRequestParams>,
+    policy: impl FnOnce() -> Result<bool> + Send + 'static,
+) -> std::result::Result<rmcp::model::ListToolsResult, rmcp::ErrorData> {
+    let mut catalog = base.to_vec();
+    let available = tokio::task::spawn_blocking(policy)
+        .await
+        .map_err(|_| rmcp::ErrorData::internal_error("Could not check media policy.", None))?
+        .map_err(|_| rmcp::ErrorData::internal_error("Could not check media policy.", None))?;
+    if available {
+        add_tools(&mut catalog)
+            .map_err(|_| rmcp::ErrorData::internal_error("Could not load media tools.", None))?;
+    }
+    super::discovery::list_tools(&catalog, page)
 }
 
 #[cfg(test)]
