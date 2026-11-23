@@ -35,7 +35,30 @@ export async function loadSnapshot() {
 export async function fetchReading(id) {
   if (!session) return null;
   const res = await fetch(`./api/garden/records/${encodeURIComponent(id)}`, { headers: { Authorization: `Bearer ${session}` } });
-  return res.ok ? res.json() : null;
+  if (!res.ok) return null;
+  const reading = await res.json();
+  const listing = await attachmentListing();
+  reading.attachments = (listing.images ?? []).flatMap(item =>
+    (item.memoryLinks ?? []).filter(link => link.memoryId === id).map(link => ({
+      sha256: item.sha256, originalSha256: item.originalSha256, mediaType: item.mediaType,
+      variant: item.variant, link, acquisition: item.acquisitions?.find(a => a.id === link.acquisitionId),
+    })));
+  reading.mediaWithheld = (listing.unavailableMemories ?? []).includes(id);
+  return reading;
+}
+
+export async function attachmentListing() {
+  if (!session) return {};
+  try {
+    const res = await fetch('./api/media', { headers: { Authorization: `Bearer ${session}` } });
+    return res.ok ? await res.json() : {};
+  } catch { return {}; }
+}
+
+export async function attachmentBlob(sha) {
+  if (!session || !/^[0-9a-f]{64}$/.test(sha)) return null;
+  const res = await fetch(`./api/media/${sha}`, { headers: { Authorization: `Bearer ${session}` } });
+  return res.ok ? res.blob() : null;
 }
 
 export async function fetchSnapshot(since) {

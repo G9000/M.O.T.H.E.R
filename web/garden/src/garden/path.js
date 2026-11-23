@@ -5,6 +5,7 @@
 // Read-only like the rest: it shows the snapshot it was given and opens records in the reader. Nothing it holds is
 // kept in browser storage.
 import { createReader } from './reader.js';
+import { attachmentListing } from './session.js';
 
 const esc = (s) => String(s ?? '').replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c]);
 const KINDS = ['memory', 'decision', 'task', 'checkpoint', 'artifact', 'action'];
@@ -45,6 +46,7 @@ const reflection = (r) => r.kind === 'memory' && r.basis === 'model_inference' &
  */
 export function createReadingPath(root, { snapshot, read, closeable = true, banner = '', onOpen = () => {}, onClose = () => {}, signal }) {
   let records = [];
+  let mediaMemories = new Set();
   let reflections = new Map();
   let opener = null;
   let behind = [];
@@ -60,6 +62,7 @@ export function createReadingPath(root, { snapshot, read, closeable = true, bann
 
   const time = (r) => Date.parse(r.createdAt) || 0;
   const passes = (r) => {
+    if (want.media && !mediaMemories.has(r.id)) return false;
     if (!want.kinds.has(r.kind)) return false;
     if (want.retired && RETIRED[r.status]) return false;
     if (!want.words.length) return true;
@@ -95,6 +98,7 @@ export function createReadingPath(root, { snapshot, read, closeable = true, bann
       `<span class="dot" style="background:${CSS[r.pinned ? 'pinned' : r.kind]}"></span>${esc(KIND[r.kind])}`,
       `Recorded ${day(r.createdAt)}`,
       esc(capture(r)),
+      ...(mediaMemories.has(r.id) ? ['Has media'] : []),
       ...(n ? [`${n} ${n === 1 ? 'reflection' : 'reflections'}`] : []),
       ...(retired ? [`<span class="rpoff">${retired}, kept as history</span>`] : []),
     ];
@@ -154,6 +158,7 @@ export function createReadingPath(root, { snapshot, read, closeable = true, bann
             <div class="rpkinds" role="group" aria-label="Kinds shown">${KINDS.filter((k) => records.some((r) => r.kind === k))
               .map((k) => `<button data-kind="${k}" aria-pressed="${want.kinds.has(k)}"><span class="dot" style="background:${CSS[k]}"></span>${PLURAL[k]}</button>`)
               .join('')}</div>
+            <label class="check"><input type="checkbox" id="rp-media" ${want.media ? 'checked' : ''} /> Has media</label>
             <label class="check"><input type="checkbox" id="rp-retired" ${want.retired ? 'checked' : ''} /> Set aside retired records</label>
           </div>
         </div>
@@ -169,6 +174,9 @@ export function createReadingPath(root, { snapshot, read, closeable = true, bann
   on('input', (e) => {
     if (e.target.id === 'rp-q') {
       want.words = e.target.value.trim().toLowerCase().split(/\s+/).filter(Boolean);
+      list();
+    } else if (e.target.id === 'rp-media') {
+      want.media = e.target.checked;
       list();
     } else if (e.target.id === 'rp-retired') {
       want.retired = e.target.checked;
@@ -228,6 +236,10 @@ export function createReadingPath(root, { snapshot, read, closeable = true, bann
     opener = from;
     draw();
     root.hidden = false;
+    void attachmentListing().then(({ images = [] }) => {
+      mediaMemories = new Set(images.flatMap(item => (item.memoryLinks ?? []).map(link => link.memoryId)));
+      if (!root.hidden) list();
+    });
     // over the garden, what is behind can't be reached by Tab or a screen reader; the reader stays reachable
     if (closeable) {
       behind = [...root.parentElement.children].filter((el) => el !== root && el.id !== 'reader' && !el.inert && !['SCRIPT', 'NOSCRIPT'].includes(el.tagName));

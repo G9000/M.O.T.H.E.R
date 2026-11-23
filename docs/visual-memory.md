@@ -1,5 +1,7 @@
 # Visual memory
 
+[Attach an exported photo or recording to an existing v1 memory](memory-attachments.md).
+
 Mother keeps images, audio and video as evidence alongside graph memories. The original bytes are stored unchanged and verified by SHA-256. Captions, descriptions, OCR and transcripts are separate, attributed claims about the media. They never replace it. The design and its decisions are in [the visual memory spec](superpowers/specs/2026-11-22-visual-memory-design.md).
 
 Everything here works on the native redb Garden's v2 graph. The v1 `artifact` record type and its text-only media types are unchanged.
