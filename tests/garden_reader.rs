@@ -164,7 +164,8 @@ fn backfill_cli_round_trip_uses_an_explicit_approval() {
 
 #[test]
 fn owner_backfill_binds_reviewed_video_and_replays_after_reopen() {
-    let dir = tempfile::tempdir().unwrap();
+    let temp = std::fs::canonicalize(std::env::temp_dir()).unwrap();
+    let dir = tempfile::tempdir_in(temp).unwrap();
     let db = dir.path().join("garden.redb");
     let garden = Garden::new(&db);
     let record = garden.write(memory(
