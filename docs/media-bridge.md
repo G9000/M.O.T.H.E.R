@@ -37,12 +37,28 @@ mother garden media bridge --config "$service_config" propose \
 
 | Host | Connection | Source bytes | Qualification |
 | --- | --- | --- | --- |
-| ChatGPT connected app | Existing supported remote transport to native stdio | The owner exports or downloads the selected original if available, then selects it in the live Garden. The Apps SDK exposes plugin-authorized file selection and temporary download URLs. This bridge does not dereference them. An opaque Library ID alone yields the local handoff. | Live host catalog, historical file access and selected-file transfer depend on the installation. |
+| ChatGPT connected app | Existing supported remote transport to native stdio | `mother_media_attachment_import` declares `openai/fileParams`, so ChatGPT can pass a file the owner attached or picked from the Library as `{download_url, file_id}`. The bridge downloads it from OpenAI file hosts and streams it. Without a passed file, an opaque Library ID yields the local owner handoff. | Native catalog and the synthetic import path are tested. Whether ChatGPT fills the file parameter for Library files through this tunnel must be confirmed with one real call; see below. |
 | Codex | [Local MCP stdio](https://developers.openai.com/codex/mcp) with a dedicated config | A host-side reader can supply chunks or invoke the selected-file helper. Owner file handoff also works. | The native executable's stdio contract is covered by the synthetic protocol test. Verify the actual Codex catalog after reconnecting. |
 | Claude Code | [Local MCP stdio](https://code.claude.com/docs/en/mcp#option-3-add-a-local-stdio-server) with a dedicated config | Same local selection and transfer options as Codex. | Separate credentials are covered by protocol tests. Verify the actual Claude Code catalog after reconnecting. |
 | Generic MCP clients | Native MCP stdio or an authenticated adapter that preserves tool schemas and identity | The client reads authorized originals and submits bounded chunks. Clients without that access use the owner file handoff. | Standard MCP tool listing and calls are exercised against the executable. |
 
-[OpenAI's plugin reference](https://developers.openai.com/plugins/reference#define-file-inputs) documents `openai/fileParams` and temporary URLs. ChatGPT file selection requires a host that authorizes the file to a specific plugin. A future file provider can send bytes through the portable tools. The core accepts neither paths nor URLs and makes zero outbound fetches.
+[OpenAI's plugin reference](https://developers.openai.com/plugins/reference#define-file-inputs) documents `openai/fileParams`: each declared field receives `{ download_url, file_id, mime_type?, file_name? }`. The owner service still accepts neither paths nor URLs and makes no outbound requests. Only the harness's own `mother mcp` bridge fetches, and only for `mother_media_attachment_import`.
+
+### Host file import
+
+1. Attach the original to the ChatGPT conversation, from the device or from the ChatGPT Library. Several files can be attached at once for a batch.
+2. Ask ChatGPT to read the target memory and call `mother_media_attachment_import` with a fresh operation UUID, the memory ID and revision, and the attached file.
+3. The bridge downloads once, computes size and SHA-256 from the actual bytes, prepares with the Library `file_id` as the source locator, streams 64 KiB chunks and submits. The result is `pending_owner_review`; nothing is attached yet.
+4. Approve in the live Garden under **Attachment review**, then confirm with `mother_media_attachment_status`.
+
+Download rules: HTTPS only; hosts under `oaiusercontent.com`, `chatgpt.com` or `openai.com`, matched by whole labels; no credentials, ports or IP literals. Redirects are re-checked against the same rules, with at most three. The download is capped at 32 MiB and two minutes. Errors name the host but never echo the signed link. An exact retry of an operation that has already left `uploading` returns its state without downloading again; a retry while uploading resumes at `receivedBytes`. A bare string such as `chat_upload` or a missing file object returns `SOURCE_BYTES_UNAVAILABLE`, and the owner handoff still applies.
+
+| Path | Status |
+| --- | --- |
+| ChatGPT file parameter, file attached in the conversation | Documented by OpenAI; verify with one live call after installing this build. |
+| ChatGPT Library file attached to the conversation | Same mechanism; host behaviour for Library files is not documented and must be verified live. |
+| ChatGPT Library ID only, no attached file | Unsupported for automatic transfer: owner handoff in Attachment review. |
+| Codex, Claude Code, other local hosts | Selected-file helper or chunked upload; unchanged. |
 
 ## Limits and recovery
 

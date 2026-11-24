@@ -1,0 +1,270 @@
+//! Acquire an original that the MCP host itself handed to a tool as a file parameter.
+//!
+//! ChatGPT resolves a declared `openai/fileParams` field to
+//! `{download_url, file_id, mime_type?, file_name?}`. This adapter downloads only
+//! from the host's own file domains, hashes the actual bytes and reuses the
+//! ordinary chunked attachment protocol, so every result still waits for local
+//! owner review. It is not a general URL fetcher.
+use super::attachment::{AttachmentClient, MAX_BYTES, STATUS, send_original};
+use crate::{
+    contracts,
+    error::{Error, Result, invalid},
+};
+use serde_json::{Value, json};
+use std::{io::Read, time::Duration};
+use url::Url;
+
+pub const IMPORT: &str = "mother_media_attachment_import";
+
+/// Hosts that serve ChatGPT file-parameter downloads. Matching is by whole DNS labels.
+const HOSTS: [&str; 3] = ["oaiusercontent.com", "chatgpt.com", "openai.com"];
+const MAX_REDIRECTS: usize = 3;
+const TIMEOUT: Duration = Duration::from_secs(120);
+
+fn unavailable(detail: &str) -> Error {
+    Error::domain(
+        "SOURCE_BYTES_UNAVAILABLE",
+        format!(
+            "{detail} Ask the owner to attach the original to this conversation, or use Attachment review in the local Garden."
+        ),
+    )
+}
+
+/// Accept only an https URL on a recognised host-file domain, without credentials or ports.
+pub(crate) fn allowed(url: &Url) -> bool {
+    let host = match url.host() {
+        Some(url::Host::Domain(host)) => host.to_ascii_lowercase(),
+        _ => return false,
+    };
+    url.scheme() == "https"
+        && url.username().is_empty()
+        && url.password().is_none()
+        && url.port().is_none()
+        && HOSTS
+            .iter()
+            .any(|suffix| host == *suffix || host.ends_with(&format!(".{suffix}")))
+}
+
+fn host_of(url: &Url) -> String {
+    url.host_str().unwrap_or("unknown").to_owned()
+}
+
+/// Download at most `MAX_BYTES`, following only redirects that stay on allowed hosts.
+fn download(start: &str) -> Result<Vec<u8>> {
+    let mut url = Url::parse(start).map_err(|_| unavailable("The host file link is invalid."))?;
+    let agent: ureq::Agent = ureq::Agent::config_builder()
+        .max_redirects(0)
+        .timeout_global(Some(TIMEOUT))
+        .http_status_as_error(false)
+        .https_only(true)
+        .build()
+        .into();
+    for _ in 0..=MAX_REDIRECTS {
+        if !allowed(&url) {
+            // Report the host, never the signed link.
+            return Err(unavailable(&format!(
+                "The host file link points to an unsupported host ({}).",
+                host_of(&url)
+            )));
+        }
+        let response = agent
+            .get(url.as_str())
+            .call()
+            .map_err(|_| unavailable("The host file download failed."))?;
+        let status = response.status().as_u16();
+        if (300..400).contains(&status) {
+            let location = response
+                .headers()
+                .get("location")
+                .and_then(|value| value.to_str().ok())
+                .ok_or_else(|| unavailable("The host file redirect was incomplete."))?;
+            url = url
+                .join(location)
+                .map_err(|_| unavailable("The host file redirect was invalid."))?;
+            continue;
+        }
+        if status != 200 {
+            return Err(unavailable(&format!(
+                "The host file download returned HTTP {status}; the link may have expired."
+            )));
+        }
+        let mut bytes = Vec::new();
+        response
+            .into_body()
+            .into_reader()
+            .take(MAX_BYTES + 1)
+            .read_to_end(&mut bytes)
+            .map_err(|_| unavailable("The host file download was interrupted."))?;
+        if bytes.len() as u64 > MAX_BYTES {
+            return Err(Error::domain(
+                "LIMIT_EXCEEDED",
+                "The original exceeds the attachment size limit.",
+            ));
+        }
+        return Ok(bytes);
+    }
+    Err(unavailable(
+        "The host file download redirected too many times.",
+    ))
+}
+
+/// Keep only the final path component of a host-supplied name.
+fn base_name(name: &str) -> Option<String> {
+    let name = name.rsplit(['/', '\\']).next()?.trim();
+    (!name.is_empty() && name != "." && name != "..").then(|| name.to_owned())
+}
+
+fn file_id(id: &str) -> bool {
+    (5..=160).contains(&id.len())
+        && (id.starts_with("file_") || id.starts_with("file-"))
+        && id
+            .bytes()
+            .all(|b| b.is_ascii_alphanumeric() || b == b'_' || b == b'-')
+}
+
+/// Prepare, stream and submit a host-provided original for owner review.
+pub fn import(client: &dyn AttachmentClient, args: &Value) -> Result<Value> {
+    import_with(client, args, download)
+}
+
+/// `import` with an injectable downloader, used by synthetic tests.
+pub(crate) fn import_with(
+    client: &dyn AttachmentClient,
+    args: &Value,
+    download: impl FnOnce(&str) -> Result<Vec<u8>>,
+) -> Result<Value> {
+    let object = args
+        .as_object()
+        .ok_or_else(|| invalid("Expected tool arguments"))?;
+    if let Some(key) = object.keys().find(|key| {
+        !["operationId", "memoryId", "expectedRevision", "file"].contains(&key.as_str())
+    }) {
+        return Err(invalid(format!("Unexpected argument {key}")));
+    }
+    let operation = contracts::string(args, "operationId")?;
+    let file = &args["file"];
+    let id = file["file_id"]
+        .as_str()
+        .filter(|id| file_id(id))
+        .ok_or_else(|| unavailable("The host did not provide a file reference."))?;
+    let link = file["download_url"]
+        .as_str()
+        .ok_or_else(|| unavailable("The host did not provide the original bytes."))?;
+    // An existing operation is reconciled without downloading again.
+    match client.request(STATUS, &json!({"operationId":operation})) {
+        Ok(state) if state["status"] != "uploading" => return Ok(state),
+        Ok(_) => {}
+        Err(error) if error.code() == "NOT_FOUND" => {}
+        Err(error) => return Err(error),
+    }
+    let bytes = download(link)?;
+    let name = file["file_name"]
+        .as_str()
+        .and_then(base_name)
+        .unwrap_or_else(|| id.to_owned());
+    let mut declared = json!({"fileName": name});
+    if let Some(kind) = file["mime_type"].as_str().filter(|kind| {
+        ["image/", "audio/", "video/"]
+            .iter()
+            .any(|prefix| kind.starts_with(prefix))
+    }) {
+        declared["mediaType"] = json!(kind);
+    }
+    send_original(
+        client,
+        &mut std::io::Cursor::new(bytes),
+        json!({
+            "operationId": operation,
+            "memoryId": args["memoryId"],
+            "expectedRevision": args["expectedRevision"],
+            "sourceLocator": id,
+            "file": declared,
+        }),
+    )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn url(text: &str) -> Url {
+        Url::parse(text).unwrap()
+    }
+
+    #[test]
+    fn only_host_file_domains_over_https_are_fetchable() {
+        for ok in [
+            "https://files.oaiusercontent.com/file-abc?sig=x",
+            "https://sdmntprwestus.oaiusercontent.com/files/x",
+            "https://chatgpt.com/backend-api/files/x",
+            "https://cdn.openai.com/x",
+        ] {
+            assert!(allowed(&url(ok)), "{ok}");
+        }
+        for bad in [
+            "http://files.oaiusercontent.com/x",
+            "https://evil-oaiusercontent.com/x",
+            "https://oaiusercontent.com.evil.test/x",
+            "https://user:pw@files.oaiusercontent.com/x",
+            "https://files.oaiusercontent.com:8443/x",
+            "https://127.0.0.1/x",
+            "https://[::1]/x",
+            "https://localhost/x",
+            "file:///C:/Windows/win.ini",
+        ] {
+            assert!(!allowed(&url(bad)), "{bad}");
+        }
+    }
+
+    #[test]
+    fn names_and_references_are_bounded() {
+        assert_eq!(base_name("IMG_4408.mp4").as_deref(), Some("IMG_4408.mp4"));
+        assert_eq!(
+            base_name("/mnt/data/a\\IMG.mp4").as_deref(),
+            Some("IMG.mp4")
+        );
+        assert_eq!(base_name("dir/"), None);
+        assert_eq!(base_name(".."), None);
+        assert!(file_id("file_00000000b6f8820790d24bf6796d36f5"));
+        assert!(file_id("file-AbC123"));
+        assert!(!file_id("chat_upload"));
+        assert!(!file_id("file_../../x"));
+    }
+
+    struct Recorder(std::sync::Mutex<Vec<String>>);
+    impl AttachmentClient for Recorder {
+        fn request(&self, method: &str, _: &Value) -> Result<Value> {
+            self.0.lock().unwrap().push(method.to_owned());
+            if method == STATUS {
+                Err(Error::domain("NOT_FOUND", "unknown"))
+            } else {
+                Err(Error::domain("FORBIDDEN", "not reached"))
+            }
+        }
+    }
+
+    #[test]
+    fn missing_or_foreign_links_never_reach_prepare_or_the_network() {
+        let client = Recorder(std::sync::Mutex::new(Vec::new()));
+        let base = json!({"operationId":"9b2c7a8e-0f51-4a41-9a8d-4f0a2c1d3e5f",
+            "memoryId":"1566a505-69d7-475c-a9c7-fcca57e0b8b5","expectedRevision":1});
+        let mut bare = base.clone();
+        bare["file"] = json!("chat_upload");
+        assert_eq!(
+            import(&client, &bare).unwrap_err().code(),
+            "SOURCE_BYTES_UNAVAILABLE"
+        );
+        let mut foreign = base.clone();
+        foreign["file"] =
+            json!({"file_id":"file_abc12","download_url":"https://169.254.169.254/latest"});
+        let error = import(&client, &foreign).unwrap_err();
+        assert_eq!(error.code(), "SOURCE_BYTES_UNAVAILABLE");
+        assert!(error.to_string().contains("169.254.169.254"));
+        assert!(!error.to_string().contains("/latest"));
+        let mut extra = base;
+        extra["url"] = json!("https://example.test");
+        assert_eq!(import(&client, &extra).unwrap_err().code(), "INVALID_INPUT");
+        // Only the status reconciliation was attempted; nothing was prepared.
+        assert_eq!(*client.0.lock().unwrap(), vec![STATUS.to_owned()]);
+    }
+}
