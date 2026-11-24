@@ -5,7 +5,8 @@ use mother::{
 };
 use serde_json::{Value, json};
 use std::{
-    io::{BufRead, BufReader, Write},
+    io::{BufRead, BufReader, Read, Write},
+    net::TcpStream,
     path::Path,
     process::{Child, ChildStdin, Command, Stdio},
     sync::mpsc,
@@ -14,6 +15,28 @@ use std::{
 };
 #[path = "support/mcp_discovery.rs"]
 mod discovery;
+
+fn browser_request(port: u16, method: &str, path: &str, token: &str, body: &str) -> (u16, Vec<u8>) {
+    let mut stream = TcpStream::connect(("127.0.0.1", port)).unwrap();
+    stream
+        .set_read_timeout(Some(Duration::from_secs(10)))
+        .unwrap();
+    write!(stream,"{method} {path} HTTP/1.1\r\nHost: 127.0.0.1:{port}\r\nOrigin: http://127.0.0.1:{port}\r\nAuthorization: Bearer {token}\r\nContent-Type: application/json\r\nContent-Length: {}\r\n\r\n{body}",body.len()).unwrap();
+    let mut response = Vec::new();
+    stream.read_to_end(&mut response).unwrap();
+    let end = response
+        .windows(4)
+        .position(|part| part == b"\r\n\r\n")
+        .unwrap();
+    let status = std::str::from_utf8(&response[..end])
+        .unwrap()
+        .split_whitespace()
+        .nth(1)
+        .unwrap()
+        .parse()
+        .unwrap();
+    (status, response.split_off(end + 4))
+}
 
 struct Process(Child);
 impl Drop for Process {
@@ -144,6 +167,7 @@ fn two_stdio_harnesses_share_one_local_owner_and_reconcile_the_same_write() {
             .arg(&db)
             .arg("--endpoint")
             .arg(&endpoint)
+            .arg("--explore")
             .env("MOTHER_HOME", dir.path())
             .env("MOTHER_MODEL_DIR", dir.path().join("missing-model"))
             .stdin(Stdio::null())
@@ -215,7 +239,7 @@ fn two_stdio_harnesses_share_one_local_owner_and_reconcile_the_same_write() {
         second.call("mother_get_context", json!({}))["inventory"]["totalRecords"],
         1
     );
-    use mother::service::attachment::{PREPARE, STATUS, SUBMIT, UPLOAD};
+    use mother::service::attachment::{CHUNK, PREPARE, STATUS, SUBMIT, UPLOAD};
     use sha2::{Digest, Sha256};
     assert!(tools.iter().all(|tool| tool["name"] != PREPARE));
     let mut transfer = Harness::new(&other_config);
@@ -230,23 +254,27 @@ fn two_stdio_harnesses_share_one_local_owner_and_reconcile_the_same_write() {
         assert_eq!(actual["inputSchema"], entry["inputSchema"]);
     }
     assert_eq!(catalog.len(), 17);
-    let bytes = include_bytes!("fixtures/attachment-sample.mp4");
+    let mut bytes = include_bytes!("fixtures/attachment-sample.mp4").to_vec();
+    let size = CHUNK + 1024;
+    bytes.extend_from_slice(&((size - bytes.len()) as u32).to_be_bytes());
+    bytes.extend_from_slice(b"free");
+    bytes.resize(size, 0);
     let operation = uuid::Uuid::new_v4().to_string();
     let target = transfer.call("mother_get_record", json!({"id":receipt["record"]["id"]}));
     let input = json!({"operationId":operation,"memoryId":target["id"],"expectedRevision":target["revision"],
-        "file":{"fileName":"fixture.mp4","sizeBytes":bytes.len(),"sha256":format!("{:x}",Sha256::digest(bytes))}});
+        "file":{"fileName":"fixture.mp4","sizeBytes":bytes.len(),"sha256":format!("{:x}",Sha256::digest(&bytes))}});
     let denied = second.rpc("tools/call", json!({"name":PREPARE,"arguments":input}));
     assert_eq!(denied["result"]["isError"], true);
     let prepared = transfer.call(PREPARE, input.clone());
     let token = prepared["transferToken"].clone();
-    let first_chunk = json!({"operationId":operation,"transferToken":token,"offset":0,"contentBase64":base64::encode(&bytes[..512])});
-    assert_eq!(transfer.call(UPLOAD, first_chunk)["receivedBytes"], 512);
+    let first_chunk = json!({"operationId":operation,"transferToken":token,"offset":0,"contentBase64":base64::encode(&bytes[..CHUNK])});
+    assert_eq!(transfer.call(UPLOAD, first_chunk)["receivedBytes"], CHUNK);
     drop(transfer);
     let mut transfer = Harness::new(&other_config);
     let query = json!({"operationId":operation});
-    assert_eq!(transfer.call(STATUS, query.clone())["receivedBytes"], 512);
+    assert_eq!(transfer.call(STATUS, query.clone())["receivedBytes"], CHUNK);
     assert_eq!(transfer.call(PREPARE, input)["transferToken"], token);
-    transfer.call(UPLOAD,json!({"operationId":operation,"transferToken":token,"offset":512,"contentBase64":base64::encode(&bytes[512..])}));
+    transfer.call(UPLOAD,json!({"operationId":operation,"transferToken":token,"offset":CHUNK,"contentBase64":base64::encode(&bytes[CHUNK..])}));
     let staged = transfer.call(
         SUBMIT,
         json!({"operationId":operation,"transferToken":token}),
@@ -257,6 +285,45 @@ fn two_stdio_harnesses_share_one_local_owner_and_reconcile_the_same_write() {
         json!({"name":"local_media_finish_review","arguments":query}),
     );
     assert!(denied["error"].is_object());
+    let descriptor = mother::config::read_json(&endpoint, 16_384).unwrap();
+    let explorer_path = endpoint.with_added_extension(format!(
+        "{}.explorer",
+        descriptor["serviceId"].as_str().unwrap()
+    ));
+    let explorer = mother::config::read_json(&explorer_path, 16_384).unwrap();
+    let port = explorer["port"].as_u64().unwrap() as u16;
+    let (status, session) = browser_request(
+        port,
+        "POST",
+        "/api/session",
+        explorer["token"].as_str().unwrap(),
+        "",
+    );
+    assert_eq!(status, 200);
+    let session: Value = serde_json::from_slice(&session).unwrap();
+    let bearer = session["session"].as_str().unwrap();
+    let approval =
+        json!({"action":"approve","operationId":operation,"reviewId":staged["originalReviewId"]});
+    let (status, approved) = browser_request(
+        port,
+        "POST",
+        "/api/attachments",
+        bearer,
+        &approval.to_string(),
+    );
+    assert_eq!(status, 200);
+    let approved: Value = serde_json::from_slice(&approved).unwrap();
+    assert_eq!(approved["verification"]["verified"], true);
+    assert_eq!(approved["verification"]["link"]["memoryId"], target["id"]);
+    assert_eq!(transfer.call(STATUS, query.clone()), approved);
+    let media_path = format!(
+        "/api/media/{}",
+        approved["verification"]["sha256"].as_str().unwrap()
+    );
+    assert_eq!(
+        browser_request(port, "GET", &media_path, bearer, ""),
+        (200, bytes)
+    );
     drop(transfer);
     drop(first);
     drop(second);
@@ -264,7 +331,7 @@ fn two_stdio_harnesses_share_one_local_owner_and_reconcile_the_same_write() {
     let mut direct_host = Harness::new(&other_direct);
     let listed = discovery::collect(|params| direct_host.rpc("tools/list", params));
     assert!(listed.iter().any(|tool| tool["name"] == PREPARE));
-    assert_eq!(direct_host.call(STATUS, query), staged);
+    assert_eq!(direct_host.call(STATUS, query), approved);
     drop(direct_host);
     let reopened = GardenStore::open(&db).unwrap();
     assert!(reopened.v1_initialized().unwrap());

@@ -464,7 +464,7 @@ impl LocalService {
     pub fn store(&self) -> &GardenStore {
         &self.store
     }
-    /// Lend the browser explorer a read source within this owner process.
+    /// Locate private transfer staging for this workspace generation.
     pub fn attachment_root(&self) -> Result<PathBuf> {
         super::attachment::root(
             &self.database_path,
@@ -472,6 +472,7 @@ impl LocalService {
             &self.info.generation,
         )
     }
+    /// Lend the local Garden its trusted store within this owner process.
     pub fn explorer_store(&self) -> std::sync::Weak<GardenStore> {
         Arc::downgrade(&self.store)
     }

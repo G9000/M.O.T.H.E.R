@@ -943,15 +943,20 @@ mod tests {
             }
         }
         fn write(&self, prior: Option<&Value>) -> Value {
-            let mut item = json!({"kind":"memory","title":"Synthetic memory","content":"Synthetic content",
+            let item = json!({"kind":"memory","title":"Synthetic memory","content":"Synthetic content",
                 "status":"active","basis":"source"});
-            if let Some(prior) = prior {
-                item["id"] = prior["id"].clone();
-            }
-            self.store.v1_call(&self.writer,"mother_write_record",json!({
+            let mut args = json!({
                 "workspaceId":self.ws,"generation":self.generation,"operationId":Uuid::new_v4().to_string(),
                 "expectedRevision":prior.map_or(json!(0), |p| p["revision"].clone()),"record":item
-            })).unwrap()["record"].clone()
+            });
+            if let Some(prior) = prior {
+                args["id"] = prior["id"].clone();
+                args["record"]["content"] = json!("Updated synthetic content");
+            }
+            self.store
+                .v1_call(&self.writer, "mother_write_record", args)
+                .unwrap()["record"]
+                .clone()
         }
         fn start(&self, target: &Value, bytes: &[u8]) -> Value {
             json!({"operationId":Uuid::new_v4().to_string(),"memoryId":target["id"],"expectedRevision":target["revision"],
