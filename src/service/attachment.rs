@@ -111,7 +111,13 @@ pub fn is_tool(name: &str) -> bool {
 pub fn capabilities(store: &GardenStore, auth: &Auth) -> Value {
     let available =
         store.v1_authorize(auth, SCOPE).is_ok() && store.v1_authorize(auth, "read").is_ok();
+    let host_file: &[&str] = if available {
+        &[super::host_file::IMPORT]
+    } else {
+        &[]
+    };
     json!({"available":available,"scope":SCOPE,"availableTools":if available {TOOLS.as_slice()} else {&[]},
+        "hostFileTools":host_file,
         "maxFileBytes":MAX_BYTES,"maxChunkBytes":CHUNK,"expiresAfterSeconds":LIFETIME,
         "requiresOriginalBytes":true,"ownerFileHandoff":true})
 }
@@ -857,15 +863,36 @@ pub fn send_file(client: &dyn AttachmentClient, path: &Path, mut args: Value) ->
     if !fs::metadata(path)?.is_file() {
         return Err(invalid("Select a regular local file"));
     }
-    let mut file = File::open(path)?;
-    let mut digest = Sha256::new();
-    let size = std::io::copy(&mut (&mut file).take(MAX_BYTES + 1), &mut digest)?;
     let name = path
         .file_name()
         .and_then(|name| name.to_str())
-        .ok_or_else(|| invalid("Expected a file name"))?;
-    args["file"] =
-        json!({"fileName":name,"sizeBytes":size,"sha256":format!("{:x}",digest.finalize())});
+        .ok_or_else(|| invalid("Expected a file name"))?
+        .to_owned();
+    args["file"] = json!({"fileName":name});
+    send_original(client, &mut File::open(path)?, args)
+}
+
+/// Hash, declare and stream original bytes through the ordinary chunked protocol.
+///
+/// `args["file"]` supplies the name and optional media type; size and digest
+/// always come from the bytes themselves. An exact retry resumes at the
+/// owner's `receivedBytes`, and a non-uploading state is returned unchanged.
+pub fn send_original<R: Read + Seek>(
+    client: &dyn AttachmentClient,
+    file: &mut R,
+    mut args: Value,
+) -> Result<Value> {
+    let mut digest = Sha256::new();
+    file.seek(SeekFrom::Start(0))?;
+    let size = std::io::copy(&mut file.by_ref().take(MAX_BYTES + 1), &mut digest)?;
+    if size == 0 || size > MAX_BYTES {
+        return Err(Error::domain(
+            "LIMIT_EXCEEDED",
+            "The original must be between one byte and the attachment size limit.",
+        ));
+    }
+    args["file"]["sizeBytes"] = json!(size);
+    args["file"]["sha256"] = json!(format!("{:x}", digest.finalize()));
     let state = client.request(PREPARE, &args)?;
     let Some(token) = state["transferToken"].as_str() else {
         return Ok(state);
@@ -1204,5 +1231,105 @@ mod tests {
         private_directory(&staging).unwrap();
         let session = private_temp(&staging).unwrap();
         crate::private_paths::owner_directory(session.path()).unwrap();
+    }
+
+    struct Direct<'a>(&'a Fixture, &'a Auth);
+    impl AttachmentClient for Direct<'_> {
+        fn request(&self, method: &str, args: &Value) -> Result<Value> {
+            dispatch(&self.0.store, self.1, &self.0.root, method, args)
+        }
+    }
+
+    /// A host file parameter reaches owner review from real bytes, survives an
+    /// exact retry, needs owner approval and reuses stored bytes for a second memory.
+    #[test]
+    fn host_file_parameter_reaches_owner_review_and_reuses_the_stored_original() {
+        use super::super::host_file::import_with;
+        let f = Fixture::new();
+        let target = f.write(None);
+        let bytes = video();
+        let link = "https://files.oaiusercontent.com/file-synthetic?sig=redacted";
+        let host_file = |id: &str| {
+            json!({"operationId":id,"memoryId":target["id"],"expectedRevision":target["revision"],
+                "file":{"download_url":link,"file_id":"file_00000000synthetic","mime_type":"video/mp4",
+                    "file_name":"/mnt/data/synthetic-clip.mp4"}})
+        };
+        let id = Uuid::new_v4().to_string();
+        let fetched = std::cell::Cell::new(0);
+        let fetch = |url: &str| {
+            assert_eq!(url, link);
+            fetched.set(fetched.get() + 1);
+            Ok(bytes.clone())
+        };
+        let client = Direct(&f, &f.transfer);
+        // A credential without media:attach is refused before anything is staged.
+        assert_eq!(
+            import_with(&Direct(&f, &f.reader), &host_file(&id), |_| Ok(
+                bytes.clone()
+            ))
+            .unwrap_err()
+            .code(),
+            "FORBIDDEN"
+        );
+        let staged = import_with(&client, &host_file(&id), fetch).unwrap();
+        assert_eq!(staged["status"], "pending_owner_review");
+        assert_eq!(staged["file"]["fileName"], "synthetic-clip.mp4");
+        assert_eq!(staged["file"]["sizeBytes"], bytes.len());
+        assert_eq!(
+            staged["file"]["sha256"],
+            format!("{:x}", Sha256::digest(&bytes))
+        );
+        assert_eq!(staged["sourceLocator"], "file_00000000synthetic");
+        // Unapproved media is not canonical: the narrative record is unchanged.
+        assert_eq!(
+            f.store
+                .v1_call(&f.writer, "mother_get_record", json!({"id":target["id"]}))
+                .unwrap(),
+            target
+        );
+        assert_eq!(f.store.media_verify().unwrap()["assetsChecked"], 0);
+        // A retry of the same operation reconciles without downloading again.
+        let retry = import_with(&client, &host_file(&id), |_| -> Result<Vec<u8>> {
+            panic!("an existing operation must not download again")
+        })
+        .unwrap();
+        assert_eq!(retry, staged);
+        assert_eq!(fetched.get(), 1);
+        let approved = f
+            .owner(
+                "approve",
+                &json!({"operationId":id,"reviewId":staged["reviewId"]}),
+            )
+            .unwrap();
+        assert_eq!(approved["verification"]["verified"], true);
+        assert_eq!(approved["verification"]["link"]["memoryId"], target["id"]);
+        // The same original for another memory reuses the stored bytes.
+        let second_target = f.write(None);
+        let second_id = Uuid::new_v4().to_string();
+        let mut second = host_file(&second_id);
+        second["memoryId"] = second_target["id"].clone();
+        second["expectedRevision"] = second_target["revision"].clone();
+        let staged = import_with(&client, &second, |_| Ok(bytes.clone())).unwrap();
+        let approved_again = f
+            .owner(
+                "approve",
+                &json!({"operationId":second_id,"reviewId":staged["reviewId"]}),
+            )
+            .unwrap();
+        assert_eq!(
+            approved_again["verification"]["sha256"],
+            approved["verification"]["sha256"]
+        );
+        assert_eq!(f.store.media_verify().unwrap()["assetsChecked"], 1);
+        // A cancelled import publishes nothing.
+        let third_target = f.write(None);
+        let third_id = Uuid::new_v4().to_string();
+        let mut third = host_file(&third_id);
+        third["memoryId"] = third_target["id"].clone();
+        third["expectedRevision"] = third_target["revision"].clone();
+        import_with(&client, &third, |_| Ok(bytes.clone())).unwrap();
+        let cancelled = f.call(CANCEL, json!({"operationId":third_id})).unwrap();
+        assert_eq!(cancelled["status"], "cancelled");
+        assert!(cancelled["verification"].is_null());
     }
 }

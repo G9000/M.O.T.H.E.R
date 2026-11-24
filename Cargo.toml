@@ -33,6 +33,8 @@ sha2 = "0.10"
 subtle = "2"
 thiserror = "2"
 tokio = { version = "1", features = ["macros", "rt-multi-thread", "io-std", "process", "sync"] }
+# Bounded download of host-provided file parameters (see src/service/host_file.rs).
+ureq = { version = "=3.5.1", default-features = false, features = ["rustls"] }
 url = "2"
 uuid = { version = "1", features = ["v4"] }
 

@@ -1,11 +1,20 @@
 //! Attachment tool discovery is driven by the credential's current grant.
-use mother::{error::Result, service::attachment::AttachmentClient};
+use mother::{
+    error::Result,
+    service::{attachment::AttachmentClient, host_file},
+};
 use serde_json::Value;
 
 pub(super) fn call(client: &dyn AttachmentClient, name: &str, args: Value) -> Result<Value> {
+    if name == host_file::IMPORT {
+        return host_file::import(client, &args);
+    }
     client.request(name, &args)
 }
-pub(super) use mother::service::attachment::is_tool;
+/// The five owner-side protocol tools plus the bridge-side host file adapter.
+pub(super) fn is_tool(name: &str) -> bool {
+    mother::service::attachment::is_tool(name) || name == host_file::IMPORT
+}
 
 pub(super) async fn list_tools(
     base: &[rmcp::model::Tool],
@@ -18,12 +27,15 @@ pub(super) async fn list_tools(
         .map_err(|_| rmcp::ErrorData::internal_error("Could not check media policy.", None))?
         .map_err(|_| rmcp::ErrorData::internal_error("Could not check media policy.", None))?;
     if available {
-        let tools: Vec<rmcp::model::Tool> =
-            serde_json::from_str(include_str!("../../contracts/media-attachment-tools.json"))
-                .map_err(|_| {
-                    rmcp::ErrorData::internal_error("Could not load media tools.", None)
-                })?;
-        catalog.extend(tools);
+        for contract in [
+            include_str!("../../contracts/media-attachment-tools.json"),
+            include_str!("../../contracts/media-host-file-tools.json"),
+        ] {
+            let tools: Vec<rmcp::model::Tool> = serde_json::from_str(contract).map_err(|_| {
+                rmcp::ErrorData::internal_error("Could not load media tools.", None)
+            })?;
+            catalog.extend(tools);
+        }
     }
     super::discovery::list_tools(&catalog, page)
 }

@@ -253,7 +253,15 @@ fn two_stdio_harnesses_share_one_local_owner_and_reconcile_the_same_write() {
             .unwrap();
         assert_eq!(actual["inputSchema"], entry["inputSchema"]);
     }
-    assert_eq!(catalog.len(), 17);
+    let host_file: Value =
+        serde_json::from_str(include_str!("../contracts/media-host-file-tools.json")).unwrap();
+    let import = catalog
+        .iter()
+        .find(|tool| tool["name"] == host_file[0]["name"])
+        .unwrap();
+    assert_eq!(import["inputSchema"], host_file[0]["inputSchema"]);
+    assert_eq!(import["_meta"]["openai/fileParams"], json!(["file"]));
+    assert_eq!(catalog.len(), 18);
     let mut bytes = include_bytes!("fixtures/attachment-sample.mp4").to_vec();
     let size = CHUNK + 1024;
     bytes.extend_from_slice(&((size - bytes.len()) as u32).to_be_bytes());
