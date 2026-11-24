@@ -18,6 +18,13 @@ pub const IMPORT: &str = "mother_media_attachment_import";
 
 /// Hosts that serve ChatGPT file-parameter downloads. Matching is by whole DNS labels.
 const HOSTS: [&str; 3] = ["oaiusercontent.com", "chatgpt.com", "openai.com"];
+/// Exact third-party storage hosts observed in ChatGPT file-parameter links.
+/// Azure storage account names are first-come, so these are never matched by
+/// prefix or suffix: each entry is one specific account, added from live evidence.
+const EXACT_HOSTS: [&str; 1] = [
+    // Observed 2026-11-25 in a live ChatGPT file-parameter download_url (Southeast Asia).
+    "oaisdmntprseasia.blob.core.windows.net",
+];
 const MAX_REDIRECTS: usize = 3;
 const TIMEOUT: Duration = Duration::from_secs(120);
 
@@ -40,9 +47,10 @@ pub(crate) fn allowed(url: &Url) -> bool {
         && url.username().is_empty()
         && url.password().is_none()
         && url.port().is_none()
-        && HOSTS
-            .iter()
-            .any(|suffix| host == *suffix || host.ends_with(&format!(".{suffix}")))
+        && (EXACT_HOSTS.contains(&host.as_str())
+            || HOSTS
+                .iter()
+                .any(|suffix| host == *suffix || host.ends_with(&format!(".{suffix}"))))
 }
 
 fn host_of(url: &Url) -> String {
@@ -271,8 +279,24 @@ mod tests {
             "https://sdmntprwestus.oaiusercontent.com/files/x",
             "https://chatgpt.com/backend-api/files/x",
             "https://cdn.openai.com/x",
+            "https://oaisdmntprseasia.blob.core.windows.net/files/x?sv=2025&sig=redacted",
+            "https://OAISDMNTPRSEASIA.blob.core.windows.net/files/x",
         ] {
             assert!(allowed(&url(ok)), "{ok}");
+        }
+        // Azure Blob Storage is open to anyone: only the exact observed account passes.
+        for bad in [
+            "http://oaisdmntprseasia.blob.core.windows.net/files/x",
+            "https://oaisdmntprseasia.blob.core.windows.net:444/files/x",
+            "https://oaisdmntprseasiax.blob.core.windows.net/files/x",
+            "https://oaisdmntprnortheu.blob.core.windows.net/files/x",
+            "https://evil.oaisdmntprseasia.blob.core.windows.net/files/x",
+            "https://oaisdmntprseasia.blob.core.windows.net.evil.test/files/x",
+            "https://attacker.blob.core.windows.net/files/x",
+            "https://blob.core.windows.net/files/x",
+            "https://user:pw@oaisdmntprseasia.blob.core.windows.net/files/x",
+        ] {
+            assert!(!allowed(&url(bad)), "{bad}");
         }
         for bad in [
             "http://files.oaiusercontent.com/x",
