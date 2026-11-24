@@ -71,6 +71,39 @@ pub(crate) fn owner_directory(path: &Path) -> Result<()> {
     Ok(())
 }
 
+/// Give a directory this process has just exclusively created an owner-only DACL.
+///
+/// Windows has no creation mode, so a new directory inherits its parent's
+/// entries; a harmless ancestor read grant would then fail `owner_directory`.
+/// This mirrors Unix `0o700` and never runs on a directory that already existed.
+#[cfg(windows)]
+pub(crate) fn restrict_new_directory(path: &Path) -> Result<()> {
+    use windows_permissions::{
+        LocalBox, SecurityDescriptor,
+        constants::{SeObjectType, SecurityInformation},
+    };
+    let current = windows_permissions::utilities::current_process_sid().map_err(|_| denied())?;
+    let descriptor: LocalBox<SecurityDescriptor> =
+        format!("D:P(A;OICI;FA;;;{current})(A;OICI;FA;;;SY)(A;OICI;FA;;;BA)")
+            .parse()
+            .map_err(|_| denied())?;
+    windows_permissions::wrappers::SetNamedSecurityInfo(
+        path.as_os_str(),
+        SeObjectType::SE_FILE_OBJECT,
+        SecurityInformation::Dacl | SecurityInformation::ProtectedDacl,
+        None,
+        None,
+        Some(descriptor.dacl().ok_or_else(denied)?),
+        None,
+    )
+    .map_err(|_| denied())
+}
+/// Unix creation already applies `0o700`.
+#[cfg(not(windows))]
+pub(crate) fn restrict_new_directory(_path: &Path) -> Result<()> {
+    Ok(())
+}
+
 #[cfg(windows)]
 fn windows_directory(path: &Path) -> Result<()> {
     use std::os::windows::fs::MetadataExt;
