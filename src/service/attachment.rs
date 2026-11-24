@@ -1332,4 +1332,47 @@ mod tests {
         assert_eq!(cancelled["status"], "cancelled");
         assert!(cancelled["verification"].is_null());
     }
+
+    /// Live regression: ChatGPT sent a complete file object whose file_id was not
+    /// in the `file_...` form. It must reach owner review from the real bytes.
+    #[test]
+    fn host_file_objects_with_opaque_ids_reach_owner_review() {
+        use super::super::host_file::import_with;
+        let f = Fixture::new();
+        let target = f.write(None);
+        let bytes = video();
+        let client = Direct(&f, &f.transfer);
+        for (file_id, expected) in [
+            (
+                "sediment://file_00000000synthetic",
+                "sediment:file_00000000synthetic",
+            ),
+            ("att_9f8e7d6c5b4a", "att_9f8e7d6c5b4a"),
+        ] {
+            let id = Uuid::new_v4().to_string();
+            let args = json!({"operationId":id,"memoryId":target["id"],"expectedRevision":target["revision"],
+                "file":{"download_url":"https://files.oaiusercontent.com/x?sig=redacted","file_id":file_id,
+                    "mime_type":"video/mp4","file_name":"IMG_synthetic.mp4"}});
+            let staged = import_with(&client, &args, |_| Ok(bytes.clone())).unwrap();
+            assert_eq!(staged["status"], "pending_owner_review");
+            assert_eq!(staged["sourceLocator"], expected);
+            assert_eq!(
+                staged["file"]["sha256"],
+                format!("{:x}", Sha256::digest(&bytes))
+            );
+            let cancelled = f.call(CANCEL, json!({"operationId":id})).unwrap();
+            assert_eq!(cancelled["status"], "cancelled");
+        }
+        // Bounds still apply before any download.
+        let id = Uuid::new_v4().to_string();
+        let args = json!({"operationId":id,"memoryId":target["id"],"expectedRevision":target["revision"],
+            "file":{"download_url":"https://files.oaiusercontent.com/x","file_id":"x".repeat(481)}});
+        let error = import_with(&client, &args, |_| -> Result<Vec<u8>> {
+            panic!("an oversized identifier must not download")
+        })
+        .unwrap_err();
+        assert_eq!(error.code(), "SOURCE_BYTES_UNAVAILABLE");
+        assert!(error.to_string().contains("over 480 bytes"));
+        assert_eq!(f.store.media_verify().unwrap()["assetsChecked"], 0);
+    }
 }
