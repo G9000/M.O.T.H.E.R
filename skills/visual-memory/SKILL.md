@@ -9,7 +9,7 @@ M.O.T.H.E.R keeps the original media as evidence. Your descriptions are attribut
 
 ## Keep media from this conversation
 
-For an existing narrative memory, read its ID with your current credential and check `mediaAttachmentBridge.available` in `mother_get_capabilities`. Use `mother_propose_media_attachment` with actual selected file bytes supplied by your harness. Use `mother_propose_media_attachment_from_file` when ChatGPT provides a selected file reference. Preserve the proposal UUID. Show the owner the pending proposal, then use `mother_get_media_attachment` to verify the stored bytes and active link after owner review. Treat a resized preview as a preview and ask for the original when needed.
+For an existing narrative memory, read its UUID and revision with `mother_get_record` and check `mediaAttachmentBridge.available` in `mother_get_capabilities`. Use `mother_media_attachment_prepare` with a stable operation UUID. Supply a file declaration only when your host can read the authorized original bytes, then stream bounded chunks and submit for review. If the source provides only a locator, omit `file` and direct the owner to **Attachment review** in their local live Garden to select the original. Preserve the operation UUID and keep the transfer token private. Check `mother_media_attachment_status` for `approved` with `verification.verified` and the matching canonical receipt before reporting success. See the [media bridge guide](../../docs/media-bridge.md).
 
 For a graph assertion where the owner will select the source file during review:
 

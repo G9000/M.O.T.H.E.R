@@ -74,7 +74,7 @@ pub const GARDEN_SCOPES: [&str; 6] = [
     "media:originals",
 ];
 pub(crate) fn valid_scope(scope: &str) -> bool {
-    SCOPES.contains(&scope) || GARDEN_SCOPES.contains(&scope)
+    SCOPES.contains(&scope) || GARDEN_SCOPES.contains(&scope) || scope == "media:attach"
 }
 pub(crate) fn valid_client(s: &str) -> bool {
     !s.is_empty()

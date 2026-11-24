@@ -8,4 +8,4 @@ An existing ChatGPT connection is not upgraded or verified by rebuilding Mother.
 
 Use a separate least-authority [credential](client-access.md) and verify the actual host with an authorized read and explicitly selected capture. Protocol discovery, owner approval and model recall are separate observations. Mother does not import ChatGPT history or automatically save conversations. [Living Memory](living-memory.md) describes the supported selected-proposal workflow.
 
-For selected files, the ChatGPT adapter uses the same [Garden media proposals](media-bridge.md) as other MCP harnesses. Its file picker supplies a temporary download reference. The shared owner reviews the attachment before publication.
+For visual attachments, use the [shared media bridge](media-bridge.md). An accessible Library ID identifies a file but does not authorize original bytes. If the connection cannot supply original bytes, prepare the attachment and select the exported original in **Attachment review** in the local live Garden.
