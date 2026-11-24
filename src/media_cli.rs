@@ -24,6 +24,18 @@ pub(crate) struct Media {
 
 #[derive(Debug, Subcommand)]
 enum MediaCommand {
+    /// Manage the shared Garden media bridge or review one harness proposal.
+    Bridge {
+        #[arg(long)]
+        config: PathBuf,
+        #[command(subcommand)]
+        command: BridgeCommand,
+    },
+    /// Review and attach an exported file to an existing v1 memory.
+    Backfill {
+        #[command(subcommand)]
+        command: BackfillCommand,
+    },
     /// Ingest one image with provenance; the original bytes are never modified.
     Add {
         #[arg(long)]
@@ -114,6 +126,84 @@ enum MediaCommand {
     },
 }
 
+#[derive(Debug, Subcommand)]
+enum BridgeCommand {
+    /// Enable selected media proposals across this Garden.
+    Enable,
+    Disable,
+    /// Show whether this Garden accepts media proposals.
+    Policy,
+    /// Submit a selected file from this harness using its existing credential.
+    Propose {
+        #[arg(long)]
+        file: PathBuf,
+        #[arg(long)]
+        memory: String,
+        #[arg(long)]
+        proposal: String,
+        #[arg(long)]
+        source_file_id: Option<String>,
+    },
+    Review {
+        #[arg(long)]
+        proposal: String,
+    },
+}
+
+#[derive(Debug, Subcommand)]
+enum BackfillCommand {
+    /// Print the proposed binding for private review. Redirect stdout into a manifest.
+    Plan {
+        #[arg(long)]
+        db: PathBuf,
+        #[arg(long)]
+        root: PathBuf,
+        /// Relative path inside the private import root, using forward slashes.
+        #[arg(long)]
+        file: String,
+        #[arg(long)]
+        memory: String,
+        #[arg(long)]
+        source_file_id: Option<String>,
+        /// Show the selection and prompt for immediate owner approval in a terminal.
+        #[arg(long)]
+        interactive: bool,
+        /// Permit this original, including its embedded metadata, in the private owner Garden.
+        #[arg(long)]
+        allow_original_in_owner_garden: bool,
+    },
+    /// Withdraw an approved link and retain its history.
+    Revoke {
+        #[arg(long)]
+        db: PathBuf,
+        #[arg(long)]
+        manifest: PathBuf,
+        /// The original reviewed attachment UUID.
+        #[arg(long)]
+        approve: String,
+    },
+    /// Check source bytes, stored bytes, and the approved association.
+    Verify {
+        #[arg(long)]
+        db: PathBuf,
+        #[arg(long)]
+        root: PathBuf,
+        #[arg(long)]
+        manifest: PathBuf,
+    },
+    /// Apply exactly the selection identified by the reviewed operation UUID.
+    Apply {
+        #[arg(long)]
+        db: PathBuf,
+        #[arg(long)]
+        root: PathBuf,
+        #[arg(long)]
+        manifest: PathBuf,
+        #[arg(long)]
+        approve: String,
+    },
+}
+
 #[derive(Debug, Args)]
 struct Provenance {
     /// captured, uploaded, imported, screenshot or ai_generated.
@@ -175,6 +265,21 @@ impl Provenance {
     }
 }
 
+fn read_attachment_plan(path: &Path) -> Result<mother::garden::media_tools::AttachmentPlan> {
+    use std::io::Read;
+    let mut data = Vec::new();
+    std::fs::File::open(path)?
+        .take(32769)
+        .read_to_end(&mut data)?;
+    if data.len() > 32768 {
+        return Err(Error::domain(
+            "INVALID_INPUT",
+            "Attachment manifest exceeds 32 KiB.",
+        ));
+    }
+    Ok(serde_json::from_slice(&data)?)
+}
+
 fn absolute(path: &Path) -> Result<PathBuf> {
     Ok(std::path::absolute(path)?)
 }
@@ -190,6 +295,154 @@ fn print(value: Value) -> Result<()> {
 
 pub(crate) fn run(args: Media) -> Result<()> {
     match *args.command {
+        MediaCommand::Bridge { config, command } => {
+            use mother::service::attachment;
+            use std::io::{IsTerminal, Write};
+            let transport = attachment::client(&config)?;
+            let client = transport.as_ref();
+            match command {
+                BridgeCommand::Enable => print(attachment::set_enabled(client, true)?),
+                BridgeCommand::Disable => print(attachment::set_enabled(client, false)?),
+                BridgeCommand::Policy => print(client.request("local_media_policy", &json!({}))?),
+                BridgeCommand::Propose {
+                    file,
+                    memory,
+                    proposal,
+                    source_file_id,
+                } => {
+                    use std::io::Read;
+                    let target =
+                        client.request("local_media_target", &json!({"memoryId":memory}))?;
+                    let mut bytes = Vec::new();
+                    std::fs::File::open(&file)?
+                        .take((attachment::MAX_BYTES + 1) as u64)
+                        .read_to_end(&mut bytes)?;
+                    let name = file.file_name().and_then(|n| n.to_str());
+                    print(attachment::submit(
+                        client,
+                        json!({"proposalId":proposal,"memoryId":memory,"expectedRevision":target["revision"],
+                        "fileId":source_file_id,"fileName":name}),
+                        &bytes,
+                    )?)
+                }
+                BridgeCommand::Review { proposal } => {
+                    let item =
+                        client.request(attachment::STATUS, &json!({"proposalId":proposal}))?;
+                    print(item.clone())?;
+                    if item["status"] == "owner_decision_recorded" {
+                        return print(client.request(
+                            "local_media_finish_review",
+                            &json!({"proposalId":proposal}),
+                        )?);
+                    }
+                    if item["status"] != "pending_owner_review" {
+                        return Ok(());
+                    }
+                    if !std::io::stdin().is_terminal() || !std::io::stdout().is_terminal() {
+                        return Err(Error::domain(
+                            "INVALID_INPUT",
+                            "Review requires an owner terminal.",
+                        ));
+                    }
+                    eprint!("Attach these bytes to the displayed memory? [approve/reject/skip] ");
+                    std::io::stderr().flush()?;
+                    let mut answer = String::new();
+                    std::io::stdin().read_line(&mut answer)?;
+                    let approve = match answer.trim() {
+                        "approve" => true,
+                        "reject" => false,
+                        _ => return Ok(()),
+                    };
+                    print(attachment::review(
+                        client,
+                        &proposal,
+                        item["reviewId"]
+                            .as_str()
+                            .ok_or_else(|| Error::domain("INVALID_INPUT", "Missing review ID."))?,
+                        approve,
+                    )?)
+                }
+            }
+        }
+        MediaCommand::Backfill { command } => match command {
+            BackfillCommand::Plan {
+                db,
+                root,
+                file,
+                memory,
+                source_file_id,
+                interactive,
+                allow_original_in_owner_garden,
+            } => {
+                use std::io::{IsTerminal, Write};
+                let store = open(&db)?;
+                let plan = store
+                    .plan_attachment(
+                        &root,
+                        &file,
+                        &memory,
+                        source_file_id,
+                        allow_original_in_owner_garden,
+                    )
+                    .map_err(domain_error)?;
+                print(serde_json::to_value(&plan)?)?;
+                if !interactive {
+                    return Ok(());
+                }
+                if !std::io::stdin().is_terminal() || !std::io::stdout().is_terminal() {
+                    return Err(Error::domain(
+                        "INVALID_INPUT",
+                        "Interactive approval requires an owner terminal.",
+                    ));
+                }
+                eprint!("Attach this file to the displayed memory? [y/N] ");
+                std::io::stderr().flush()?;
+                let mut answer = String::new();
+                std::io::stdin().read_line(&mut answer)?;
+                if answer.trim().eq_ignore_ascii_case("y") {
+                    print(
+                        store
+                            .apply_attachment(&root, &plan, &plan.operation_id)
+                            .map_err(domain_error)?,
+                    )
+                } else {
+                    print(json!({"status":"skipped"}))
+                }
+            }
+            BackfillCommand::Revoke {
+                db,
+                manifest,
+                approve,
+            } => {
+                let plan = read_attachment_plan(&manifest)?;
+                print(
+                    open(&db)?
+                        .revoke_attachment(&plan, &approve)
+                        .map_err(domain_error)?,
+                )
+            }
+            BackfillCommand::Verify { db, root, manifest } => {
+                let plan = read_attachment_plan(&manifest)?;
+                print(
+                    open(&db)?
+                        .verify_attachment(&root, &plan)
+                        .map_err(domain_error)?,
+                )
+            }
+            BackfillCommand::Apply {
+                db,
+                root,
+                manifest,
+                approve,
+            } => {
+                let plan = read_attachment_plan(&manifest)?;
+                print(
+                    open(&db)?
+                        .apply_attachment(&root, &plan, &approve)
+                        .map_err(domain_error)?,
+                )
+            }
+        },
         MediaCommand::Add {
             db,
             file,

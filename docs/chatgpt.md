@@ -7,3 +7,5 @@ A ChatGPT integration requires a separately supported transport that can reach t
 An existing ChatGPT connection is not upgraded or verified by rebuilding Mother. Old SQLite configurations fail explicitly. Any host or external transport configuration change needs its own reviewed setup; source updates never alter those settings. Tool responses returned to a remote model leave the local machine even though canonical records remain local.
 
 Use a separate least-authority [credential](client-access.md) and verify the actual host with an authorized read and explicitly selected capture. Protocol discovery, owner approval and model recall are separate observations. Mother does not import ChatGPT history or automatically save conversations. [Living Memory](living-memory.md) describes the supported selected-proposal workflow.
+
+For selected files, the ChatGPT adapter uses the same [Garden media proposals](media-bridge.md) as other MCP harnesses. Its file picker supplies a temporary download reference. The shared owner reviews the attachment before publication.

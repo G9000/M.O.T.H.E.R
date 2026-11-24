@@ -1,3 +1,6 @@
+import { companionAppearance, gardenAppearance } from './seed.js';
+import { attachmentBlob } from './session.js';
+
 // The reader: one memory, opened for reading, through three lenses over the same stored evidence.
 //
 //   Mother's Eyes  existing reflections an assistant wrote, each attributed, never generated here
@@ -225,6 +228,7 @@ export function createReader(root, { fetchReading, snapshotOf, all, order, walk,
   }
 
   function archive(r) {
+    const appearance = gardenAppearance(r.recordId);
     const row = (k, v) => `<dt>${k}</dt><dd>${v}</dd>`;
     const copy = (value, what) => `<button class="rcopy" data-copy="${esc(value)}" aria-label="Copy ${what}">Copy</button>`;
     const link = (b) =>
@@ -237,6 +241,7 @@ export function createReader(root, { fetchReading, snapshotOf, all, order, walk,
       <dl class="rfacts">
         ${row('Record ID', `<code>${esc(r.recordId)}</code> ${copy(r.recordId, 'record ID')}`)}
         ${row('Kind', esc(r.kind))}
+        ${row('Garden appearance', `${esc(appearance.form)} with ${esc(companionAppearance(appearance.seed).form)} · Seed <code>${appearance.seed}</code> ${copy(appearance.seed, 'garden seed')}`)}
         ${row('Status', esc(r.status))}
         ${row('Revision', esc(r.revision))}
         ${row('Last written by', esc(r.actor ?? 'Not recorded'))}
@@ -275,7 +280,49 @@ export function createReader(root, { fetchReading, snapshotOf, all, order, walk,
       </section>`;
   }
 
+  const objectUrls = new Set();
+  function clearMedia() {
+    for (const url of objectUrls) URL.revokeObjectURL(url);
+    objectUrls.clear();
+  }
+  function attachments(r) {
+    if (!r.attachments?.length && !r.mediaWithheld) return '';
+    const media = (r.attachments ?? []).map((a, i) => {
+      const name = esc(a.acquisition?.originalFilename || a.mediaType);
+      const details = shown === 'archive'
+        ? `<dl class="rfacts"><dt>Original SHA-256</dt><dd><code>${esc(a.originalSha256)}</code></dd><dt>Evidence</dt><dd>${esc(a.link.evidenceId)}</dd><dt>Source</dt><dd>${esc(a.acquisition?.source || 'Owner-selected file')}</dd><dt>Approved</dt><dd>${esc(a.link.approvedAt)}</dd><dt>Event date</dt><dd>${esc(a.acquisition?.eventTime?.at || 'Unknown')}</dd></dl>` : '';
+      return `<figure><button data-attachment="${i}">Open ${name}</button><figcaption>${esc(a.variant)} · Owner-approved</figcaption>${details}</figure>`;
+    }).join('');
+    return `<section aria-label="Moments captured"><h3>Moments captured</h3>${media}${r.mediaWithheld ? '<p>Media not available in this view.</p>' : ''}</section>`;
+  }
+  async function openAttachment(button) {
+    const a = current?.attachments?.[Number(button.dataset.attachment)];
+    if (!a) return;
+    button.disabled = true;
+    try {
+      const blob = await attachmentBlob(a.sha256);
+      if (!button.isConnected) return;
+      if (!blob) throw Error();
+      const kind = a.mediaType.split('/')[0];
+      const media = document.createElement(kind === 'image' ? 'img' : kind === 'audio' ? 'audio' : 'video');
+      const url = URL.createObjectURL(blob);
+      objectUrls.add(url);
+      media.src = url;
+      media.style.maxWidth = '100%';
+      media.style.maxHeight = '70vh';
+      if (kind === 'image') media.alt = a.acquisition?.originalFilename || 'Attached image';
+      else { media.controls = true; media.preload = 'metadata'; }
+      button.after(media);
+      button.hidden = true;
+      media.tabIndex = 0;
+      media.focus();
+    } catch {
+      if (button.isConnected) { button.disabled = false; button.textContent = 'Media unavailable. Retry'; }
+    }
+  }
+
   function render(focusTab = false) {
+    clearMedia();
     const r = current;
     const active = shown;
     const ids = sequence ?? order();
@@ -298,7 +345,7 @@ export function createReader(root, { fetchReading, snapshotOf, all, order, walk,
         ${header(r)}
         ${r.loading ? '<p class="rnote" role="status">Reading the full record…</p>' : r.partial ? '<p class="rnote" role="status">Showing what this garden snapshot holds. The full record could not be read just now.</p>' : ''}
         ${tabs(active)}
-        <div class="rpanel" id="reader-panel" role="tabpanel" aria-labelledby="lens-${active}" tabindex="0">${body}</div>
+        <div class="rpanel" id="reader-panel" role="tabpanel" aria-labelledby="lens-${active}" tabindex="0">${body}${attachments(r)}</div>
         <footer class="rfoot">
           ${active === 'archive' ? '' : '<button class="rhow" data-how>How do we know? <span aria-hidden="true">→</span> The Archive</button>'}
           ${related(r)}
@@ -351,6 +398,7 @@ export function createReader(root, { fetchReading, snapshotOf, all, order, walk,
   function close() {
     if (root.hidden) return;
     asked++;
+    clearMedia();
     root.hidden = true;
     root.innerHTML = '';
     current = null;
@@ -365,7 +413,8 @@ export function createReader(root, { fetchReading, snapshotOf, all, order, walk,
     if (e.target === root) return close();
     const t = e.target.closest('button');
     if (!t || t.disabled) return;
-    if (t.dataset.close !== undefined) close();
+    if (t.dataset.attachment !== undefined) void openAttachment(t);
+    else if (t.dataset.close !== undefined) close();
     else if (t.dataset.lens) {
       pick(t.dataset.lens);
       render(true);

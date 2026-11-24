@@ -1,0 +1,125 @@
+[
+  {
+    "name": "mother_propose_media_attachment",
+    "title": "Propose a memory attachment",
+    "description": "Stage selected media bytes for owner review from any harness. Supply actual base64 file bytes from a host file reader. Up to 2 MiB. Use a stable proposal UUID for status and exact retries. When ChatGPT supplies a file reference, use mother_propose_media_attachment_from_file.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "proposalId": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "memoryId": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "contentBase64": {
+          "type": "string",
+          "maxLength": 2796204
+        },
+        "fileName": {
+          "type": "string"
+        },
+        "mediaType": {
+          "type": "string"
+        },
+        "sourceFileId": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "proposalId",
+        "memoryId",
+        "contentBase64"
+      ],
+      "additionalProperties": false
+    },
+    "annotations": {
+      "readOnlyHint": false,
+      "destructiveHint": false,
+      "idempotentHint": true,
+      "openWorldHint": false
+    }
+  },
+  {
+    "name": "mother_propose_media_attachment_from_file",
+    "title": "Propose a host file attachment",
+    "description": "Stage one user-selected ChatGPT file, up to 2 MiB, for local owner review. For other hosts use mother_propose_media_attachment with selected file bytes. Retain the proposal UUID to check the verified link after approval.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "proposalId": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "memoryId": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "file": {
+          "type": "object",
+          "properties": {
+            "download_url": {
+              "type": "string"
+            },
+            "file_id": {
+              "type": "string"
+            },
+            "mime_type": {
+              "type": "string"
+            },
+            "file_name": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "download_url",
+            "file_id"
+          ],
+          "additionalProperties": false
+        }
+      },
+      "required": [
+        "proposalId",
+        "memoryId",
+        "file"
+      ],
+      "additionalProperties": false
+    },
+    "annotations": {
+      "readOnlyHint": false,
+      "destructiveHint": false,
+      "idempotentHint": true,
+      "openWorldHint": true
+    },
+    "_meta": {
+      "openai/fileParams": [
+        "file"
+      ]
+    }
+  },
+  {
+    "name": "mother_get_media_attachment",
+    "title": "Check a memory attachment",
+    "description": "Read this connection's proposal status and verify its approved media link against the current Garden.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "proposalId": {
+          "type": "string",
+          "format": "uuid"
+        }
+      },
+      "required": [
+        "proposalId"
+      ],
+      "additionalProperties": false
+    },
+    "annotations": {
+      "readOnlyHint": true,
+      "destructiveHint": false,
+      "openWorldHint": false
+    }
+  }
+]

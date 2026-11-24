@@ -1,25 +1,25 @@
 // The memory garden: the owner's records, planted along the path that winds down the hill. The path is time: the
 // newest record stands where the walk begins, under the great tree, and each step further along it is a step
-// further back, to the first record of all beside the pool at the path's end. Each record is one tall flower, its
-// species telling its kind, drawn in flat colour with an inked line so it stands out from the painted meadow.
-// Pinned records are not on the path: they are the stone lanterns standing round the start.
+// further back, to the first record of all beside the pool. A stable seed gives each record its form.
+// Pinned records stand beside lanterns around the start.
 //
 // Read-only: this file fetches one snapshot from the local server that served the page, and sends nothing else.
 import * as THREE from 'three';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 import { COMMON } from '../lib/index.js';
-import { gardenRadius, pathAt, pathLength, START, TARN, tarnDistance } from '../valley/world.js';
+import { pathAt, pathLength, START, TARN, tarnDistance } from '../valley/world.js';
 import { createViewer, describe, placeholder } from './media.js';
 import { createReadingPath } from './path.js';
 import { createReader } from './reader.js';
 import { fetchReading } from './session.js';
+import { COMPANIONS, FORMS, companionAppearance, gardenAppearance } from './seed.js';
 
 export { fetchReading, fetchSnapshot, loadMedia, loadSnapshot } from './session.js';
 
 const TAU = Math.PI * 2;
 const KINDS = ['memory', 'decision', 'task', 'checkpoint', 'artifact', 'action'];
 const BED = { memory: 'Memories', decision: 'Decisions', task: 'Tasks', checkpoint: 'Checkpoints', artifact: 'Artifacts', action: 'Actions', pinned: 'Pinned' };
-const FLOWER = { memory: 'daisy', decision: 'tulip', task: 'poppy', checkpoint: 'bellflower', artifact: 'sunflower', action: 'rose', pinned: 'stone lantern' };
+const FLOWER_PAINT = { daisy: 'memory', tulip: 'decision', poppy: 'task', bellflower: 'checkpoint', sunflower: 'artifact', rose: 'action' };
 const CSS = { memory: '#c6abf2', decision: '#86d4c0', task: '#f2a66e', checkpoint: '#8db6f2', artifact: '#e3cf7d', action: '#ef93ae', pinned: '#f0d9a0' };
 const RETIRED = new Set(['retracted', 'superseded', 'cancelled']);
 const unsettled = (r) => (r.kind === 'task' && (r.status === 'doing' || r.status === 'blocked')) || (r.kind === 'action' && (r.status === 'pending' || r.status === 'unknown'));
@@ -39,6 +39,7 @@ const PAINT = {
   green: [[0.38, 0.62, 0.28], [0.15, 0.33, 0.22]],
   leaf: [[0.42, 0.7, 0.3], [0.13, 0.33, 0.24]],
   pale: [[1.0, 0.96, 0.78], [0.72, 0.68, 0.6]],
+  berry: [[0.91, 0.075, 0.045], [0.33, 0.024, 0.044]],
   wood: [[0.56, 0.4, 0.26], [0.27, 0.2, 0.2]],
   plank: [[0.78, 0.62, 0.42], [0.42, 0.32, 0.3]],
   stone: [[0.74, 0.72, 0.66], [0.4, 0.41, 0.52]],
@@ -56,6 +57,7 @@ function readRecords(snapshot) {
       const refs = (r.references ?? []).filter((id) => known.has(id) && id !== r.id);
       return {
         id: r.id,
+        appearance: gardenAppearance(r.id),
         kind: r.kind,
         status: r.status,
         title: r.title,
@@ -81,6 +83,9 @@ ${r.kind}`.toLowerCase(),
 
 // ---- the flowers ----------------------------------------------------------------------------------------------
 const SPHERE = new THREE.SphereGeometry(1, 14, 9);
+const FLORET = new THREE.IcosahedronGeometry(1, 0);
+// Keep the little pollen grains indexed like the other parts of the merged head.
+FLORET.setIndex(Array.from({ length: FLORET.attributes.position.count }, (_, i) => i));
 const TUBE = new THREE.CylinderGeometry(1, 1, 1, 8);
 const TAPER = new THREE.CylinderGeometry(0.55, 1, 1, 8);
 const CONE = new THREE.ConeGeometry(1, 1, 14, 3, true);
@@ -114,6 +119,7 @@ function part(shape, matrix, paint, ink, deep = 0.25) {
   }
   g.applyMatrix4(matrix);
   g.deleteAttribute('uv');
+  g.setAttribute('aBlade', new THREE.Float32BufferAttribute(new Float32Array(n * 3), 3));
   g.setAttribute('aLit', new THREE.BufferAttribute(lit, 3));
   g.setAttribute('aShade', new THREE.BufferAttribute(shade, 3));
   g.setAttribute('aInk', new THREE.BufferAttribute(new Float32Array(n).fill(ink), 1));
@@ -125,10 +131,13 @@ const place = (x, y, z, sx, sy, sz, rz = 0, rx = 0) => M().makeTranslation(x, y,
  * One petal (or leaf), lying along +x from the origin with its face up: wide in the middle and pointed or round at
  * the tip, cupped across, curled along its length, and painted from a deep foot to a light tip.
  */
-function petal(paint, ink, { len, wid, cup = 0.3, curl = 0, round = 0.6, wave = 0, deep = 0.45 }) {
-  const NU = 7;
-  const NV = 4;
+function petal(paint, ink, { len, wid, cup = 0.3, curl = 0, round = 0.6, wave = 0, deep = 0.45 }, phase = 0) {
+  const broad = wid > 0.11;
+  const small = len < 0.10;
+  const NU = small ? 4 : broad ? 15 : 10;
+  const NV = small ? 4 : broad ? 10 : 6;
   const pos = [];
+  const blade = [];
   const lit = [];
   const shade = [];
   const idx = [];
@@ -136,14 +145,24 @@ function petal(paint, ink, { len, wid, cup = 0.3, curl = 0, round = 0.6, wave = 
     const u = i / NU;
     // the outline: narrow at the foot, widest past the middle, closing to a point or a round tip
     // (a round petal keeps its width almost to the tip and closes in a curve; a pointed one narrows to a point)
-    const w = wid * 0.5 * Math.pow(Math.sin(Math.PI * Math.pow(u, 0.62)), 1 - 0.7 * round) * (round + (1 - round) * (1 - u * u)) + wid * 0.04;
+    const profile = Math.sin(Math.PI * u * (1 - 0.22 * round));
+    const scallop = paint === 'leaf' ? 0.095 : 0.055 + wave * 0.6;
+    const w = wid * (0.025 + 0.55 * Math.pow(profile, 0.9 - 0.4 * round))
+      * (1 + scallop * Math.sin(25 * u + phase) * Math.sin(Math.PI * u));
     const [a, b] = grade(paint, u, deep);
     for (let j = 0; j <= NV; j++) {
       const v = (j / NV) * 2 - 1;
-      const x = u * len;
-      const z = v * w;
-      const y = cup * w * v * v + curl * len * u * u + wave * w * Math.sin(v * 3.1 + u * 5.0) * u;
+      const margin = Math.pow(Math.abs(v), 2);
+      const tip = u * u;
+      const roll = paint === 'action' ? -0.18 * tip * (1 + 0.45 * v) : 0;
+      const pleat = (0.045 + wave) * Math.sin(v * 9 + u * 4 + phase) * (0.2 + 0.8 * margin)
+        + 0.16 * Math.sin(19 * u + phase + v) * tip * margin;
+      const x = u * len + (roll - 0.24 * round * tip) * wid * margin;
+      const z = v * w + Math.sin(phase + u * 2) * wid * 0.07 * tip;
+      const y = w * (cup * margin + pleat + roll * 2) + curl * len * tip
+        + w * 0.12 * Math.sin(Math.PI * u) * (1 - Math.abs(v));
       pos.push(x, y, z);
+      blade.push(u, v, paint === 'leaf' ? 2 : 1);
       // (the middle vein a shade deeper than the blade)
       const vein = 1 - 0.1 * (1 - Math.abs(v)) * (1 - u);
       lit.push(a[0] * vein, a[1] * vein, a[2] * vein);
@@ -153,13 +172,14 @@ function petal(paint, ink, { len, wid, cup = 0.3, curl = 0, round = 0.6, wave = 
   for (let i = 0; i < NU; i++) {
     for (let j = 0; j < NV; j++) {
       const p = i * (NV + 1) + j;
-      idx.push(p, p + NV + 1, p + 1, p + 1, p + NV + 1, p + NV + 2);
+      idx.push(p, p + 1, p + NV + 1, p + 1, p + NV + 2, p + NV + 1);
     }
   }
   const g = new THREE.BufferGeometry();
   g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
   g.setAttribute('aLit', new THREE.Float32BufferAttribute(lit, 3));
   g.setAttribute('aShade', new THREE.Float32BufferAttribute(shade, 3));
+  g.setAttribute('aBlade', new THREE.Float32BufferAttribute(blade, 3));
   g.setAttribute('aInk', new THREE.Float32BufferAttribute(new Float32Array(pos.length / 3).fill(ink), 1));
   g.setIndex(idx);
   g.computeVertexNormals();
@@ -175,7 +195,7 @@ function ring(parts, n, tilt, paint, ink, shape, { base = M().makeTranslation(0,
       .multiply(M().makeRotationY((i / n) * TAU + turn + Math.sin(i * 12.9898) * jitter))
       .multiply(M().makeRotationZ(tilt + Math.sin(i * 78.233) * jitter * 0.6))
       .multiply(M().makeTranslation(r0, 0, 0));
-    parts.push(petal(paint, ink, shape).applyMatrix4(m));
+    parts.push(petal(paint, ink, shape, i * 2.39996 + turn).applyMatrix4(m));
   }
 }
 
@@ -184,58 +204,119 @@ function dots(parts, n, radius, size, paint, ink, { y = 1.0, lift = 0, base = M(
   for (let i = 0; i < n; i++) {
     const a = i * 2.39996;
     const r = radius * Math.sqrt((i + 0.5) / n);
-    parts.push(part(SPHERE, base.clone().multiply(place(Math.cos(a) * r, y + lift * (1 - r / radius), Math.sin(a) * r, size, size, size)), paint, ink, 0.1));
+    parts.push(part(FLORET, base.clone().multiply(place(Math.cos(a) * r, y + lift * Math.sqrt(1 - (r / radius) ** 2), Math.sin(a) * r, size, size * 1.4, size, 0, a)), paint, ink, 0.1));
   }
 }
 
+/** Fused petals of a bellflower, narrowing at the neck and flaring into five continuous lobes. */
+function bell(hang, ink) {
+  const sides = 30, rows = 7;
+  const positions = [], blade = [], faces = [];
+  for (let j = 0; j <= rows; j++) {
+    const t = j / rows;
+    for (let i = 0; i <= sides; i++) {
+      const angle = TAU * i / sides;
+      const lobe = (1 + Math.cos(5 * angle)) / 2;
+      const radius = 0.009 + 0.062 * Math.sin(t * Math.PI / 2) + (0.024 + lobe * 0.032) * t ** 4;
+      positions.push(radius * Math.cos(angle), -0.21 * t - 0.044 * lobe * t ** 4, radius * Math.sin(angle));
+      // Continuous across lobe boundaries and the seam.
+      blade.push(t, Math.sin(5 * angle), 1);
+      if (j < rows && i < sides) {
+        const a = j * (sides + 1) + i;
+        faces.push(a, a + 1, a + sides + 1, a + 1, a + sides + 2, a + sides + 1);
+      }
+    }
+  }
+  const shape = new THREE.BufferGeometry();
+  shape.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
+  shape.setIndex(faces);
+  shape.computeVertexNormals();
+  // Weld the shading at the wrap while keeping the two endpoint vertices.
+  for (let j = 0; j <= rows; j++) {
+    const a = j * (sides + 1), b = a + sides;
+    const normals = shape.attributes.normal;
+    const n = new THREE.Vector3().fromBufferAttribute(normals, a).add(new THREE.Vector3().fromBufferAttribute(normals, b)).normalize();
+    normals.setXYZ(a, n.x, n.y, n.z);
+    normals.setXYZ(b, n.x, n.y, n.z);
+  }
+  const g = part(shape, hang, 'checkpoint', ink, 0.35);
+  g.setAttribute('aBlade', new THREE.Float32BufferAttribute(blade, 3));
+  shape.dispose();
+  return g;
+}
+
 /** A stem with two real leaves and, at the top, the head of its kind: one metre tall, its foot at the origin. */
-function flowerGeometry(kind) {
-  if (kind === 'pinned') return lanternGeometry();
+function flowerGeometry(form, structure) {
+  if (COMPANIONS.includes(form)) return companionGeometry(form, structure);
+  const kind = FLOWER_PAINT[form];
   const parts = [part(TAPER, place(0, 0.5, 0, 0.017, 1, 0.017), 'green', INK.green, 0.35)];
   // leaves: long, pointed, arching out and down from the stem
-  const leaf = { len: 0.32, wid: 0.1, cup: 0.25, curl: -0.25, round: 0.15, deep: 0.35 };
-  parts.push(petal('leaf', INK.green, leaf).applyMatrix4(M().makeTranslation(0, 0.26, 0).multiply(M().makeRotationZ(0.75))));
-  parts.push(petal('leaf', INK.green, { ...leaf, len: 0.27 }).applyMatrix4(M().makeTranslation(0, 0.48, 0).multiply(M().makeRotationY(2.6)).multiply(M().makeRotationZ(0.65))));
+  const broadLeaf = form === 'tulip' || form === 'sunflower';
+  const foliage = broadLeaf ? 3 : 5 + structure;
+  for (let i = 0; i < foliage; i++) {
+    const t = i / foliage, turn = i * 2.39996 + structure * 0.65;
+    const base = M().makeTranslation(0, 0.13 + 0.62 * t, 0).multiply(M().makeRotationY(turn))
+      .multiply(M().makeRotationZ(broadLeaf ? 0.96 - 0.2 * t : 0.54 + 0.15 * t));
+    const leaf = { len: (broadLeaf ? 0.54 : 0.37) * (1 - 0.4 * t), wid: broadLeaf ? 0.17 : 0.09,
+      cup: 0.55, curl: -0.33, round: 0.17, wave: 0.045 };
+    parts.push(petal('leaf', INK.green, leaf, turn).applyMatrix4(base));
+    if (form === 'rose' || form === 'poppy') {
+      for (const side of [-1, 1]) {
+        const at = base.clone().multiply(M().makeTranslation(0.11, 0, 0)).multiply(M().makeRotationY(side * 0.86));
+        parts.push(petal('leaf', INK.green, { ...leaf, len: leaf.len * 0.58 }, turn + side).applyMatrix4(at));
+      }
+    }
+  }
   // (a small green cup under every head)
   if (kind !== 'checkpoint') ring(parts, 5, -0.5, 'leaf', INK.green, { len: 0.07, wid: 0.045, cup: 0.4, round: 0.3 }, { y: -0.015 });
 
   if (kind === 'memory') {
     // a daisy: two rings of narrow rays round a domed gold heart
-    ring(parts, 14, 0.12, kind, INK.outer, { len: 0.26, wid: 0.06, cup: 0.35, curl: -0.08, round: 0.9 }, { r0: 0.05 });
-    ring(parts, 11, 0.32, kind, INK.inner, { len: 0.2, wid: 0.055, cup: 0.35, curl: -0.05, round: 0.9 }, { r0: 0.04, y: 0.01, turn: 0.14 });
+    ring(parts, 14 + 3 * structure, 0.12, kind, INK.outer, { len: 0.26, wid: 0.06, cup: 0.35, curl: -0.08, round: 0.9 }, { r0: 0.05 });
+    ring(parts, 11 + 2 * structure, 0.32, kind, INK.inner, { len: 0.2, wid: 0.055, cup: 0.35, curl: -0.05, round: 0.9 }, { r0: 0.04, y: 0.01, turn: 0.14 });
     parts.push(part(SPHERE, place(0, 1.025, 0, 0.068, 0.045, 0.068), 'gold', INK.core, 0.4));
+    dots(parts, 53, 0.065, 0.007, 'gold', INK.core, { y: 1.025, lift: 0.045 });
   } else if (kind === 'decision') {
     // a tulip: six broad cupped petals closing into a cup
     ring(parts, 3, 1.18, kind, INK.outer, { len: 0.27, wid: 0.2, cup: 0.9, curl: 0.15, round: 0.75, deep: 0.55 }, { r0: 0.015 });
-    ring(parts, 3, 1.3, kind, INK.inner, { len: 0.25, wid: 0.18, cup: 0.9, curl: 0.12, round: 0.75, deep: 0.55 }, { r0: 0.01, turn: TAU / 6 });
+    ring(parts, 3 + structure, 1.3, kind, INK.inner, { len: 0.25, wid: 0.18, cup: 0.9, curl: 0.12, round: 0.75, deep: 0.55 }, { r0: 0.01, turn: TAU / 6 });
+    for (let i = 0; i < 6; i++) {
+      const a = i * TAU / 6;
+      const x = 0.023 * Math.cos(a), z = 0.023 * Math.sin(a);
+      parts.push(part(TAPER, place(x, 1.055, z, 0.003, 0.11, 0.003), 'pale', INK.core));
+      parts.push(part(FLORET, place(x, 1.117, z, 0.007, 0.017, 0.007), 'gold', INK.core));
+    }
   } else if (kind === 'task') {
     // a poppy: four wide crinkled petals, a dark heart and a ring of stamens
     ring(parts, 4, 0.22, kind, INK.outer, { len: 0.25, wid: 0.3, cup: 0.22, curl: 0.06, round: 1, wave: 0.14, deep: 0.55 });
-    ring(parts, 4, 0.5, kind, INK.inner, { len: 0.2, wid: 0.25, cup: 0.3, curl: 0.06, round: 1, wave: 0.12, deep: 0.55 }, { y: 0.01, turn: TAU / 8 });
+    ring(parts, 4 + structure, 0.5, kind, INK.inner, { len: 0.2, wid: 0.25, cup: 0.3, curl: 0.06, round: 1, wave: 0.12, deep: 0.55 }, { y: 0.01, turn: TAU / 8 });
     parts.push(part(SPHERE, place(0, 1.045, 0, 0.042, 0.04, 0.042), 'dark', INK.core, 0.1));
     dots(parts, 14, 0.065, 0.011, 'dark', INK.core, { y: 1.05, lift: 0.01 });
   } else if (kind === 'checkpoint') {
     // a bellflower: three bells nodding from short arching stalks, each mouth flaring into five points
     parts.push(part(TUBE, place(0, 1.0, 0, 0.012, 0.12, 0.012), 'green', INK.green));
-    for (let i = 0; i < 3; i++) {
-      const a = i * 2.1 + 0.4;
+    for (let i = 0; i < 3 + structure; i++) {
+      const a = i * TAU / (3 + structure) + 0.4;
       const hang = M()
         .makeRotationY(-a)
         .multiply(M().makeTranslation(0.15, 0.98 - i * 0.06, 0))
         .multiply(M().makeRotationZ(-0.35));
-      parts.push(part(TUBE, M().makeRotationY(-a).multiply(place(0.075, 1.0 - i * 0.03, 0, 0.007, 0.16, 0.007, -1.1)), 'green', INK.green));
-      parts.push(part(CONE, hang.clone().multiply(place(0, -0.1, 0, 0.105, 0.22, 0.105)), kind, i === 1 ? INK.inner : INK.outer, 0.45));
-      ring(parts, 5, -0.55, kind, i === 1 ? INK.inner : INK.outer, { len: 0.08, wid: 0.08, cup: -0.3, round: 0.2, deep: 0.1 }, { base: hang.clone().multiply(M().makeTranslation(0, -0.205, 0)), r0: 0.085 });
-      dots(parts, 1, 0.001, 0.018, 'pale', INK.core, { base: hang, y: -0.19 });
+      const shoulder = 1.04 - i * 0.04;
+      const drop = 0.98 - i * 0.06 - shoulder;
+      const stalk = place(0.075, shoulder + drop / 2, 0, 0.007, Math.hypot(0.15, drop), 0.007, Math.atan2(-0.15, drop));
+      parts.push(part(TUBE, M().makeRotationY(-a).multiply(stalk), 'green', INK.green));
+      parts.push(bell(hang, i === 1 ? INK.inner : INK.outer));
+      parts.push(part(TAPER, hang.clone().multiply(place(0, -0.11, 0, 0.004, 0.22, 0.004)), 'pale', INK.core));
+      dots(parts, 1, 0.001, 0.012, 'gold', INK.core, { base: hang, y: -0.22 });
     }
   } else if (kind === 'artifact') {
     // a sunflower: two rings of golden rays round a broad seed disc, the whole head turned to look out
     const head = [];
     const disc = { base: M().makeTranslation(0, 1, 0) };
-    ring(head, 18, 0.05, kind, INK.outer, { len: 0.19, wid: 0.07, cup: 0.3, curl: -0.08, round: 0.4 }, { ...disc, r0: 0.12 });
+    ring(head, 18 + 4 * structure, 0.05, kind, INK.outer, { len: 0.19, wid: 0.07, cup: 0.3, curl: -0.08, round: 0.4 }, { ...disc, r0: 0.12 });
     ring(head, 14, 0.18, kind, INK.inner, { len: 0.16, wid: 0.07, cup: 0.3, curl: -0.05, round: 0.4 }, { ...disc, r0: 0.11, y: 0.008, turn: 0.11 });
     head.push(part(SPHERE, place(0, 1.0, 0, 0.14, 0.035, 0.14), 'brown', INK.core, 0.5));
-    dots(head, 26, 0.12, 0.012, 'dark', INK.core, { y: 1.026, lift: 0.012 });
+    dots(head, 120, 0.134, 0.010, 'dark', INK.core, { y: 1.0, lift: 0.035 });
     const tip = M().makeTranslation(0, 1, 0).multiply(M().makeRotationX(0.85)).multiply(M().makeTranslation(0, -1, 0.04));
     for (const g of head) parts.push(g.applyMatrix4(tip));
   } else if (kind === 'action') {
@@ -246,10 +327,109 @@ function flowerGeometry(kind) {
       [4, 1.15, 0.11, 0.12, 0.9, 0.02],
       [3, 1.4, 0.08, 0.1, 1.1, 0.03],
     ];
-    rings.forEach(([count, tilt, len, wid, cup, y], k) => ring(parts, count, tilt, kind, k % 2 ? INK.inner : INK.outer, { len, wid, cup, curl: 0.18, round: 1, deep: 0.5 }, { y, turn: k * 0.7 }));
+    rings.forEach(([count, tilt, len, wid, cup, y], k) => ring(parts, count + structure, tilt, kind, k % 2 ? INK.inner : INK.outer, { len, wid, cup, curl: 0.18, round: 1, deep: 0.5 }, { y, turn: k * 0.7 }));
   }
   const merged = mergeGeometries(parts);
   for (const g of parts) g.dispose();
+  return merged;
+}
+
+/** Branches are connected in local coordinates, so instances can vary in width and height as a unit. */
+function companionGeometry(form, structure) {
+  const parts = [];
+  const v = (x, y, z) => new THREE.Vector3(x, y, z);
+  const up = v(0, 1, 0);
+  function stem(from, to, radius, woody = false) {
+    const delta = to.clone().sub(from);
+    const length = delta.length();
+    const m = M().compose(from.clone().lerp(to, 0.5), new THREE.Quaternion().setFromUnitVectors(up, delta.normalize()), v(radius, length, radius));
+    parts.push(part(TAPER, m, woody ? 'wood' : 'green', INK.green));
+  }
+  function leaf(at, turn, len, wid, tilt) {
+    const m = M().makeTranslation(at.x, at.y, at.z).multiply(M().makeRotationY(turn)).multiply(M().makeRotationZ(tilt));
+    parts.push(petal('leaf', INK.green, { len, wid, curl: -0.22, cup: 0.34, round: 0.24 }, turn).applyMatrix4(m));
+  }
+  const golden = 2.39996;
+  const at = p => M().makeTranslation(p.x, p.y, p.z);
+  if (form === 'bearded iris') {
+    stem(v(0, 0, 0), v(0, 0.85, 0), 0.017);
+    for (let i = 0; i < 7; i++) leaf(v(0, 0.03, 0), i * golden, 0.61 + 0.16 * Math.cos(i), 0.075, 0.9 + 0.16 * Math.sin(i));
+    const base = at(v(0, 0.85, 0));
+    ring(parts, 3, 0.52, 'checkpoint', INK.outer, { len: 0.34, wid: 0.19, cup: 0.41, curl: -0.93, wave: 0.12, round: 0.94 }, { base, jitter: 0 });
+    ring(parts, 3, 1.07 + 0.12 * structure, 'checkpoint', INK.inner, { len: 0.25, wid: 0.14, cup: 0.58, curl: 0.11, wave: 0.08, round: 0.85 }, { base, turn: Math.PI / 3 });
+    for (let i = 0; i < 3; i++) for (let j = 1; j <= 8; j++) {
+      const x = j * 0.016;
+      parts.push(part(FLORET, base.clone().multiply(M().makeRotationY(i * TAU / 3)).multiply(place(x, 0.015 + x * 0.50 - x*x*2.5, 0, 0.012, 0.018, 0.014)), 'gold', INK.core));
+    }
+  } else if (form === 'foxglove' || form === 'lavender') {
+    const fox = form === 'foxglove', spikes = fox ? 1 : 7 + structure;
+    for (let i = 0; i < spikes; i++) {
+      const angle = i * golden, spread = i === 0 ? 0 : 0.26;
+      const top = v(Math.cos(angle)*spread, (fox ? 1.13 : 0.97) - (i ? 0.12 + 0.08*Math.sin(i) : 0), Math.sin(angle)*spread);
+      stem(v(0, 0, 0), top, fox ? 0.014 : 0.008);
+      for (let j = 0; j < (fox ? 8 : 4); j++) leaf(top.clone().multiplyScalar(0.06+j*0.038), angle+j*golden, fox ? 0.34-j*0.019 : 0.17, fox ? 0.13 : 0.024, 0.4+j*0.08);
+      const levels = fox ? 10 + structure * 2 : 6;
+      for (let j = 0; j < levels; j++) {
+        const t = j / levels, p = top.clone().multiplyScalar((fox ? 0.43 : 0.68) + t*(fox ? 0.57 : 0.32));
+        const size = 1 - 0.54*t;
+        if (fox) {
+          const m = at(p).multiply(M().makeRotationY(j*golden)).multiply(M().makeRotationZ(0.98)).multiply(M().makeScale(size*0.76,size,size*0.72));
+          parts.push(bell(m, INK.outer));
+        } else {
+          for (let k = 0; k < 3; k++) {
+            const a = k*TAU/3+j*golden;
+            const m = at(p).multiply(M().makeRotationY(a)).multiply(place(0.022*size,0,0,0.043*size,0.024*size,0.023*size,0.40));
+            const bud = part(FLORET, m, 'checkpoint', INK.inner);
+            const blade = bud.attributes.aBlade;
+            for (let b=0;b<blade.count;b++) blade.setXYZ(b,0.58,0.1,1);
+            parts.push(bud);
+          }
+        }
+      }
+    }
+  } else {
+    const hydrangea = form === 'hydrangea', berries = form === 'winterberry';
+    const stems = (hydrangea ? 5 : 8) + structure;
+    for (let i = 0; i < stems; i++) {
+      const angle = i*golden, spread = i ? 0.31 + 0.09*Math.sin(i) : 0.03;
+      const top = v(Math.cos(angle)*spread, i ? 0.61 + 0.10*Math.cos(i) : 0.85, Math.sin(angle)*spread);
+      const fork = top.clone().multiplyScalar(0.48);
+      stem(v(0,0,0),fork,0.021,true);
+      stem(fork,top,0.014,true);
+      const side = fork.clone().add(v(Math.cos(angle+0.75)*0.21,0.19,Math.sin(angle+0.75)*0.21));
+      stem(fork,side,0.008,true);
+      for (let j=0;j< (berries ? 3 : 7);j++) {
+        const p = j === 0 ? side : fork.clone().lerp(top,j/8);
+        leaf(p, angle+j*golden, berries ? 0.12 : 0.24, hydrangea ? 0.16 : 0.09,0.18 + 0.26*Math.sin(j));
+      }
+      if (hydrangea) {
+        // Pack four-sepal florets over the exposed dome of each flower head.
+        for (let j=0;j<19;j++) {
+          const h = (j+0.5)/19, r = Math.sqrt(1-h*h), a = j*golden;
+          const n = v(r*Math.cos(a),h,r*Math.sin(a));
+          const p = top.clone().addScaledVector(n,0.13);
+          const m = at(p).multiply(M().makeRotationFromQuaternion(new THREE.Quaternion().setFromUnitVectors(up,n)));
+          ring(parts,4,0.15,'memory',INK.outer,{len:0.064,wid:0.05,round:1,cup:0.35},{base:m,turn:a,jitter:0});
+          parts.push(part(FLORET,m.clone().multiply(place(0,0.009,0,0.012,0.012,0.012)),'pale',INK.core));
+        }
+      } else if (berries) {
+        for (let j=0;j<10;j++) {
+          const p = fork.clone().lerp(top,(j+0.5)/10);
+          const a=j*golden;
+          const fruit=p.clone().add(v(0.057*Math.cos(a),0.018,0.057*Math.sin(a)));
+          stem(p,fruit,0.004,true);
+          parts.push(part(SPHERE,at(fruit).multiply(M().makeScale(0.036,0.039,0.036)),'berry',INK.inner));
+        }
+      } else {
+        const m=at(top).multiply(M().makeRotationY(-angle)).multiply(M().makeRotationZ(-0.69));
+        ring(parts,7,0.23,'action',INK.outer,{len:0.13,wid:0.115,curl:0.05,round:1},{base:m});
+        ring(parts,5,0.67,'action',INK.inner,{len:0.09,wid:0.095,cup:0.55,round:1},{base:m,turn:0.42});
+        dots(parts,9,0.029,0.009,'gold',INK.core,{base:m,y:0.038,lift:0.014});
+      }
+    }
+  }
+  const merged = mergeGeometries(parts);
+  parts.forEach(g => g.dispose());
   return merged;
 }
 
@@ -266,6 +446,28 @@ function lanternGeometry() {
   const lantern = mergeGeometries(stone);
   for (const g of stone) g.dispose();
   return lantern;
+}
+
+function rockGeometry(form, structure) {
+  const shape = new THREE.SphereGeometry(1, 16, 10);
+  const points = shape.attributes.position;
+  for (let i = 0; i < points.count; i++) {
+    const x = points.getX(i), y = points.getY(i), z = points.getZ(i);
+    const lump = 1 + 0.08 * Math.sin(x * 4 + z * 2) * Math.cos(y * 3 - z);
+    points.setXYZ(i, x * lump + 0.12 * y, Math.sign(y) * Math.pow(Math.abs(y), 0.75), z * lump);
+  }
+  shape.computeVertexNormals();
+  const layers = form === 'river stone' ? [[0, 0.44, 0.65, 0.55, 0.49, 0.11]] : [
+    [0, 0.17, 0.52, 0.23, 0.42, 0.06], [-0.04, 0.51, 0.40, 0.16, 0.34, -0.08],
+    [0.03, 0.76, 0.27, 0.13, 0.22, 0.09], [-0.01, 0.93, 0.15, 0.08, 0.14, -0.12],
+  ];
+  if (form === 'slate cairn' && structure < 0) layers.pop();
+  if (form === 'slate cairn' && structure > 0) layers.push([0.02, 1.045, 0.09, 0.05, 0.085, 0.13]);
+  const parts = layers.map(([x, y, w, h, d, tilt]) => part(shape, place(x, y, 0, w, h, d, tilt), 'stone', INK.outer));
+  const merged = mergeGeometries(parts);
+  parts.forEach(g => g.dispose());
+  shape.dispose();
+  return merged;
 }
 
 /** A month's marker beside the path: a weathered post with a plank across it. */
@@ -286,7 +488,15 @@ uniform float uFocus;
 in vec3 aLit;
 in vec3 aShade;
 in float aInk;
+in vec3 aBlade;
+out vec3 vBlade;
 in float aState;
+#ifdef SEEDED
+in vec3 aPigment;
+in vec2 aShape;
+flat out float vPhase;
+out vec3 vLocal;
+#endif
 in vec2 aMark;
 out vec3 vWorld;
 out float vMark;
@@ -302,24 +512,56 @@ void main() {
   // (the flower you are looking at stands a little taller)
   // (grown: 0 before its time on the timeline, 1 once it is there; marked: 1 found, -1 set aside by a filter)
   vMark = aMark.y;
-  vec4 w = m * vec4(position * aMark.x * (1.0 + 0.1 * vFocus + 0.08 * max(aMark.y, 0.0) - 0.3 * max(-aMark.y, 0.0)), 1.0);
+  vec3 local = position, n = normal;
+  vLit = aLit;
+  vShade = aShade;
+  #ifdef SEEDED
+    vPhase = aShape.y;
+    vLocal = position;
+    #ifdef MINERAL
+      // Shear the entire stack together so its layers stay in contact.
+      local.x += aShape.x * 0.28 * position.y;
+      n.y -= aShape.x * 0.28 * n.x;
+      vLit = aPigment;
+      vShade = aPigment * vec3(0.52, 0.56, 0.64);
+    #else
+      // Vary the opening angle across the flower head, including its centre.
+      float neck = smoothstep(0.62, 0.82, local.y);
+      float radial = length(local.xz);
+      local.y += aShape.x * radial * neck;
+      n.xz -= aShape.x * neck * local.xz / max(radial, 0.001) * n.y;
+      if (aBlade.z > 0.5 && aBlade.z < 1.5) {
+        vLit = aPigment * (0.70 + 0.30 * aBlade.x);
+        vShade = aPigment * vec3(0.51, 0.46, 0.64) * (0.72 + 0.28 * aBlade.x);
+      }
+    #endif
+  #endif
+  vec4 w = m * vec4(local * aMark.x * (1.0 + 0.1 * vFocus + 0.08 * max(aMark.y, 0.0) - 0.3 * max(-aMark.y, 0.0)), 1.0);
   vec3 foot = m[3].xyz;
   // a slow nod in the wind, more at the head than the foot
   float up = max(w.y - foot.y, 0.0);
   float sway = sin(uTime * 1.5 + foot.x * 0.61 + foot.z * 0.47) + 0.5 * sin(uTime * 2.7 + foot.z * 0.9);
   // (stone and wood do not nod)
   if (aState > 2.5) sway = 0.0;
+  #ifdef MINERAL
+  sway = 0.0;
+  #endif
   w.x += sway * 0.03 * up * up;
   w.z += sway * 0.018 * up * up;
   vWorld = w.xyz;
-  vN = normalize(mat3(m) * normal);
-  vLit = aLit;
-  vShade = aShade;
+  mat3 axes = mat3(m);
+  vN = normalize(axes * (n / vec3(dot(axes[0], axes[0]), dot(axes[1], axes[1]), dot(axes[2], axes[2]))));
   vInk = aInk;
+  vBlade = aBlade;
   vState = aState;
   gl_Position = projectionMatrix * viewMatrix * w;
 }
 `;
+
+// The batch already contains one form. A uniform lets every seed retain
+// its own colour and markings while sharing the species' surface pattern.
+const petalFamily = { poppy: 1, tulip: 2, 'bearded iris': 3, foxglove: 4, rose: 5, camellia: 5,
+  daisy: 6, sunflower: 6, bellflower: 7, hydrangea: 7 };
 
 const fragment = /* glsl */ `
 ${COMMON}
@@ -331,7 +573,102 @@ in float vInk;
 in float vState;
 in float vFocus;
 in float vMark;
+in vec3 vBlade; // length, signed width, surface kind (0 solid, 1 petal, 2 leaf)
+#ifdef MINERAL
+uniform sampler2D tMineralColour;
+uniform sampler2D tMineralNormal;
+#endif
+#ifdef SEEDED
+flat in float vPhase;
+in vec3 vLocal;
+uniform int uPetalFamily;
+#endif
 layout(location = 0) out vec4 outC;
+// Band-limit the grooves so distant flowers keep their colour as each vein becomes subpixel.
+float veinLine(float cycles) {
+  float footprint = max(fwidth(cycles), 0.001);
+  float axis = abs(fract(cycles + 0.5) - 0.5);
+  return (1.0 - smoothstep(0.025, 0.08 + footprint * 0.5, axis)) * (1.0 - smoothstep(0.16, 0.55, footprint));
+}
+#ifdef SEEDED
+// Smooth pigment fields and grain are evaluated in specimen coordinates, so they follow the wind.
+float surfaceNoise(vec2 p) {
+  vec2 k = floor(p), f = fract(p);
+  f = f * f * (3.0 - 2.0 * f);
+  return mix(mix(hash12(k), hash12(k + vec2(1, 0)), f.x),
+             mix(hash12(k + vec2(0, 1)), hash12(k + vec2(1, 1)), f.x), f.y);
+}
+float grainAt(vec2 p) {
+  vec2 footprint = fwidth(p);
+  return (surfaceNoise(p) - 0.5) * (1.0 - smoothstep(0.28, 1.3, max(footprint.x, footprint.y)));
+}
+vec3 petalPigment(vec3 base, vec2 uv, float phase) {
+  float t = uv.x, s = uv.y;
+  float wash = surfaceNoise(uv * vec2(4.0, 2.5) + phase);
+  float curl = 0.10 * sin(t * 5.0 + phase) + 0.12 * wash;
+  float flame = smoothstep(0.05, 0.9, cos((s + curl) * (8.0 + 3.0 * sin(phase)) + 1.8 * wash));
+  float style = floor(phase * (4.0 / TAU));
+  vec3 ink = mix(vec3(0.24, 0.024, 0.095), vec3(0.10, 0.045, 0.27), smoothstep(0.8, 2.9, phase));
+  vec3 cream = vec3(1.0, 0.89, 0.71);
+  float edge = smoothstep(0.74, 0.95, max(abs(s), t) + 0.12 * (wash - 0.5));
+  float throat = 1.0 - smoothstep(0.07, 0.49, t + 0.09 * wash);
+  vec3 colour = mix(base * base, ink, throat * 0.76);
+  if (style < 1.0) { // a pale petal with a saturated picotee edge
+    colour = mix(cream, colour, 0.35 + 0.65 * max(edge, throat));
+    colour = mix(colour, ink, 0.76 * edge);
+  } else if (style < 2.0) { // brush-shaped streaks radiate from the throat
+    colour = mix(colour, ink, 0.8 * flame * (1.0 - smoothstep(0.2, 1.0, t + wash * 0.22)));
+    colour = mix(colour, cream, 0.35 * edge);
+  } else if (style < 3.0) { // freckles over a contrasting throat
+    vec2 p = uv * vec2(11.0, 5.0) + phase;
+    vec2 cell = floor(p), centre = vec2(hash12(cell), hash12(cell + 19.3)) * 0.52 + 0.24;
+    float spots = (1.0 - smoothstep(0.09, 0.20 + min(0.1, fwidth(p.x)), length(fract(p) - centre)))
+      * (1.0 - smoothstep(0.2, 0.85, fwidth(p.x)));
+    colour = mix(colour, cream, 0.42 * (1.0 - t));
+    colour = mix(colour, ink, spots * (1.0 - smoothstep(0.25, 0.84, t)) * 0.95);
+  } else {
+    colour = mix(colour, cream, smoothstep(0.38, 0.9, t + 0.26 * flame) * 0.78);
+  }
+  float side = abs(s);
+  float fan = s * (2.3 + 1.2 * t) + 0.17 * sin(4.0 * t + phase) + 0.32 * (wash - 0.5);
+  float rib = veinLine(fan);
+  if (uPetalFamily == 1) {
+    // Poppy petals have a dark basal blotch that gathers into the centre.
+    float blotch = 1.0 - smoothstep(0.28, 0.38, t + 0.17 * side * side + 0.13 * (wash - 0.5));
+    colour = mix(mix(colour, base, 0.25), vec3(0.042, 0.012, 0.051), 0.96 * blotch);
+    colour *= 1.0 - 0.16 * rib;
+  } else if (uPetalFamily == 2) {
+    float tongues = (1.0 - smoothstep(0.10, 0.48, abs(fract(fan + 0.5) - 0.5)))
+      * (1.0 - smoothstep(0.13, 0.88, t + 0.28 * wash));
+    colour = mix(colour, mix(ink, base * 0.55, 0.32), 0.82 * tongues);
+    colour = mix(colour, cream, 0.30 * smoothstep(0.78, 0.98, t));
+  } else if (uPetalFamily == 3) {
+    float signal = (1.0 - smoothstep(0.22, 0.70, side)) * (1.0 - smoothstep(0.24, 0.73, t));
+    colour = mix(colour, vec3(0.98, 0.78, 0.35), signal * 0.93);
+    colour = mix(colour, ink, veinLine(fan * 1.85) * (0.82 - 0.48 * t));
+  } else if (uPetalFamily == 4) {
+    // Burgundy spots sit inside pale halos around the mouths of the bells.
+    vec2 p = uv * vec2(5.0, 2.5) + phase;
+    vec2 cell = floor(p), centre = 0.24 + 0.52 * vec2(hash12(cell), hash12(cell + 31.0));
+    float d = length(fract(p) - centre);
+    float aa = max(fwidth(p.x), fwidth(p.y));
+    float visible = (1.0 - smoothstep(0.14, 0.6, aa)) * smoothstep(0.18, 0.59, t);
+    colour = mix(colour, cream, visible * (1.0 - smoothstep(0.20, 0.27 + aa, d)));
+    colour = mix(colour, vec3(0.15, 0.018, 0.061), visible * (1.0 - smoothstep(0.11, 0.17 + aa, d)));
+  } else if (uPetalFamily == 5) {
+    float margin = smoothstep(0.77, 1.0, max(side, t) + 0.045 * wash);
+    colour = mix(colour, mix(base, cream, 0.63), margin * 0.80);
+    colour *= 1.0 - 0.14 * veinLine(fan * 1.5);
+  } else if (uPetalFamily == 6) {
+    float honey = (1.0 - smoothstep(0.08, 0.43, t)) * (1.0 - 0.25 * side);
+    colour = mix(colour, vec3(0.98, 0.52, 0.09), honey * 0.84);
+    colour *= 1.0 - 0.23 * rib;
+  } else if (uPetalFamily == 7) {
+    colour = mix(colour, mix(ink, base, 0.32), 0.61 * rib * (1.0 - 0.54 * t));
+  }
+  return colour * (0.87 + 0.18 * wash + 0.16 * grainAt(uv * vec2(250, 85)));
+}
+#endif
 void main() {
   vec3 N = normalize(vN);
   vec3 V = normalize(uCamPos - vWorld);
@@ -339,8 +676,53 @@ void main() {
   // in the light or out of it, with a short soft turn between, as a painted figure is
   float open = smoothstep(0.35, 0.6, openAt(vWorld.xz));
   float lit = smoothstep(-0.02, 0.09, dot(N, uSunDir) + 0.06) * open;
+  float blade = step(0.5, vBlade.z);
+  lit = mix(lit, smoothstep(-0.44, 0.84, dot(N, uSunDir)) * open, blade);
   vec3 litPaint = vLit;
   vec3 shadePaint = vShade;
+  #ifdef SEEDED
+    #ifdef MINERAL
+      vec2 rockUV = vec2(vLocal.x + vLocal.z * 0.67, vLocal.y + vLocal.z * 0.29) + vPhase;
+      // The same CC0 colour and normal scans used on the hill supply pores and small pits.
+      vec2 stoneUV = rockUV * 0.51;
+      vec3 scan = texture(tMineralColour, stoneUV).rgb;
+      vec2 relief = texture(tMineralNormal, stoneUV).rg * 2.0 - 1.0;
+      vec3 dx = dFdx(vWorld), dy = dFdy(vWorld);
+      vec3 tx = cross(dy, N), ty = cross(N, dx);
+      vec3 tangent = tx * dFdx(stoneUV.x) + ty * dFdy(stoneUV.x);
+      vec3 bitangent = tx * dFdx(stoneUV.y) + ty * dFdy(stoneUV.y);
+      float span = max(dot(tangent, tangent), dot(bitangent, bitangent));
+      N = normalize(N + (tangent * relief.x + bitangent * relief.y) * (0.48 * inversesqrt(max(span, 1e-16))));
+      float cloud = surfaceNoise(rockUV * 4.0), grit = grainAt(rockUV * 180.0);
+      float strata = rockUV.y * 5.2 + rockUV.x * 1.3 + 1.6 * cloud + 0.25 * surfaceNoise(rockUV * 17.0);
+      float quartz = veinLine(strata) + 0.38 * veinLine(strata * 2.1 + 0.16);
+      float lichen = smoothstep(0.50, 0.72, cloud + 0.21 * surfaceNoise(rockUV * 46.0) + 0.16 * grit)
+        * smoothstep(0.0, 0.8, N.y);
+      litPaint = mix(vLit * vLit * (0.73 + 0.52 * cloud + 0.45 * grit), vec3(0.87, 0.79, 0.65), min(0.82, quartz));
+      litPaint = mix(litPaint, mix(vec3(0.14, 0.19, 0.065), vec3(0.59, 0.55, 0.25), 0.5 + grit), lichen * 0.78);
+      litPaint *= 0.77 + 0.68 * sqrt(dot(scan, vec3(0.30, 0.59, 0.11)));
+      shadePaint = litPaint * vec3(0.44, 0.48, 0.56);
+      lit = smoothstep(-0.72, 0.92, dot(N, uSunDir) + 0.13 * grit) * open;
+    #else
+      if (vBlade.z > 0.5 && vBlade.z < 1.5) {
+        litPaint = petalPigment(vLit, vBlade.xy, vPhase);
+        shadePaint = litPaint * vec3(0.50, 0.43, 0.63);
+        // Small folds follow the fan of veins. Perturb the surface across the
+        // petal so the highlight shifts as the specimen or the light turns.
+        vec3 crossBlade = cross(dFdy(vWorld), N) * dFdx(vBlade.y) + cross(N, dFdx(vWorld)) * dFdy(vBlade.y);
+        crossBlade *= inversesqrt(max(dot(crossBlade, crossBlade), 1e-16));
+        float pleat = vBlade.y * (3.0 + 2.4 * vBlade.x) + 0.16 * sin(4.6 * vBlade.x + vPhase);
+        float resolved = 1.0 - smoothstep(0.12, 0.49, fwidth(pleat));
+        float height = uPetalFamily == 1 || uPetalFamily == 3 ? 0.17 : 0.07;
+        N = normalize(N + crossBlade * height * resolved * sin(TAU * pleat));
+        lit = smoothstep(-0.44, 0.84, dot(N, uSunDir)) * open;
+      } else if (vBlade.z > 1.5) {
+        float fleck = surfaceNoise(vBlade.xy * vec2(14, 5) + vPhase);
+        litPaint = mix(vec3(0.035, 0.16, 0.085), vec3(0.34, 0.53, 0.17), 0.22 + 0.54 * fleck + 0.15 * vBlade.x);
+        shadePaint = litPaint * vec3(0.45, 0.56, 0.60);
+      }
+    #endif
+  #endif
   if (vState > 0.5 && vState < 1.5) {
     // retired: the colour has gone out of it
     litPaint = mix(vec3(dot(litPaint, vec3(0.333))), litPaint, 0.18) * vec3(0.78, 0.76, 0.84);
@@ -350,9 +732,18 @@ void main() {
   float grey = dot(uSkyColor, vec3(0.333));
   vec3 sky = mix(uSkyColor, vec3(grey), 0.8) * 1.15 + 0.2;
   vec3 col = mix(shadePaint * sky, litPaint * sun, lit);
+  float u = vBlade.x, lateral = abs(vBlade.y), leaf = step(1.5, vBlade.z);
+  float vein = veinLine(mix(vBlade.y * (2.6 + 1.6 * u) + 0.16 * sin(5.0 * u + vBlade.y), 6.0 * u - 1.35 * lateral, leaf));
+  float ribs = veinLine(14.0 * vBlade.y + 0.9 * sin(3.3 * u + vBlade.y));
+  float midrib = (1.0 - smoothstep(0.022, 0.085 + fwidth(vBlade.y), lateral)) * (1.0 - smoothstep(0.15, 0.65, fwidth(vBlade.y)));
+  col *= 1.0 - blade * (0.15 * vein + 0.045 * ribs) * smoothstep(0.0, 0.2, u);
+  col += litPaint * blade * (0.06 * midrib + 0.13 * leaf * midrib + 0.08 * pow(lateral, 4.0)) * (0.35 + 0.65 * lit);
+  // A folded, waxy leaf catches a broken band of sky along its midrib.
+  float wax = pow(max(dot(N, normalize(V + uSunDir)), 0.0), 18.0);
+  col += leaf * wax * open * (0.65 + 0.35 * midrib) * uSunColor * vec3(0.10, 0.14, 0.085);
   // thin petals glow where the low sun comes through them from behind
   float through = pow(max(dot(-V, uSunDir), 0.0), 3.0) * (1.0 - lit) * open;
-  col += litPaint * uSunColor * 0.32 * through * step(vInk, 0.12);
+  col += litPaint * uSunColor * through * blade * (0.12 + 0.30 * lateral) * (1.0 - 0.4 * vein);
   // and catch a little of the sky along their edges
   float rim = pow(1.0 - abs(dot(N, V)), 3.0);
   col += litPaint * uSkyColor * 0.18 * rim;
@@ -443,6 +834,8 @@ function layOut(records, heightAt) {
     const a = (i / pinned.length) * TAU + 0.5;
     r.x = START[0] + Math.cos(a) * 4.6;
     r.z = START[1] + Math.sin(a) * 4.6;
+    const lx = r.x + Math.cos(a) * 0.75, lz = r.z + Math.sin(a) * 0.75;
+    r.lantern = { x: lx, z: lz, y: heightAt(lx, lz) };
     r.s = null;
   });
   // everything else along the path, newest first, on alternate sides of it and never quite in a row
@@ -471,9 +864,9 @@ function layOut(records, heightAt) {
   // each flower on the path stands in a little clump of its own kind: smaller blooms round it, away from the path
   const companions = [];
   for (const r of line) {
-    const n = 3 + Math.floor(((r.s * 13.7) % 1) * 4);
+    const n = 2 + Math.floor(r.appearance.phase / TAU * 4);
     for (let k = 0; k < n; k++) {
-      const h = Math.sin((r.s + k) * 91.7) * 0.5 + 0.5;
+      const h = Math.sin(r.appearance.turn + k * 91.7) * 0.5 + 0.5;
       const out = 0.35 + 0.5 * ((k * 0.618 + h) % 1);
       const side = (k % 2 ? 1 : -1) * (0.28 + 0.3 * h);
       const x = r.x + r.away[0] * out + r.along[0] * side;
@@ -504,7 +897,7 @@ const $ = (id) => document.getElementById(id);
  * @param field the valley's meadow: its uniforms are the light the flowers stand in
  * @param goTo (x, z, yaw, pitch) stands the walker somewhere, looking a way
  */
-export function createGarden({ snapshot, field, scene, canvas, goTo, media = [], chime = () => {}, kinds = [...KINDS, 'pinned'] }) {
+export function createGarden({ snapshot, field, scene, canvas, goTo, survey, inspect, media = [], chime = () => {}, kinds = [...KINDS, 'pinned'] }) {
   const lifecycle = new AbortController();
   const { signal } = lifecycle;
   const listen = (target, event, handler) => target.addEventListener(event, handler, { signal });
@@ -514,34 +907,69 @@ export function createGarden({ snapshot, field, scene, canvas, goTo, media = [],
   const byId = new Map(records.map((r) => [r.id, r]));
   const refBy = (id) => records.filter((r) => r.refs.includes(id)).map((r) => r.id);
   const { marks, line, companions } = layOut(records, field.heightAt);
+  for (const r of records) {
+    const dir = r.away ?? [(r.x - START[0]) / 4.6, (r.z - START[1]) / 4.6];
+    const offset = r.pinned ? 1.48 : 0.96;
+    const x = r.x + dir[0] * offset, z = r.z + dir[1] * offset;
+    r.companion = { owner: r, title: r.title, x, z, y: field.heightAt(x, z), appearance: companionAppearance(r.appearance.seed) };
+  }
 
-  // one mesh per kind of flower, however many records there are
+  // Shared topology per form; pigments, proportions and curvature belong to individual records.
   const meshes = [];
   const dummy = new THREE.Object3D();
-  for (const kind of [...KINDS, 'pinned']) {
-    const items = records.filter((r) => (kind === 'pinned' ? r.pinned : r.kind === kind && !r.pinned));
+  const groups = new Map();
+  const groupFor = (r) => {
+    const { form, structure } = r.appearance;
+    const key = form + '/' + structure;
+    if (!groups.has(key)) groups.set(key, { form, structure, items: [], buds: [] });
+    return groups.get(key);
+  };
+  for (const r of records) {
+    groupFor(r).items.push(r);
+    groupFor(r.companion).items.push(r.companion);
+  }
+  for (const c of companions) groupFor(c.of).buds.push(c);
+  groups.set('lantern', { form: 'lantern', items: records.filter(r => r.pinned), buds: [] });
+  for (const { form, structure, items, buds } of groups.values()) {
+    const lantern = form === 'lantern';
     if (!items.length) continue;
-    const buds = kind === 'pinned' ? [] : companions.filter((c) => c.of.kind === kind);
-    const geometry = flowerGeometry(kind);
+    const stone = !lantern && items[0].appearance.stone;
+    const geometry = lantern ? lanternGeometry() : stone ? rockGeometry(form, structure) : flowerGeometry(form, structure);
+    const owners = [...items, ...buds.map(c => c.of)];
+    if (!lantern) {
+      geometry.setAttribute('aPigment', new THREE.InstancedBufferAttribute(Float32Array.from(owners.flatMap(r => r.appearance.pigment)), 3));
+      geometry.setAttribute('aShape', new THREE.InstancedBufferAttribute(Float32Array.from(owners.flatMap(r => [r.appearance.curve, r.appearance.phase])), 2));
+    }
     const state = new Float32Array(items.length + buds.length);
     const material = new THREE.ShaderMaterial({
       glslVersion: THREE.GLSL3,
       side: THREE.DoubleSide,
-      uniforms: { ...field.uniforms, uFocus: { value: -1 } },
+      defines: lantern ? {} : stone ? { SEEDED: 1, MINERAL: 1 } : { SEEDED: 1 },
+      uniforms: { ...field.uniforms, uFocus: { value: -1 }, uPetalFamily: { value: petalFamily[form] ?? 0 }, ...(stone ? {
+        tMineralColour: field.ground.uniforms.tDirt, tMineralNormal: field.ground.uniforms.tDirtN,
+      } : {}) },
       vertexShader: vertex,
       fragmentShader: fragment,
     });
     const mesh = new THREE.InstancedMesh(geometry, material, items.length + buds.length);
     items.forEach((r, i) => {
-      const retired = RETIRED.has(r.status);
+      const owner = r.owner ?? r;
+      const retired = RETIRED.has(owner.status);
       // taller the more often it has been revised; a retired record has sunk back
-      r.tall = kind === 'pinned' ? 1.2 : retired ? 0.62 : 0.85 + 0.09 * Math.min(r.revision, 5);
-      r.mesh = mesh;
-      r.index = i;
-      state[i] = kind === 'pinned' ? 3 : retired ? 1 : unsettled(r) ? 2 : 0;
-      dummy.position.set(r.x, r.y - 0.02, r.z);
-      dummy.rotation.set(0, (i * 2.39996) % TAU, 0);
-      dummy.scale.setScalar(r.tall);
+      const a = r.appearance;
+      if (lantern) {
+        dummy.position.set(r.lantern.x, r.lantern.y - 0.02, r.lantern.z);
+        dummy.scale.setScalar(1);
+      } else {
+        const size = retired ? 0.62 : 0.85 + 0.09 * Math.min(owner.revision, 5);
+        r.tall = size * a.height * (a.form === 'river stone' ? 0.68 : 1);
+        r.mesh = mesh;
+        r.index = i;
+        dummy.position.set(r.x, r.y - 0.02, r.z);
+        dummy.scale.set(size * a.width, r.tall, size * a.depth);
+      }
+      state[i] = lantern ? 3 : retired ? 1 : unsettled(owner) ? 2 : 0;
+      dummy.rotation.set(0, a.turn, 0);
       dummy.updateMatrix();
       mesh.setMatrixAt(i, dummy.matrix);
     });
@@ -550,7 +978,8 @@ export function createGarden({ snapshot, field, scene, canvas, goTo, media = [],
       state[i] = state[c.of.index];
       dummy.position.set(c.x, c.y - 0.02, c.z);
       dummy.rotation.set(0, c.turn, 0);
-      dummy.scale.setScalar(c.of.tall * c.small);
+      mesh.getMatrixAt(c.of.index, dummy.matrix);
+      dummy.scale.setFromMatrixScale(dummy.matrix).multiplyScalar(c.small);
       dummy.updateMatrix();
       mesh.setMatrixAt(i, dummy.matrix);
     });
@@ -561,7 +990,7 @@ export function createGarden({ snapshot, field, scene, canvas, goTo, media = [],
     const markAttr = new THREE.InstancedBufferAttribute(mark, 2);
     markAttr.setUsage(THREE.DynamicDrawUsage);
     geometry.setAttribute('aMark', markAttr);
-    mesh.userData = { owners: [...items, ...buds.map((c) => c.of)], mark, want: mark.slice(), markAttr };
+    mesh.userData = { owners: owners.map(r => r.owner ?? r), mark, want: mark.slice(), markAttr };
     mesh.frustumCulled = false;
     plantings.add(mesh);
     meshes.push(mesh);
@@ -601,7 +1030,7 @@ export function createGarden({ snapshot, field, scene, canvas, goTo, media = [],
     let k = 0;
     for (const r of records.filter((x) => x.pinned)) {
       // (just in front of the window, so its glow is not hidden inside the stone)
-      home.push(r.x, r.y + 0.79 * r.tall, r.z, (k++ * 0.618) % 1);
+      home.push(r.lantern.x, r.lantern.y + 0.77, r.lantern.z, (k++ * 0.618) % 1);
       info.push(0.85, 0);
     }
     const homes = records.filter((x) => !x.pinned);
@@ -929,6 +1358,9 @@ export function createGarden({ snapshot, field, scene, canvas, goTo, media = [],
       <button class="close" aria-label="Close" data-close>×</button>
       <div class="pills"><span class="pill kind" style="background:${CSS[r.kind]}">${esc(r.kind)}</span><span class="pill ${warn ? 'warn' : RETIRED.has(r.status) ? 'bad' : ''}">${esc(r.status)}</span>${r.pinned ? '<span class="pill pinned">pinned</span>' : ''}</div>
       <h2>${esc(r.title)}</h2>
+      <p class="sub">${esc(r.appearance.form)} with ${esc(r.companion.appearance.form)} · Seed <code>${r.appearance.seed}</code></p>
+      <button class="chip" type="button" data-inspect>Specimen lens</button>
+      <button class="chip" type="button" data-companion>Inspect ${esc(r.companion.appearance.form)}</button>
       <p class="sub">rev ${esc(r.revision)}${last ? ` · ${esc(last[1])} · ${when(last[2])}` : ''}</p>
       <p class="content">${esc(r.content)}${r.truncated ? ' …' : ''}</p>
       ${r.truncated ? '<p class="sub">A long record: only its beginning is shown here.</p>' : ''}
@@ -1036,7 +1468,9 @@ export function createGarden({ snapshot, field, scene, canvas, goTo, media = [],
       const go = e.target.closest('[data-go]');
       const pic = e.target.closest('[data-photo]');
       const readIt = e.target.closest('[data-read]');
-      if (readIt) reader.open(readIt.dataset.read, readIt);
+      if (e.target.closest('[data-inspect]') && open) inspect(open);
+      else if (e.target.closest('[data-companion]') && open) inspect(open.companion);
+      else if (readIt) reader.open(readIt.dataset.read, readIt);
       else if (go) visit(byId.get(go.dataset.go));
       else if (pic) visit(photos[Number(pic.dataset.photo)]);
       else if (e.target.closest('[data-close]')) closePanels();
@@ -1049,6 +1483,7 @@ export function createGarden({ snapshot, field, scene, canvas, goTo, media = [],
   const passes = (r) => r.photo || want.kinds.has(r.pinned ? 'pinned' : r.kind) && (!want.harness || r.actors.includes(want.harness)) && !(want.retired && RETIRED.has(r.status));
   const shown = (r) => r.photo || r.pinned || r.created <= want.cutoff;
   const matches = (r) => want.words.length > 0 && want.words.every((w) => r.text.includes(w));
+  const visibleSpecimens = () => records.filter(r => shown(r) && passes(r) && (!want.words.length || matches(r)));
   /** Says to every flower (and its companions) how grown and how marked it should be, and lights the beacons. */
   function apply() {
     want.words = search.value.trim().toLowerCase().split(/\s+/).filter(Boolean);
@@ -1062,6 +1497,7 @@ export function createGarden({ snapshot, field, scene, canvas, goTo, media = [],
         target[i * 2 + 1] = !passes(r) || (want.words.length && !matches(r)) ? -1 : matches(r) ? 1 : 0;
       });
     }
+    $('lensBtn').disabled = !visibleSpecimens().length;
     beacons(found.filter((r) => !r.photo));
     const note = $('found');
     note.hidden = !want.words.length;
@@ -1087,7 +1523,7 @@ export function createGarden({ snapshot, field, scene, canvas, goTo, media = [],
   const counts = Object.fromEntries([...KINDS, 'pinned'].map((k) => [k, records.filter((r) => (k === 'pinned' ? r.pinned : !r.pinned && r.kind === k)).length]));
   $('legend').innerHTML = [...KINDS, 'pinned']
     .filter((k) => counts[k])
-    .map((k) => `<button class="kind" data-kind="${k}" aria-pressed="${want.kinds.has(k)}">${dot(k === 'pinned' ? { pinned: true } : { kind: k })}<span class="kn">${BED[k]}</span><span class="kf">${FLOWER[k]}</span><span class="kc">${counts[k]}</span></button>`)
+    .map((k) => `<button class="kind" data-kind="${k}" aria-pressed="${want.kinds.has(k)}">${dot(k === 'pinned' ? { pinned: true } : { kind: k })}<span class="kn">${BED[k]}</span><span class="kc">${counts[k]}</span></button>`)
     .join('');
   listen($('legend'), 'click', (e) => {
     const b = e.target.closest('[data-kind]');
@@ -1161,13 +1597,7 @@ export function createGarden({ snapshot, field, scene, canvas, goTo, media = [],
   // the map: the hill from above, the path, every record and where you stand
   const map = $('map');
   const ctx = map.getContext('2d');
-  const reach = gardenRadius() + 14;
-  const trail = [];
-  for (let t = 0; t <= pathLength(); t += 1.5) {
-    const p = pathAt(t);
-    trail.push([p.x, p.z]);
-  }
-  const toMap = (x, z, size) => [size / 2 + ((x - START[0]) / reach) * (size / 2), size / 2 + ((z - START[1]) / reach) * (size / 2)];
+  const { chart, toMap } = survey;
   function drawMap() {
     const size = map.clientWidth;
     if (!size) return;
@@ -1179,18 +1609,7 @@ export function createGarden({ snapshot, field, scene, canvas, goTo, media = [],
     ctx.beginPath();
     ctx.arc(size / 2, size / 2, size / 2 - 1, 0, TAU);
     ctx.clip();
-    ctx.fillStyle = 'rgba(92, 132, 72, 0.92)';
-    ctx.fillRect(0, 0, size, size);
-    ctx.strokeStyle = 'rgba(244, 236, 214, 0.9)';
-    ctx.lineWidth = 3;
-    ctx.lineCap = ctx.lineJoin = 'round';
-    ctx.beginPath();
-    trail.forEach(([x, z], i) => {
-      const [u, w] = toMap(x, z, size);
-      if (i) ctx.lineTo(u, w);
-      else ctx.moveTo(u, w);
-    });
-    ctx.stroke();
+    ctx.drawImage(chart, 0, 0, size, size);
     for (const r of records) {
       if (!shown(r)) continue;
       const [u, w] = toMap(r.x, r.z, size);
@@ -1218,7 +1637,7 @@ export function createGarden({ snapshot, field, scene, canvas, goTo, media = [],
     }
     const [u, w] = toMap(eye.x, eye.z, size);
     const a = Math.atan2(gaze.z, gaze.x);
-    ctx.fillStyle = 'rgba(255, 255, 255, 0.35)';
+    ctx.fillStyle = 'rgba(255, 238, 188, 0.45)';
     ctx.beginPath();
     ctx.moveTo(u, w);
     ctx.arc(u, w, 22, a - 0.5, a + 0.5);
@@ -1292,14 +1711,15 @@ export function createGarden({ snapshot, field, scene, canvas, goTo, media = [],
     el.style.left = `${((v.x + 1) / 2) * innerWidth}px`;
     el.style.top = `${((1 - v.y) / 2) * innerHeight}px`;
   }
+  const specimens = records.flatMap(r => [r, r.companion]);
   function update(dt, camera) {
     camera.getWorldPosition(eye);
     camera.getWorldDirection(gaze);
     let best = null;
     let bestScore = 0.94; // within about twenty degrees of where you look
-    for (const r of records) {
-      if (!shown(r)) continue;
-      to.set(r.x - eye.x, r.y + r.tall * 0.9 - eye.y, r.z - eye.z);
+    for (const r of specimens) {
+      if (!shown(r.owner ?? r)) continue;
+      to.set(r.x - eye.x, r.y + r.tall * (r.owner ? 0.69 : 0.9) - eye.y, r.z - eye.z);
       const d = to.length();
       if (d > 16 || d < 0.3) continue;
       const score = to.dot(gaze) / d - d * 0.0012;
@@ -1321,8 +1741,9 @@ export function createGarden({ snapshot, field, scene, canvas, goTo, media = [],
     for (const p of photos) if (p.picture) p.picture.material.uniforms.uLook.value += ((p === best ? 1 : 0) - p.picture.material.uniforms.uLook.value) * Math.min(1, dt * 8);
     // (with a card open, its flower stays the marked one)
     const marked = open ?? best;
-    if (best !== focus) {
-      focus = best;
+    const selected = best?.owner ?? best;
+    if (selected !== focus) {
+      focus = selected;
       $('hint').hidden = !focus;
     }
     for (const mesh of meshes) mesh.material.uniforms.uFocus.value = marked && marked.mesh === mesh ? marked.index : -1;
@@ -1396,10 +1817,12 @@ export function createGarden({ snapshot, field, scene, canvas, goTo, media = [],
     marks,
     update,
     visit,
+    closePanels,
     typing,
     selectedKinds: () => [...want.kinds],
-    canRefresh: () => !viewer.isOpen && !reader.isOpen && !readingPath.isOpen && card.hidden && list.hidden && !typing() && !playing && want.cutoff === Infinity,
+    canRefresh: () => !$('atlas').open && !viewer.isOpen && !reader.isOpen && !readingPath.isOpen && card.hidden && list.hidden && !typing() && !playing && want.cutoff === Infinity,
     dispose,
-    flowers: FLOWER,
+    forms: FORMS,
+    visibleSpecimens: () => visibleSpecimens().flatMap(r => [r.companion, r]),
   };
 }

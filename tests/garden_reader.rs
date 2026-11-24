@@ -88,6 +88,184 @@ impl Garden {
             .to_owned()
     }
 }
+#[test]
+fn backfill_cli_round_trip_uses_an_explicit_approval() {
+    let dir = tempfile::tempdir().unwrap();
+    let db = dir.path().join("synthetic.redb");
+    let garden = Garden::new(&db);
+    let record = garden.write(memory(
+        "CLI screening",
+        "Synthetic clip.",
+        "owner_statement",
+    ));
+    drop(garden);
+    let clip = include_bytes!("fixtures/attachment-sample.mp4");
+    std::fs::write(dir.path().join("video.mp4"), clip).unwrap();
+    let run = |command: &str, args: &[&str]| {
+        Command::new(env!("CARGO_BIN_EXE_mother"))
+            .current_dir(dir.path())
+            .args([
+                "garden",
+                "media",
+                "backfill",
+                command,
+                "--db",
+                "synthetic.redb",
+            ])
+            .args(args)
+            .output()
+            .unwrap()
+    };
+    let output = run(
+        "plan",
+        &[
+            "--root",
+            ".",
+            "--file",
+            "video.mp4",
+            "--memory",
+            id(&record),
+        ],
+    );
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let reviewed: Value = serde_json::from_slice(&output.stdout).unwrap();
+    std::fs::write(dir.path().join("review.json"), output.stdout).unwrap();
+    let op = reviewed["operationId"].as_str().unwrap();
+    assert!(
+        !run("apply", &["--root", ".", "--manifest", "review.json"])
+            .status
+            .success()
+    );
+    for (command, args) in [
+        (
+            "apply",
+            vec!["--root", ".", "--manifest", "review.json", "--approve", op],
+        ),
+        ("verify", vec!["--root", ".", "--manifest", "review.json"]),
+        ("revoke", vec!["--manifest", "review.json", "--approve", op]),
+    ] {
+        let output = run(command, &args);
+        assert!(
+            output.status.success(),
+            "{command}: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+    }
+    assert!(
+        !run("verify", &["--root", ".", "--manifest", "review.json"])
+            .status
+            .success()
+    );
+}
+
+#[test]
+fn owner_backfill_binds_reviewed_video_and_replays_after_reopen() {
+    let temp = std::fs::canonicalize(std::env::temp_dir()).unwrap();
+    let dir = tempfile::tempdir_in(temp).unwrap();
+    let db = dir.path().join("garden.redb");
+    let garden = Garden::new(&db);
+    let record = garden.write(memory(
+        "A synthetic screening",
+        "A two-frame test.",
+        "owner_statement",
+    ));
+    let memory_id = id(&record);
+    let clip = include_bytes!("fixtures/attachment-sample.mp4");
+    let path = dir.path().join("clip.mp4");
+    std::fs::write(&path, clip).unwrap();
+    let before = garden.store.v1_garden_reader(memory_id).unwrap();
+    let plan = garden
+        .store
+        .plan_attachment(
+            dir.path(),
+            "clip.mp4",
+            memory_id,
+            Some("synthetic-source".into()),
+            false,
+        )
+        .unwrap();
+    assert_eq!(plan.media_type, "video/mp4");
+    assert!(
+        garden
+            .store
+            .plan_attachment(dir.path(), "../clip.mp4", memory_id, None, false)
+            .is_err()
+    );
+    assert!(
+        garden.store.media_owner_list(None).unwrap()["assets"]
+            .as_array()
+            .unwrap()
+            .is_empty()
+    );
+    assert!(
+        garden
+            .store
+            .apply_attachment(dir.path(), &plan, "unreviewed")
+            .is_err()
+    );
+    std::fs::write(&path, b"swapped after review").unwrap();
+    assert!(
+        garden
+            .store
+            .apply_attachment(dir.path(), &plan, &plan.operation_id)
+            .is_err()
+    );
+    std::fs::write(&path, clip).unwrap();
+    let first = garden
+        .store
+        .apply_attachment(dir.path(), &plan, &plan.operation_id)
+        .unwrap();
+    assert_eq!(first["status"], "applied");
+    assert_eq!(
+        garden.store.verify_attachment(dir.path(), &plan).unwrap()["verified"],
+        true
+    );
+    assert_eq!(before, garden.store.v1_garden_reader(memory_id).unwrap());
+    let listed = garden.store.media_owner_list(None).unwrap();
+    let asset = &listed["assets"][0];
+    assert_eq!(asset["memoryLinks"][0]["memoryId"], memory_id);
+    assert_eq!(asset["memoryLinks"][0]["operationId"], plan.operation_id);
+    assert_eq!(garden.store.media_owner_bytes(&plan.sha256).unwrap(), clip);
+    let bundle = dir.path().join("backup");
+    garden.store.backup_to(&bundle).unwrap();
+    let restored = GardenStore::restore_backup(&bundle, &dir.path().join("restored.redb")).unwrap();
+    assert_eq!(listed, restored.media_owner_list(None).unwrap());
+    assert!(
+        restored
+            .apply_attachment(dir.path(), &plan, &plan.operation_id)
+            .is_err()
+    );
+    drop(garden);
+    let reopened = GardenStore::open_active(&db).unwrap();
+    let replay = reopened
+        .apply_attachment(dir.path(), &plan, &plan.operation_id)
+        .unwrap();
+    assert_eq!(replay["receipt"], first["receipt"]);
+    assert_eq!(replay["status"], "already_applied");
+    assert_eq!(listed, reopened.media_owner_list(None).unwrap());
+    let revoked = reopened
+        .revoke_attachment(&plan, &plan.operation_id)
+        .unwrap();
+    assert_eq!(revoked["status"], "revoked");
+    assert_eq!(
+        reopened
+            .revoke_attachment(&plan, &plan.operation_id)
+            .unwrap()["receipt"],
+        revoked["receipt"]
+    );
+    assert!(
+        reopened.media_owner_list(None).unwrap()["assets"][0]["memoryLinks"]
+            .as_array()
+            .unwrap()
+            .is_empty()
+    );
+    assert_eq!(reopened.media_owner_bytes(&plan.sha256).unwrap(), clip);
+}
+
 fn memory(title: &str, content: &str, basis: &str) -> Value {
     json!({"kind":"memory","title":title,"content":content,"status":"active","basis":basis})
 }

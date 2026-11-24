@@ -1,5 +1,7 @@
 # Visual memory
 
+[Attach an exported photo or recording to an existing v1 memory](memory-attachments.md).
+
 Mother keeps images, audio and video as evidence alongside graph memories. The original bytes are stored unchanged and verified by SHA-256. Captions, descriptions, OCR and transcripts are separate, attributed claims about the media. They never replace it. The design and its decisions are in [the visual memory spec](superpowers/specs/2026-11-22-visual-memory-design.md).
 
 Everything here works on the native redb Garden's v2 graph. The v1 `artifact` record type and its text-only media types are unchanged.
@@ -77,7 +79,7 @@ The gallery uses the same single-use loopback link as the explorer, and it never
 
 ## Attaching a photo from a conversation
 
-Hosts generally do not pass the original bytes of an uploaded image to an MCP server. A model may see a resized copy, but tool arguments are text, so Mother never treats bytes in a conversation as the original. The flow is:
+For a narrative memory, the [shared media bridge](media-bridge.md) accepts a selected file from an authorized harness and verifies the stored link after owner approval. For a graph assertion, a harness can propose pending evidence and the owner can select the original file during review.
 
 1. The harness calls `mother_garden_propose` with one evidence item whose source is `{"type":"uri","uri":"urn:mother:media:pending"}`. Its `mother.media:pending` extension (schema version 1) carries the target `{"kind":"assertion","id":...}`, the target's `expectedRevision`, an optional `description` and an optional `eventTime`. The target must be visible to the proposer. The proposal carries no path and no bytes.
 2. The harness tells you to finish in Mother. It must not say the photo is saved.

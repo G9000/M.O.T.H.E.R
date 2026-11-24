@@ -208,7 +208,9 @@ export function paint(x, z) {
   const wet = Math.max(smooth(0.68, 0.76, fbm(x / 47 + 1.5, z / 47 + 6.9, 2, 133)) * 0.6, 1 - smooth(1.0, 1.7, t));
   let growth = 1;
   // the footpath worn to earth, its edges ragged
-  const path = pathDistance(x, z);
+  const along = Math.max(0, Math.min(R_IN, x * DX + z * DZ));
+  const approach = Math.hypot(x - along * DX, z - along * DZ);
+  const path = Math.min(approach, pathDistance(x, z));
   growth = Math.min(growth, smooth(0.42, 1.1, path + (fbm(x / 2.7, z / 2.7, 2, 161) - 0.5) * 0.7));
   // nothing grows under the water
   growth = Math.min(growth, smooth(0.8, 0.86, t + (fbm(x / 3.3, z / 3.3, 2, 167) - 0.5) * 0.04));

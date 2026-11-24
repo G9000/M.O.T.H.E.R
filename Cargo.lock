@@ -1631,8 +1631,9 @@ dependencies = [
 
 [[package]]
 name = "mother-workspace"
-version = "0.5.0"
+version = "0.6.0"
 dependencies = [
+ "base64 0.13.1",
  "candle-core",
  "candle-nn",
  "candle-transformers",

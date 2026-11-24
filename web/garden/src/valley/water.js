@@ -22,6 +22,9 @@ uniform vec3 uZenith, uMid, uHorizon, uGlow;
 uniform samplerCube tClouds;
 uniform vec4 uTarn;   // centre x, z, and its half-lengths across and along the valley
 uniform vec2 uAlong;  // the way the valley runs
+uniform sampler2D tGlasshouse;
+uniform mat4 uMirrorProjection;
+uniform float uMirrorVisible;
 
 vec3 skyAt(vec3 d) {
   float h = max(d.y, 0.0);
@@ -54,6 +57,14 @@ void main() {
   // what stands low on the far side is mirrored too: the bank, the hills
   float shore = 1.0 - smoothstep(0.015, 0.11, R.y + r1.x * 0.03);
   mirror = mix(mirror, vec3(0.03, 0.115, 0.05) * (uSkyColor + uSunColor * 0.25), shore * 0.9);
+  if (uMirrorVisible > 0.5) {
+    vec4 reflected = uMirrorProjection * vec4(vWorld, 1.0);
+    vec2 uv = reflected.xy / reflected.w * 0.5 + 0.5 + rip * 0.10;
+    if (reflected.w > 0.0 && all(greaterThan(uv, vec2(0.0))) && all(lessThan(uv, vec2(1.0)))) {
+      vec4 house = texture(tGlasshouse, uv);
+      mirror = mirror * (1.0 - house.a * 0.91) + house.rgb * 0.91;
+    }
+  }
   float fres = 0.03 + 0.97 * pow(1.0 - max(dot(N, V), 0.0), 5.0);
   float shade = cloudAt(xz);
   vec3 bed = mix(vec3(0.1, 0.19, 0.11), vec3(0.01, 0.06, 0.065), smoothstep(0.0, 1.5, depth)) * (uSkyColor + uSunColor * 0.3 * shade);
@@ -61,6 +72,24 @@ void main() {
   // the sun's path on it, in sparks
   float glint = pow(max(dot(R, uSunDir), 0.0), 420.0) * shade;
   col += uSunColor * glint * 2.5;
+  // Rafts of water lilies collect in the shallows. Paint them in the water
+  // pass so their fine edges share its antialiasing and cost no extra draws.
+  vec2 cell = floor(off / 0.86);
+  vec2 seed = texture(tWhite, fract((cell + 0.5) / 64.0)).rg;
+  vec2 p = fract(off / 0.86) - 0.5 - (seed - 0.5) * 0.4;
+  float turn = seed.x * 6.283;
+  float angle = atan(p.y, p.x) + turn;
+  float radius = length(p);
+  float edge = (0.14 + 0.09 * seed.y) * (1.0 + 0.065 * sin(5.0 * angle));
+  float aa = clamp(fwidth(radius), 0.005, 0.08);
+  float raft = smoothstep(0.49, 0.59, texture(tNoise, off * 0.064 + 0.43).g)
+             * smoothstep(0.12, 0.42, depth) * (1.0 - smoothstep(1.35, 1.80, depth));
+  float pad = (1.0 - smoothstep(edge - aa, edge + aa, radius)) * smoothstep(0.01, 0.09, 1.0 - cos(angle));
+  float veins = pow(max(0.0, cos(angle * 9.0)), 8.0);
+  vec3 leaf = mix(vec3(0.045, 0.17, 0.12), vec3(0.28, 0.42, 0.19), 0.36 * veins + 0.5 * radius / max(edge, 0.01));
+  float petals = 1.0 - smoothstep(0.08 - aa, 0.08 + aa, radius / (0.73 + 0.27 * cos(angle * 7.0)));
+  leaf = mix(leaf, mix(vec3(0.9, 0.67, 0.70), vec3(0.95, 0.64, 0.27), 1.0 - smoothstep(0.01, 0.03, radius)), petals * step(0.80, seed.x));
+  col = mix(col, leaf * (uSkyColor + uSunColor * 0.54 * shade), raft * pad);
   // a dark line where the bank meets the water
   col = mix(vec3(0.045, 0.12, 0.075) * (uSkyColor + uSunColor * 0.25), col, smoothstep(0.04, 0.3, depth));
   float alpha = smoothstep(0.0, 0.1, depth);
@@ -75,6 +104,9 @@ export function createTarn(field, sky) {
   geometry.rotateX(-Math.PI / 2);
   const u = sky.uniforms;
   const uniforms = { ...field.uniforms, uZenith: u.uZenith, uMid: u.uMid, uHorizon: u.uHorizon, uGlow: u.uGlow, tClouds: u.tClouds, uTarn: { value: new THREE.Vector4(TARN.at[0], TARN.at[1], TARN.rx, TARN.rz) }, uAlong: { value: new THREE.Vector2(HERO[0], HERO[1]) } };
+  uniforms.tGlasshouse = { value: null };
+  uniforms.uMirrorProjection = { value: new THREE.Matrix4() };
+  uniforms.uMirrorVisible = { value: 0 };
   const material = new THREE.ShaderMaterial({ glslVersion: THREE.GLSL3, vertexShader: vertex, fragmentShader: fragment, uniforms, transparent: true, depthWrite: false });
   const mesh = new THREE.Mesh(geometry, material);
   mesh.position.set(TARN.at[0], TARN.level, TARN.at[1]);

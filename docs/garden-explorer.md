@@ -2,17 +2,31 @@
 
 A read-only way to walk through what M.O.T.H.E.R holds. The place is one painted hill with a great tree on its crown. A footpath leaves the tree and winds down the hill in a spiral, and **the path is time**: the newest record stands where the walk begins, and every step along the path is a step further back, to the first record beside the pool at the path's end.
 
-Each record of the native v1 view is one tall flower beside the path, drawn in flat colour with an inked line so it stands out from the painted meadow.
+A wisteria arbor stands between the lantern ring and the first turn of the path. Above the ring, the old cherry spreads from eight buttress roots into a broad crown of flowering boughs. Five-petalled blossoms hang from the outer twigs. Choose **Blossom tree** beside **Walk the garden** for a view of the whole tree, or **Walk here** to stand under the branches. Select **Cherry blossoms** in the atlas to orbit the low, Blender-modeled branch at petal height. Water lilies float in the shallows beside the photo grove.
 
-| Record | Flower |
-|---|---|
-| Memory | lilac daisy |
-| Decision | mint tulip |
-| Task | orange poppy |
-| Checkpoint | blue bellflower |
-| Artifact | sunflower |
-| Action | pink rose |
-| Pinned (any kind) | a stone lantern in the ring round the start, not on the path |
+![The central cherry tree with its broad flowering crown, hanging twigs and exposed roots](garden-blossom-tree.jpg)
+
+Choose **Bark close-up** in the atlas to examine the cherry's peeling grain, horizontal cork marks and lichen. Rotate the view or change the time of day to see the surface catch the light.
+
+![The same trunk before and after the bark texture update](garden-bark-detail.jpg)
+
+The cherry canopy carries clusters of five-petalled flowers on short spurs. In **Specimen lens**, look for a poppy's dark centre, feathered tulip petals, gold markings on irises and pale rings around foxglove spots. Seeds still determine individual colour variation.
+
+![The same cherry canopy, tulip, iris and daisy before and after the flower texture update](garden-petal-textures.jpg)
+
+A domed glasshouse rises from the pool. Its brass fanlights and tinted panes catch the daylight, and the glass takes on a warm glow at sunset. The pool reflects its dome and palms from the current viewing angle. The illustration on the loading screen and the Reading Path uses the same architectural model.
+
+Each record has a numeric garden seed derived from its ID. The seed chooses a daisy, tulip, poppy, bellflower, sunflower, rose, river stone or slate cairn. It also determines colour, proportions, orientation and petal curvature or stone markings. Two memories can take different forms. Editing a record or pinning it preserves its seed. Pinned specimens stand beside a lantern near the entrance.
+
+The same seed grows a companion beside each original specimen. Look for rounded heads of hydrangea, layered camellia blooms, winterberry branches, bearded irises, foxglove bells and lavender spikes. Each has three branching or flowering patterns and a seed-selected palette. Both plants lead to the same memory. The record card lets you inspect either one, and the reader's Archive shows both names and the seed. Map colours and filters indicate record kind.
+
+![Seed-grown hydrangea, camellia and winterberry above bearded iris, foxglove and lavender](garden-companions.jpg)
+
+Choose **Specimen lens** beside **Walk the garden** to inspect the actual plant or stone on the path. **Next** cycles through different families first. Use the rotation and time-of-day controls to see the petals and mineral grain under changing light. **Whole specimen** also shows the foliage and stem. The same lens opens from a record’s card.
+
+![The same poppy and river stone before and after the material update](garden-materials.jpg)
+
+![Six sample memory seeds rendered as two poppies, a bellflower, a river stone and two slate cairns](garden-seeds.png)
 
 Each record's flower stands in a small clump of smaller blooms of its own kind, away from the path, so the path runs between full borders. A flower stands taller the more often its record has been revised. Retracted, superseded and cancelled records are grey and low; tasks in progress or blocked, and actions pending or unknown, slowly pulse. A wooden signpost beside the path marks where each month begins, and the month you are walking through is shown at the bottom left. The path is as long as the records need, so the hill grows with the garden. The garden opens in the gold light of a summer evening and stays there; the lanterns' windows glow, and fireflies come out over the flowers as the sun goes down.
 
@@ -32,6 +46,8 @@ mother garden explore --endpoint <service.json> --open
 
 Leave out `--open` to print the URL. The browser gets read-only snapshots from the owner's existing database handle. It checks for changes every five seconds while the tab is visible and you are walking or free from an open panel. If growth needs a longer path, the page repaints the hill after you stop walking and restores your position when session storage is available. The live Garden shows up to 500 records, following the usual pinned-first ordering.
 
+To see newly built artwork with your live records while an older owner is running, run `node web/garden/preview-live.mjs` from the repository with Node 22 or later. It opens the browser on loopback port 49568 with the graphics in `assets/garden-explorer` and reads from the running owner's Explorer. Leave the terminal open while walking. On Windows it uses the standard installed paths. For a custom installation, pass the endpoint path and executable path as its first and second arguments.
+
 The offline snapshot command is still available:
 
 ```
@@ -50,21 +66,22 @@ Use the [Living Memory Graph](living-memory-graph.md) to follow directed relatio
 
 ## Walking
 
-- Click the picture to walk: the mouse looks, `W A S D` move, Shift runs, Space jumps. Esc gives the mouse back.
+- Choose **Walk the garden**, or click the picture, to begin. The mouse looks, `W A S D` move, Shift runs, Space jumps. Esc gives the mouse back.
 - Look at a flower within a few steps and press `E`, or click, to open its card: text, status, handoff, next step and linked records. Linked records are buttons that take you to them. **Read this memory** on the card, or `R`, opens the reader (below).
-- `/` (or the small lens at the top right) opens the search box. Every word must appear in a record's title, text, status or kind. Found flowers are lit and a soft light hangs over each, the rest fade and shrink back into the meadow, and Enter stands you beside each found flower in turn (Shift+Enter goes back). Esc clears the search.
+- Type in **Search the garden**, or press `/` to focus the search box. Every word must appear in a record's title, text, status or kind. Found flowers are lit and a soft light hangs over each, the rest fade and shrink back into the meadow, and Enter stands you beside each found flower in turn (Shift+Enter goes back). Esc clears the search.
 - A record's card shows the records it names and those that name it; threads of light run from its flower to theirs while the card is open.
-- The kinds are a column of coloured dots at the left edge; hover it to open the legend and filter: click a kind to set it aside or bring it back. The harness menu keeps only records that harness wrote or revised, and "Set aside retired records" does what it says. Set-aside flowers stay where they are, faded.
-- The timeline at the bottom (faint until you hover it) shows the garden as it stood on any day: later flowers are not yet grown. ▶ replays the garden growing to today.
-- The map at the bottom right (larger while you hover it) shows the hill from above: the path, every record as a dot and where you stand, facing which way. Click a dot to walk to that record.
+- Open **Filters** below the title to see the flower legend and counts. Select a kind to set it aside or bring it back. The harness menu keeps only records that harness wrote or revised, and "Set aside retired records" does what it says. Set-aside flowers stay where they are, faded.
+- The timeline at the bottom shows the garden as it stood on any day: later flowers are not yet grown. ▶ replays the garden growing to today.
+- The map at the bottom right (larger while you hover it) shows the contours of the hill, the pool, the path, each record and the direction you face. Click a dot to walk to that record.
+- **Garden atlas**, beneath the map, opens an aerial view sized to the current garden. Choose the arbor, blossom tree or glasshouse for a closer view. Rotate left or right, or select a time of day to change the garden light. **Walk here** moves you to the selected landmark, with the glasshouse viewed from the bank. **Back to walk** or Esc returns to your previous position.
 - **The photo grove:** each attached photo, recording and video stands on a wooden easel in a ring round the pool at the path's end, its picture facing the water. A video shows a frame from its first seconds, and a recording a painted stand-in. Look at one and press E, or click, to open the viewer: the item large, its captions, descriptions, OCR text or transcripts with who wrote them, its date, file and source, which copy is shown, and how many memories cite it. Audio and video play there. The arrow keys step through the grove, and Esc closes it. Search finds photos by their words too, the map shows them as small white squares, and the list has them at the top.
 - `L` opens the list of every record, grouped by kind; it follows the search. Choosing one stands you on the path beside its flower, and the **Read** button beside it opens the reader without moving you. The list works from the keyboard and needs no walking.
-- The panels hide while you walk with the mouse captured; Esc brings them back. The record count appears when you hover the title.
+- The panels hide while you walk with the mouse captured; Esc brings them back. The record count appears beneath the garden title while paused.
 - `T` and `1`–`4` change the time of day, `0` lets the evening pass on to sunset, and `,` and `.` nudge the hour; `P` turns the paint finish off and on.
 
 ## The Reading Path
 
-The Reading Path lists every record of the snapshot as text, newest first, so you can read one after another without walking. Open it with the book button at the top right. It covers the garden, which waits behind it; **Back to the garden** or Esc returns you where you were.
+The Reading Path lists every record of the snapshot as text, newest first, so you can read one after another without walking. Open it with **Reading Path** at the top right (the book icon on narrow screens). It covers the garden, which waits behind it; **Back to the garden** or Esc returns you where you were.
 
 - Records are grouped by month, or by kind with **By kind**, with pinned records first under *Kept close*. Each entry shows its kind, the date it was recorded, how it was captured, how many reflections name it and whether it is retired, then the opening of its text.
 - The search box finds records whose title, text, kind and status contain every word. The kind buttons set kinds aside, and **Set aside retired records** does what it says.

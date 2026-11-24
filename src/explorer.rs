@@ -44,6 +44,8 @@ fn asset(path: &str) -> Option<(&'static str, &'static [u8])> {
         "/" => ("text/html; charset=utf-8", asset!("index.html")),
         "/assets/index.js" => (JS, asset!("assets/index.js")),
         "/assets/bake.worker.js" => (JS, asset!("assets/bake.worker.js")),
+        "/glasshouse-pool.jpg" => (JPEG, asset!("glasshouse-pool.jpg")),
+        "/cherry-bough.glb" => ("model/gltf-binary", asset!("cherry-bough.glb")),
         "/textures/Ground048_Color.jpg" => (JPEG, asset!("textures/Ground048_Color.jpg")),
         "/textures/Ground048_NormalGL.jpg" => (JPEG, asset!("textures/Ground048_NormalGL.jpg")),
         "/textures/Ground103_Color.jpg" => (JPEG, asset!("textures/Ground103_Color.jpg")),
@@ -205,10 +207,14 @@ impl Site {
             ));
         }
         let mut stored = self.gallery.lock().unwrap_or_else(|e| e.into_inner());
-        if path == "/api/media"
-            && let Some(live) = &self.live
-        {
-            match live.store().and_then(|store| gallery(&store, false)) {
+        if let Some(live) = &self.live {
+            // Refresh the owner decision before each live read. Listing a memory needs
+            // metadata only. A byte request loads just the requested authorized variant.
+            let wanted = path.strip_prefix("/api/media/").unwrap_or("");
+            match live
+                .store()
+                .and_then(|store| gallery_selection(&store, false, Some(wanted)))
+            {
                 Ok(current) => *stored = Some(current),
                 Err(_) => return Some(Reply::refuse(503, "Garden media is unavailable.")),
             }
@@ -417,12 +423,28 @@ fn open_browser(url: &str) {
 /// Snapshot attached images. Derivatives are shown first; an original carrying
 /// embedded location or device data is withheld unless the owner asks for originals.
 fn gallery(store: &GardenStore, originals: bool) -> Result<Gallery> {
+    gallery_selection(store, originals, None)
+}
+
+fn gallery_selection(
+    store: &GardenStore,
+    originals: bool,
+    wanted: Option<&str>,
+) -> Result<Gallery> {
     let list = store
         .media_owner_list(None)
         .map_err(mother::garden::config::domain_error)?;
     let mut gallery = Gallery::default();
     let (mut shown, mut withheld, mut total, mut truncated) = (Vec::new(), 0u64, 0u64, false);
+    let mut unavailable_memories = std::collections::BTreeSet::new();
     for entry in list["assets"].as_array().into_iter().flatten() {
+        let mut mark_unavailable = || {
+            for link in entry["memoryLinks"].as_array().into_iter().flatten() {
+                if let Some(id) = link["memoryId"].as_str() {
+                    unavailable_memories.insert(id);
+                }
+            }
+        };
         let asset = &entry["asset"];
         let uses = entry["uses"].as_array().map_or(0, Vec::len);
         if uses == 0 {
@@ -431,12 +453,16 @@ fn gallery(store: &GardenStore, originals: bool) -> Result<Gallery> {
         let clean = asset["embeddedMetadata"]
             .as_array()
             .is_some_and(Vec::is_empty);
+        let original_approved = entry["memoryLinks"]
+            .as_array()
+            .is_some_and(|links| links.iter().any(|link| link["allowOriginal"] == true));
         let (variant, sha) = match entry["derivatives"][0].as_str() {
             Some(derivative) => ("derivative", derivative),
-            None if clean || originals => {
+            None if clean || originals || original_approved => {
                 ("original", asset["sha256"].as_str().unwrap_or_default())
             }
             None => {
+                mark_unavailable();
                 withheld += 1;
                 continue;
             }
@@ -449,23 +475,26 @@ fn gallery(store: &GardenStore, originals: bool) -> Result<Gallery> {
         };
         let size = asset["sizeBytes"].as_u64().unwrap_or(u64::MAX);
         if total.saturating_add(size) > GALLERY_BYTES {
+            mark_unavailable();
             truncated = true;
             continue;
         }
-        let bytes = store
-            .media_owner_bytes(sha)
-            .map_err(mother::garden::config::domain_error)?;
-        total += bytes.len() as u64;
-        gallery.images.insert(sha.to_owned(), (kind, bytes));
+        total += size;
+        if wanted.is_none_or(|requested| requested == sha) {
+            let bytes = store
+                .media_owner_bytes(sha)
+                .map_err(mother::garden::config::domain_error)?;
+            gallery.images.insert(sha.to_owned(), (kind, bytes));
+        }
         shown.push(
             json!({"sha256":sha,"originalSha256":asset["sha256"],"variant":variant,
             "mediaType":kind,"width":asset["width"],"height":asset["height"],
             "acquisitions":entry["acquisitions"],"interpretations":entry["interpretations"],
-            "uses":uses}),
+            "uses":uses,"memoryLinks":entry["memoryLinks"]}),
         );
     }
     gallery.listing = serde_json::to_vec(
-        &json!({"images":shown,"withheld":withheld,"truncated":truncated,"readOnly":true}),
+        &json!({"images":shown,"unavailableMemories":unavailable_memories,"withheld":withheld,"truncated":truncated,"readOnly":true}),
     )?;
     Ok(gallery)
 }
@@ -712,6 +741,62 @@ mod tests {
     }
 
     #[test]
+    fn approved_memory_video_is_served_only_in_the_owner_session() {
+        let temp = tempfile::tempdir().unwrap();
+        let workspace = uuid::Uuid::new_v4().to_string();
+        let generation = uuid::Uuid::new_v4().to_string();
+        let store = GardenStore::initialize(temp.path().join("test.redb"), &workspace, &generation)
+            .unwrap();
+        store.v1_initialize("Synthetic persona").unwrap();
+        let author = store
+            .v1_grant(
+                "synthetic",
+                &["read", "memory:write"].map(String::from),
+                &Default::default(),
+                None,
+            )
+            .unwrap();
+        let written = store.v1_call(&author, "mother_write_record", json!({"workspaceId":workspace,"generation":generation,
+            "operationId":uuid::Uuid::new_v4().to_string(),"expectedRevision":0,"record":{"kind":"memory","title":"Test clip","content":"A synthetic recording.","basis":"owner_statement","status":"active"}})).unwrap();
+        let id = written["record"]["id"].as_str().unwrap();
+        let clip = include_bytes!("../tests/fixtures/attachment-sample.mp4");
+        std::fs::write(temp.path().join("clip.mp4"), clip).unwrap();
+        let plan = store
+            .plan_attachment(temp.path(), "clip.mp4", id, None, false)
+            .unwrap();
+        store
+            .apply_attachment(temp.path(), &plan, &plan.operation_id)
+            .unwrap();
+        // FFmpeg writes a tag container even for this synthetic clip. The ordinary
+        // session names the affected memory without publishing the original bytes.
+        let private = gallery(&store, false).unwrap();
+        let listing: serde_json::Value = serde_json::from_slice(&private.listing).unwrap();
+        assert_eq!(listing["unavailableMemories"], json!([id]));
+        assert!(private.images.is_empty());
+        let approval = store
+            .plan_attachment(temp.path(), "clip.mp4", id, None, true)
+            .unwrap();
+        store
+            .apply_attachment(temp.path(), &approval, &approval.operation_id)
+            .unwrap();
+        let site = Site::with_media(
+            4100,
+            "launch-token".into(),
+            vec![],
+            gallery(&store, false).unwrap(),
+        );
+        let media_path = format!("/api/media/{}", plan.sha256);
+        assert_eq!(site.respond(&request("GET", &media_path, &[])).status, 401);
+        let bearer = format!("Authorization: Bearer {}", session(&site));
+        let reply = site.respond(&request("GET", "/api/media", &[&bearer]));
+        let listing: serde_json::Value = serde_json::from_slice(&reply.body).unwrap();
+        assert_eq!(listing["images"][0]["memoryLinks"][0]["memoryId"], id);
+        let reply = site.respond(&request("GET", &media_path, &[&bearer]));
+        assert_eq!(reply.kind, "video/mp4");
+        assert_eq!(reply.body.as_ref(), clip);
+    }
+
+    #[test]
     fn gallery_withholds_originals_with_embedded_metadata_unless_asked() {
         use mother::garden::{
             access::GardenAccess,
@@ -883,6 +968,11 @@ mod tests {
     fn pages_are_served_without_a_token_but_the_snapshot_is_not() {
         let site = site();
         assert_eq!(site.respond(&request("GET", "/", &[])).status, 200);
+        assert_eq!(
+            site.respond(&request("GET", "/glasshouse-pool.jpg", &[]))
+                .kind,
+            JPEG
+        );
         assert_eq!(
             site.respond(&request("GET", "/?quality=low", &[])).status,
             200

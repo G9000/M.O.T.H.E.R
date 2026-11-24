@@ -4,16 +4,23 @@
 // still reports its progress through patch-block, which here goes nowhere.)
 import { patchBlock } from 'patch-block';
 import * as THREE from 'three';
+import { createGardenChart } from '../garden/chart.js';
+import { createAtlas } from '../garden/atlas.js';
+import { illustrateWisteria } from '../garden/botanical.js';
 import { createGarden, fetchReading, fetchSnapshot, loadMedia, loadSnapshot, pathLengthFor } from '../garden/garden.js';
 import { startReadingPage } from '../garden/path.js';
 import { bakeGround, createField, createFrame, loadGroundTextures } from '../lib/index.js';
 import { createFluff, createStones } from './dressing.js';
+import { createArbor } from './arbor.js';
+import { createGlasshouse } from './glasshouse.js';
+import { poolReflection } from './reflection.js';
 import { createFloor, FLOOR, paintFloor } from './floor.js';
 import { createHorizon } from './horizon.js';
 import { createSky, createSkyParts, SUNSET } from './sky.js';
 import { createSounds } from './sounds.js';
 import { createStrokes } from './strokes.js';
 import { createTrees } from './trees.js';
+import { loadCherryBough } from './cherry-bough.js';
 import { createTarn } from './water.js';
 import { configure, fromValley, heightAt, HERO, paint, START, tarnDistance } from './world.js';
 
@@ -28,6 +35,7 @@ const mark = (name) => {
 };
 const stepped = params.has('step'); // a test drives the clock: nothing moves until it says
 const $ = (id) => document.getElementById(id);
+illustrateWisteria($('loadingPlate'));
 
 let loaded = false;
 let shown = true;
@@ -40,7 +48,8 @@ const block = patchBlock({
 /** Says how far along the loading is, and gives the browser a turn so the word gets out and the page stays alive. */
 const stage = async (value, label) => {
   block.progress(value, label);
-  $('loading').firstElementChild.textContent = label;
+  $('loadStage').textContent = label;
+  $('loadProgress').value = value;
   await new Promise((done) => setTimeout(done));
 };
 /**
@@ -74,7 +83,8 @@ const offThread = (message, here) =>
 // The owner's records come first: the path through the garden is as long as they need, and the land is made round it.
 let snapshot = (await loadSnapshot()) ?? (import.meta.env.DEV ? (await import('../garden/demo.js')).demoSnapshot() : null);
 if (!snapshot) {
-  $('loading').firstElementChild.textContent = 'This garden link has already been used, or the garden was closed. Run the command again for a new link.';
+  $('loadStage').textContent = 'This garden link has already been used, or the garden was closed. Run the command again for a new link.';
+  $('loadProgress').hidden = true;
   throw new Error('no snapshot');
 }
 /** Whether this browser can draw the garden at all; the context made to ask is given straight back. */
@@ -118,8 +128,9 @@ let renderer;
 try {
   renderer = new THREE.WebGLRenderer({ canvas, antialias: false, powerPreference: 'high-performance', preserveDrawingBuffer: stepped });
 } catch {
-  $('loading').firstElementChild.textContent = 'The garden needs WebGL 2, which this browser does not offer.';
-  throw new Error('no WebGL 2');
+  startReadingPage({ snapshot, fetchSnapshot, fetchReading, reason: 'no-webgl' });
+  block.ready();
+  await new Promise(() => {});
 }
 renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, params.has('dpr') ? Number(params.get('dpr')) : 1.5));
 renderer.setSize(window.innerWidth, window.innerHeight);
@@ -207,21 +218,31 @@ mark('strokes');
   field.uniforms.uHeroEye.value.set(START[0], field.heightAt(START[0], START[1]) + 1.68, START[1]);
 }
 mark('floor');
-await stage(0.3, 'Building the village');
+await stage(0.3, 'Raising the wisteria arbor');
 const frame = createFrame(renderer, field, { samples: quality === 'low' ? 0 : 4, bloom: 0.1 });
 mark('frame');
 const sky = createSky(renderer, field, { parts: skyParts });
 mark('sky');
 const trees = createTrees(field, { cards: quality === 'low' ? 0.6 : quality === 'medium' ? 0.8 : 1 });
+try {
+  trees.group.add(await loadCherryBough(field));
+} catch (error) {
+  console.warn('Could not load the flowering cherry bough', error);
+}
 mark('trees');
-scene.add(sky.mesh, createHorizon(field, EXTENT / 2), trees.group, createTarn(field, sky));
+const water = createTarn(field, sky);
+scene.add(sky.mesh, createHorizon(field, EXTENT / 2), trees.group, water);
 // the finish: the frame laid in as brush marks. ?paint=0 for none; P turns it on and off.
 frame.paint = params.has('paint') ? Number(params.get('paint')) : quality === 'low' ? 0 : quality === 'medium' ? 2 : 3;
 const paintWas = frame.paint || 3;
 mark('build');
 await stage(0.45, 'Planting trees');
 const stones = createStones(field);
-scene.add(stones.group);
+const arbor = createArbor(field, quality);
+const obstacles = [...stones.solid, ...arbor.solid];
+const glasshouse = createGlasshouse(field);
+scene.add(stones.group, arbor.group, glasshouse);
+const reflectPool = poolReflection(renderer, glasshouse, water, quality);
 if (quality !== 'low' && params.get('seeds') !== '0') scene.add(createFluff(field, quality === 'medium' ? 200 : 320));
 // time passes: the afternoon you start in is sunset twenty minutes later. ?drift=0 holds the hour; T and 1 to 4
 // pick a time of day and hold it there, 0 lets it pass again, and , and . nudge it.
@@ -261,6 +282,11 @@ const player = {
 };
 player.y = field.heightAt(player.x, player.z);
 const keys = new Set();
+const atlas = createAtlas({
+  heightAt: field.heightAt, goTo, times: TIMES, hour: () => sky.hour, pickTime,
+  beforeOpen: () => keys.clear(), beforeTravel: () => garden?.closePanels(),
+  specimens: () => garden?.visibleSpecimens() ?? [],
+});
 
 function updatePlayer(dt) {
   const fx = -Math.sin(player.yaw);
@@ -292,7 +318,7 @@ function updatePlayer(dt) {
     player.vz *= 0.5;
   }
   // nor through a tree
-  for (const [sx, sz, gap] of stones.solid) {
+  for (const [sx, sz, gap] of obstacles) {
     const dx = player.x - sx;
     const dz = player.z - sz;
     const d = Math.hypot(dx, dz);
@@ -303,7 +329,7 @@ function updatePlayer(dt) {
   }
   for (const [tx, tz, kind, scale] of trees.trees) {
     if (kind > 3) break;
-    const gap = (kind === 0 ? 1.25 : 0.6) * scale;
+      const gap = (kind === 0 ? 2.1 : 0.6) * scale;
     const dx = player.x - tx;
     const dz = player.z - tz;
     const d = Math.hypot(dx, dz);
@@ -419,10 +445,20 @@ function setWind(speed) {
   field.setWind(wind.angle, wind.speed);
 }
 
-canvas.addEventListener('click', () => {
+function beginWalk() {
+  if (typeof canvas.requestPointerLock !== 'function') {
+    $('pathBtn').click();
+    return;
+  }
   sounds.start();
-  if (document.pointerLockElement !== canvas) canvas.requestPointerLock()?.catch?.(() => {});
-});
+  if (document.pointerLockElement !== canvas) canvas.requestPointerLock()?.catch?.(() => note('Mouse capture unavailable. Open Reading Path to browse.'));
+}
+if (typeof canvas.requestPointerLock !== 'function') {
+  $('walkBtn').textContent = 'Open Reading Path';
+  $('start').querySelector('small').hidden = true;
+}
+canvas.addEventListener('click', beginWalk);
+$('walkBtn').addEventListener('click', beginWalk);
 document.addEventListener('pointerlockchange', () => {
   const locked = document.pointerLockElement === canvas;
   document.body.classList.toggle('playing', locked);
@@ -436,7 +472,8 @@ document.addEventListener('mousemove', (e) => {
 });
 document.addEventListener('keydown', (e) => {
   // (letters typed into the garden's search box are not the valley's keys)
-  if (e.target instanceof HTMLInputElement) return;
+  if (e.target instanceof HTMLInputElement || e.target instanceof HTMLSelectElement) return;
+  if (!document.pointerLockElement && e.code === 'Space' && e.target.closest?.('button, summary')) return;
   keys.add(e.code);
   // (after the last of them, round to the first again)
   if (e.code === 'KeyT') pickTime(Math.max(0, TIMES.findIndex((time) => time.hour > sky.hour + 0.05)));
@@ -472,8 +509,11 @@ function gpuDone() {
 // ---- the loop ------------------------------------------------------------------------------------------------
 function tick(dt) {
   if (garden?.typing()) keys.clear();
-  updatePlayer(dt);
-  placeCamera();
+  if (atlas.open) atlas.placeCamera(camera);
+  else {
+    updatePlayer(dt);
+    placeCamera();
+  }
   field.update(dt, camera);
   frame.update(dt, camera);
   clock += dt;
@@ -496,8 +536,9 @@ function tick(dt) {
   const gust = 0.5 + 0.5 * Math.sin(clock * 0.23) * Math.sin(clock * 0.37 + 1);
   sounds.update(dt, { wind: wind.speed, gust, tree, tarn, dusk: Math.min(1, Math.max(0, (sky.hour - 18.8) / 1.4)) });
   sky.update(dt, camera);
-  garden?.update(dt, camera);
+  if (!atlas.open) garden?.update(dt, camera);
   frame.exposure = sky.exposure;
+  reflectPool(camera, sky.hour);
   frame.render(scene, camera);
 }
 
@@ -505,7 +546,12 @@ mark('land');
 await stage(0.48, 'Planting the garden');
 // the owner's photos and recordings, for the grove by the pool (invented ones under the dev server)
 let media = import.meta.env.DEV && snapshot.workspaceId === 'demo' ? await (await import('../garden/demo.js')).demoMedia() : await loadMedia();
-const plantGarden = (kinds) => createGarden({ snapshot, field, scene, canvas, goTo, media, chime: () => sounds.chime(), kinds });
+const survey = createGardenChart(field.heightAt);
+const plantGarden = (kinds) => {
+  const planted = createGarden({ snapshot, field, scene, canvas, goTo, survey, media, inspect: atlas.inspect, chime: () => sounds.chime(), kinds });
+  $('lensBtn').hidden = !planted.records.length;
+  return planted;
+};
 garden = plantGarden();
 // sound on or off: the button by the search, or M; off until asked for, and remembered in this browser only
 {

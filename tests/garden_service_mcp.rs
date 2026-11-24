@@ -198,9 +198,52 @@ fn two_stdio_harnesses_share_one_local_owner_and_reconcile_the_same_write() {
         second.call("mother_get_context", json!({}))["inventory"]["totalRecords"],
         1
     );
+    let authority =
+        mother::service::LocalClient::new(mother::service::load_service_config(&config).unwrap())
+            .unwrap();
+    mother::service::attachment::set_enabled(&authority, true).unwrap();
+    let catalog = discovery::collect(|params| second.rpc("tools/list", params));
+    let file_tool = catalog
+        .iter()
+        .find(|t| t["name"] == mother::service::attachment::HOST_FILE)
+        .unwrap();
+    assert_eq!(file_tool["_meta"]["openai/fileParams"], json!(["file"]));
+    assert!(
+        catalog
+            .iter()
+            .all(|t| !t["name"].as_str().unwrap().starts_with("local_media_"))
+    );
+    let denied = second.rpc(
+        "tools/call",
+        json!({"name":"local_media_finish_review","arguments":{}}),
+    );
+    assert!(denied["error"].is_object());
+    let selected = json!({"proposalId":uuid::Uuid::new_v4().to_string(),"memoryId":receipt["record"]["id"],
+        "fileName":"fixture.mp4","mediaType":"video/mp4","contentBase64":base64::encode(include_bytes!("fixtures/attachment-sample.mp4"))});
+    let staged = second.call("mother_propose_media_attachment", selected.clone());
+    assert_eq!(staged["status"], "pending_owner_review");
     drop(first);
     drop(second);
     drop(owner);
+    let mut direct_host = Harness::new(&direct);
+    let listed = discovery::collect(|params| direct_host.rpc("tools/list", params));
+    assert!(
+        listed
+            .iter()
+            .any(|tool| tool["name"] == "mother_propose_media_attachment")
+    );
+    assert_eq!(
+        direct_host.call(
+            "mother_get_media_attachment",
+            json!({"proposalId":selected["proposalId"]})
+        ),
+        staged
+    );
+    assert_eq!(
+        direct_host.call("mother_propose_media_attachment", selected),
+        staged
+    );
+    drop(direct_host);
     let reopened = GardenStore::open(&db).unwrap();
     assert!(reopened.v1_initialized().unwrap());
     assert!(!dir.path().join("context.sqlite").exists());
