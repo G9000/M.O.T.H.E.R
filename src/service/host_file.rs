@@ -124,10 +124,11 @@ fn received(file: &Value) -> String {
                 .take(8)
                 .map(|key| key.chars().take(24).collect())
                 .collect();
-            let id = match fields.get("file_id").and_then(Value::as_str) {
-                Some(id) if file_id(id) => "valid",
-                Some(_) => "unrecognised",
-                None => "missing",
+            let id = match fields.get("file_id") {
+                Some(Value::String(id)) if file_id(id) => format!("valid ({})", id_shape(id)),
+                Some(Value::String(id)) => format!("rejected ({})", id_shape(id)),
+                Some(_) => "not a string".to_owned(),
+                None => "missing".to_owned(),
             };
             let link = if fields.get("download_url").is_some_and(Value::is_string) {
                 "present"
@@ -150,12 +151,48 @@ fn base_name(name: &str) -> Option<String> {
     (!name.is_empty() && name != "." && name != "..").then(|| name.to_owned())
 }
 
+/// Host file IDs are opaque provenance, never a path, command or source of a link.
+/// They follow the attachment service's source-locator bounds.
 fn file_id(id: &str) -> bool {
-    (5..=160).contains(&id.len())
-        && (id.starts_with("file_") || id.starts_with("file-"))
-        && id
-            .bytes()
-            .all(|b| b.is_ascii_alphanumeric() || b == b'_' || b == b'-')
+    !id.trim().is_empty() && id.len() <= 480 && !id.chars().any(char::is_control)
+}
+
+/// Describe an identifier by length and format category, never by value.
+fn id_shape(id: &str) -> String {
+    let category = if id.trim().is_empty() {
+        "empty".to_owned()
+    } else if id.chars().any(char::is_control) {
+        "contains control characters".to_owned()
+    } else if id.starts_with("file_") || id.starts_with("file-") {
+        "OpenAI file ID".to_owned()
+    } else if let Some((scheme, _)) = id.split_once("://").filter(|(scheme, _)| {
+        (1..=16).contains(&scheme.len())
+            && scheme
+                .bytes()
+                .all(|b| b.is_ascii_alphanumeric() || b"+.-".contains(&b))
+    }) {
+        format!("URI-like with scheme {scheme}")
+    } else {
+        "opaque".to_owned()
+    };
+    let bound = if id.len() > 480 {
+        ", over 480 bytes"
+    } else {
+        ""
+    };
+    format!("length {}, {category}{bound}", id.len())
+}
+
+/// Store the host ID as a source locator the attachment service accepts:
+/// `scheme://rest` becomes `scheme:rest`; anything carrying a query or
+/// fragment (which could hold a token) is replaced by a fingerprint.
+fn locator(id: &str) -> String {
+    let id = id.trim();
+    if id.contains(['?', '#']) {
+        use sha2::{Digest, Sha256};
+        return format!("host-file-sha256:{:x}", Sha256::digest(id.as_bytes()));
+    }
+    id.replacen("://", ":", 1).replace("://", "/")
 }
 
 /// Prepare, stream and submit a host-provided original for owner review.
@@ -213,7 +250,7 @@ pub(crate) fn import_with(
             "operationId": operation,
             "memoryId": args["memoryId"],
             "expectedRevision": args["expectedRevision"],
-            "sourceLocator": id,
+            "sourceLocator": locator(id),
             "file": declared,
         }),
     )
@@ -263,8 +300,30 @@ mod tests {
         assert_eq!(base_name(".."), None);
         assert!(file_id("file_00000000b6f8820790d24bf6796d36f5"));
         assert!(file_id("file-AbC123"));
-        assert!(!file_id("chat_upload"));
-        assert!(!file_id("file_../../x"));
+        // Other host formats are opaque provenance, accepted within bounds.
+        assert!(file_id("sediment://file_00000000b6f8820790d24bf6796d36f5"));
+        assert!(file_id("chat_upload"));
+        assert!(!file_id(""));
+        assert!(!file_id("   "));
+        assert!(!file_id(&"x".repeat(481)));
+        assert!(file_id(&"x".repeat(480)));
+        assert!(!file_id("file_abc\u{7}"));
+        assert!(!file_id("file_abc\nInjected: header"));
+        // Locators satisfy the service rule (no "://", "?" or "#") and never keep a query.
+        assert_eq!(locator("file_abc"), "file_abc");
+        assert_eq!(locator("sediment://file_abc"), "sediment:file_abc");
+        let hashed = locator("https://files.example/x?sig=secret");
+        assert!(hashed.starts_with("host-file-sha256:") && !hashed.contains("secret"));
+        for id in ["sediment://file_abc", "a://b://c", "x?y", "x#y"] {
+            let l = locator(id);
+            assert!(!l.contains("://") && !l.contains(['?', '#']), "{l}");
+        }
+        assert_eq!(
+            id_shape("sediment://file_abc"),
+            "length 19, URI-like with scheme sediment"
+        );
+        assert_eq!(id_shape("file_abc"), "length 8, OpenAI file ID");
+        assert!(id_shape(&"y".repeat(500)).ends_with("over 480 bytes"));
     }
 
     #[test]
