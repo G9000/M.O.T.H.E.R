@@ -1,8 +1,8 @@
-//! Read-only loopback web view of the memory garden, offline or from the running owner.
+//! Loopback Garden reader and local owner attachment review.
 use mother::{
     error::{Error, Result},
     garden::store::GardenStore,
-    service::LocalService,
+    service::{LocalService, attachment},
 };
 use rand::RngCore;
 use serde::{Deserialize, Serialize};
@@ -19,11 +19,12 @@ use std::{
         atomic::{AtomicUsize, Ordering},
     },
     thread,
-    time::Duration,
+    time::{Duration, Instant},
 };
 use subtle::ConstantTimeEq;
 
 const MAX_HEAD: usize = 8 * 1024;
+const MAX_REVIEW_BODY: usize = 96 * 1024;
 const MAX_CONNECTIONS: usize = 32;
 const IO_TIMEOUT: Duration = Duration::from_secs(5);
 const JS: &str = "text/javascript; charset=utf-8";
@@ -42,6 +43,8 @@ macro_rules! asset {
 fn asset(path: &str) -> Option<(&'static str, &'static [u8])> {
     Some(match path {
         "/" => ("text/html; charset=utf-8", asset!("index.html")),
+        "/attachments" => ("text/html; charset=utf-8", asset!("attachments.html")),
+        "/attachment-review.js" => (JS, asset!("attachment-review.js")),
         "/assets/index.js" => (JS, asset!("assets/index.js")),
         "/assets/bake.worker.js" => (JS, asset!("assets/bake.worker.js")),
         "/textures/Ground048_Color.jpg" => (JPEG, asset!("textures/Ground048_Color.jpg")),
@@ -92,6 +95,7 @@ impl Gallery {
 struct LiveView {
     store: Weak<GardenStore>,
     limit: usize,
+    attachment_root: Option<PathBuf>,
 }
 
 impl LiveView {
@@ -250,7 +254,8 @@ impl Site {
     }
 
     fn respond(&self, head: &str) -> Reply {
-        let mut lines = head.split("\r\n");
+        let (headers, body) = head.split_once("\r\n\r\n").unwrap_or((head, ""));
+        let mut lines = headers.split("\r\n");
         let mut request = lines.next().unwrap_or_default().split(' ');
         let (Some(method), Some(path), Some("HTTP/1.1" | "HTTP/1.0"), None) = (
             request.next(),
@@ -281,6 +286,23 @@ impl Site {
             return reply;
         }
         match (method, path) {
+            ("GET", "/")
+                if self
+                    .live
+                    .as_ref()
+                    .is_some_and(|live| live.attachment_root.is_some()) =>
+            {
+                let html = String::from_utf8_lossy(asset!("index.html")).replacen(
+                    r#"<button class="btn glass" id="pathBtn""#,
+                    r#"<a class="btn glass" href="/attachments" aria-label="Attachment review" title="Attachment review" style="color:inherit;text-decoration:none"><svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><path d="m8 12 5-5a3 3 0 0 1 4 4l-7 7a4 4 0 0 1-6-6l7-7"/></svg></a><button class="btn glass" id="pathBtn""#,
+                    1,
+                );
+                Reply {
+                    status: 200,
+                    kind: HTML,
+                    body: Cow::Owned(html.into_bytes()),
+                }
+            }
             ("GET", path) if asset(path).is_some() => {
                 let (kind, body) = asset(path).expect("checked above");
                 Reply {
@@ -307,6 +329,72 @@ impl Site {
                     status: 200,
                     kind: JSON,
                     body,
+                }
+            }
+            ("GET", "/api/attachments") | ("POST", "/api/attachments") => {
+                if !self.signed_in(bearer) {
+                    return Reply::refuse(401, "Open Attachment review from the live Garden.");
+                }
+                let Some(live) = &self.live else {
+                    return Reply::refuse(404, "Attachment review requires the live Garden.");
+                };
+                let Some(root) = &live.attachment_root else {
+                    return Reply::refuse(404, "Attachment review is unavailable.");
+                };
+                let result = live.store().and_then(|store| {
+                    if method == "GET" {
+                        return attachment::owner_request(&store, root, "list", &json!({}));
+                    }
+                    if origin.is_none() {
+                        return Err(Error::domain(
+                            "FORBIDDEN",
+                            "A same-origin owner request is required.",
+                        ));
+                    }
+                    if header("content-type") != Some("application/json")
+                        || body.len() > MAX_REVIEW_BODY
+                    {
+                        return Err(Error::domain(
+                            "INVALID_INPUT",
+                            "Expected a bounded JSON body.",
+                        ));
+                    }
+                    let body: serde_json::Value = serde_json::from_str(body)?;
+                    let action = body["action"]
+                        .as_str()
+                        .ok_or_else(|| Error::domain("INVALID_INPUT", "Missing review action."))?;
+                    attachment::owner_request(&store, root, action, &body)
+                });
+                match result {
+                    Ok(value) => Reply {
+                        status: 200,
+                        kind: JSON,
+                        body: Cow::Owned(value.to_string().into_bytes()),
+                    },
+                    Err(error) => {
+                        let status = match error.code() {
+                            "FORBIDDEN" => 403,
+                            "NOT_FOUND" => 404,
+                            "CONFLICT" => 409,
+                            "RATE_LIMITED" => 429,
+                            "STORE_UNAVAILABLE" => 503,
+                            _ => 400,
+                        };
+                        let message = if status == 503 {
+                            "Attachment review could not reconcile the operation. Refresh its status.".into()
+                        } else {
+                            error.to_string()
+                        };
+                        Reply {
+                            status,
+                            kind: JSON,
+                            body: Cow::Owned(
+                                json!({"code":error.code(),"message":message})
+                                    .to_string()
+                                    .into_bytes(),
+                            ),
+                        }
+                    }
                 }
             }
             ("GET", "/api/garden") => {
@@ -362,12 +450,59 @@ fn matches(expected: Option<&str>, given: Option<&str>) -> bool {
 fn read_head(stream: &mut TcpStream) -> Option<String> {
     let mut head = Vec::new();
     let mut chunk = [0; 1024];
-    while !head.windows(4).any(|w| w == b"\r\n\r\n") {
+    let deadline = Instant::now() + IO_TIMEOUT;
+    let end = loop {
+        stream
+            .set_read_timeout(Some(deadline.checked_duration_since(Instant::now())?))
+            .ok()?;
         let read = stream.read(&mut chunk).ok()?;
-        if read == 0 || head.len() + read > MAX_HEAD {
+        if read == 0 {
             return None;
         }
         head.extend_from_slice(&chunk[..read]);
+        if let Some(end) = head.windows(4).position(|w| w == b"\r\n\r\n") {
+            break end + 4;
+        }
+        if head.len() > MAX_HEAD {
+            return None;
+        }
+    };
+    if end > MAX_HEAD {
+        return None;
+    }
+    let headers = std::str::from_utf8(&head[..end]).ok()?;
+    if headers.starts_with("POST /api/attachments ") {
+        let mut length = None;
+        for line in headers.lines().skip(1) {
+            if let Some((name, value)) = line.split_once(':') {
+                if name.eq_ignore_ascii_case("transfer-encoding") {
+                    return None;
+                }
+                if name.eq_ignore_ascii_case("content-length") {
+                    if length.is_some() {
+                        return None;
+                    }
+                    length = Some(value.trim().parse::<usize>().ok()?);
+                }
+            }
+        }
+        let length = length.filter(|length| (1..=MAX_REVIEW_BODY).contains(length))?;
+        if head.len() > end + length {
+            return None;
+        }
+        while head.len() < end + length {
+            stream
+                .set_read_timeout(Some(deadline.checked_duration_since(Instant::now())?))
+                .ok()?;
+            let remaining = (end + length - head.len()).min(chunk.len());
+            let read = stream.read(&mut chunk[..remaining]).ok()?;
+            if read == 0 {
+                return None;
+            }
+            head.extend_from_slice(&chunk[..read]);
+        }
+    } else {
+        head.truncate(end);
     }
     String::from_utf8(head).ok()
 }
@@ -388,6 +523,8 @@ fn serve(site: &Site, mut stream: TcpStream) {
         401 => "Unauthorized",
         403 => "Forbidden",
         404 => "Not Found",
+        409 => "Conflict",
+        429 => "Too Many Requests",
         503 => "Service Unavailable",
         _ => "Method Not Allowed",
     };
@@ -436,8 +573,9 @@ fn gallery_selection(
     let (mut shown, mut withheld, mut total, mut truncated) = (Vec::new(), 0u64, 0u64, false);
     let mut unavailable_memories = std::collections::BTreeSet::new();
     for entry in list["assets"].as_array().into_iter().flatten() {
+        let links = || entry["memoryLinks"].as_array().into_iter().flatten();
         let mut mark_unavailable = || {
-            for link in entry["memoryLinks"].as_array().into_iter().flatten() {
+            for link in links() {
                 if let Some(id) = link["memoryId"].as_str() {
                     unavailable_memories.insert(id);
                 }
@@ -484,11 +622,22 @@ fn gallery_selection(
                 .map_err(mother::garden::config::domain_error)?;
             gallery.images.insert(sha.to_owned(), (kind, bytes));
         }
+        let visible_links: Vec<&serde_json::Value> = links()
+            .filter(|link| {
+                if variant != "original" || clean || originals || link["allowOriginal"] == true {
+                    return true;
+                }
+                if let Some(id) = link["memoryId"].as_str() {
+                    unavailable_memories.insert(id);
+                }
+                false
+            })
+            .collect();
         shown.push(
             json!({"sha256":sha,"originalSha256":asset["sha256"],"variant":variant,
             "mediaType":kind,"width":asset["width"],"height":asset["height"],
             "acquisitions":entry["acquisitions"],"interpretations":entry["interpretations"],
-            "uses":uses,"memoryLinks":entry["memoryLinks"]}),
+            "uses":uses,"memoryLinks":visible_links}),
         );
     }
     gallery.listing = serde_json::to_vec(
@@ -678,6 +827,7 @@ pub(crate) fn start_live(service: &LocalService, endpoint: &Path) -> Result<Live
     site.live = Some(LiveView {
         store: service.explorer_store(),
         limit: 500,
+        attachment_root: Some(service.attachment_root()?),
     });
     let launch = LiveLaunch { path, address };
     thread::Builder::new()
@@ -739,6 +889,57 @@ mod tests {
     }
 
     #[test]
+    fn owner_attachment_routes_require_a_local_session_and_same_origin_to_write() {
+        let temp = tempfile::tempdir().unwrap();
+        let store = Arc::new(
+            GardenStore::initialize(
+                temp.path().join("test.redb"),
+                &uuid::Uuid::new_v4().to_string(),
+                &uuid::Uuid::new_v4().to_string(),
+            )
+            .unwrap(),
+        );
+        let mut site = site();
+        site.live = Some(LiveView {
+            store: Arc::downgrade(&store),
+            limit: 1,
+            attachment_root: Some(temp.path().join("synthetic-sessions")),
+        });
+        let path = "/api/attachments";
+        assert_eq!(site.respond(&request("GET", path, &[])).status, 401);
+        let bearer = format!("Authorization: Bearer {}", session(&site));
+        assert_eq!(site.respond(&request("GET", path, &[&bearer])).status, 200);
+        let body = json!({"action":"approve","operationId":uuid::Uuid::new_v4().to_string()});
+        let kind = "Content-Type: application/json";
+        assert_eq!(
+            site.respond(&(request("POST", path, &[&bearer, kind]) + &body.to_string()))
+                .status,
+            403
+        );
+        assert_eq!(
+            site.respond(
+                &(request(
+                    "POST",
+                    path,
+                    &[&bearer, "Origin: http://127.0.0.1:4101", kind]
+                ) + &body.to_string())
+            )
+            .status,
+            403
+        );
+        assert_eq!(
+            site.respond(&(request("POST", path, &[ORIGIN, kind]) + &body.to_string()))
+                .status,
+            401
+        );
+        assert_eq!(
+            site.respond(&(request("POST", path, &[&bearer, ORIGIN, kind]) + &body.to_string()))
+                .status,
+            404
+        );
+    }
+
+    #[test]
     fn approved_memory_video_is_served_only_in_the_owner_session() {
         let temp = tempfile::tempdir().unwrap();
         let workspace = uuid::Uuid::new_v4().to_string();
@@ -789,6 +990,17 @@ mod tests {
         let reply = site.respond(&request("GET", "/api/media", &[&bearer]));
         let listing: serde_json::Value = serde_json::from_slice(&reply.body).unwrap();
         assert_eq!(listing["images"][0]["memoryLinks"][0]["memoryId"], id);
+        assert_eq!(
+            listing["images"][0]["memoryLinks"]
+                .as_array()
+                .unwrap()
+                .len(),
+            1
+        );
+        assert_eq!(
+            listing["images"][0]["memoryLinks"][0]["allowOriginal"],
+            true
+        );
         let reply = site.respond(&request("GET", &media_path, &[&bearer]));
         assert_eq!(reply.kind, "video/mp4");
         assert_eq!(reply.body.as_ref(), clip);
@@ -1044,6 +1256,7 @@ mod tests {
         site.live = Some(LiveView {
             store: Arc::downgrade(&store),
             limit: 500,
+            attachment_root: None,
         });
         let token = session(&site);
         assert_eq!(session(&site), token);

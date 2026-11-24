@@ -115,6 +115,7 @@ fn two_stdio_harnesses_share_one_local_owner_and_reconcile_the_same_write() {
     let store = GardenStore::initialize(&db, &ws, &generation).unwrap();
     store.v1_initialize("Synthetic owner persona").unwrap();
     let direct = dir.path().join("direct.private.json");
+    let other_direct = dir.path().join("attachment.private.json");
     store
         .v1_grant_to_file_with_access(
             "synthetic-client",
@@ -123,6 +124,16 @@ fn two_stdio_harnesses_share_one_local_owner_and_reconcile_the_same_write() {
             &db,
             &ClientAccess::default(),
             Some(&GardenAccess::All {}),
+        )
+        .unwrap();
+    store
+        .v1_grant_to_file_with_access(
+            "attachment-client",
+            &["read".into(), "media:attach".into()],
+            &other_direct,
+            &db,
+            &ClientAccess::default(),
+            None,
         )
         .unwrap();
     drop(store);
@@ -150,27 +161,33 @@ fn two_stdio_harnesses_share_one_local_owner_and_reconcile_the_same_write() {
         assert!(Instant::now() < deadline, "owner startup timed out");
         thread::sleep(Duration::from_millis(10));
     }
+    let configure = |direct: &Path, config: &Path| {
+        let configured = Command::new(env!("CARGO_BIN_EXE_mother"))
+            .args(["garden", "service-config", "--config"])
+            .arg(direct)
+            .arg("--endpoint")
+            .arg(&endpoint)
+            .arg("--out")
+            .arg(config)
+            .env("MOTHER_HOME", dir.path())
+            .output()
+            .unwrap();
+        assert!(
+            configured.status.success(),
+            "{}",
+            String::from_utf8_lossy(&configured.stderr)
+        );
+        let secret: Value = serde_json::from_slice(&std::fs::read(config).unwrap()).unwrap();
+        assert_eq!(secret["backend"], "garden_service");
+        assert!(
+            !String::from_utf8_lossy(&configured.stdout)
+                .contains(secret["token"].as_str().unwrap())
+        );
+    };
     let config = dir.path().join("service.private.json");
-    let configured = Command::new(env!("CARGO_BIN_EXE_mother"))
-        .args(["garden", "service-config", "--config"])
-        .arg(&direct)
-        .arg("--endpoint")
-        .arg(&endpoint)
-        .arg("--out")
-        .arg(&config)
-        .env("MOTHER_HOME", dir.path())
-        .output()
-        .unwrap();
-    assert!(
-        configured.status.success(),
-        "{}",
-        String::from_utf8_lossy(&configured.stderr)
-    );
-    let secret: Value = serde_json::from_slice(&std::fs::read(&config).unwrap()).unwrap();
-    assert_eq!(secret["backend"], "garden_service");
-    assert!(
-        !String::from_utf8_lossy(&configured.stdout).contains(secret["token"].as_str().unwrap())
-    );
+    let other_config = dir.path().join("attachment.service.json");
+    configure(&direct, &config);
+    configure(&other_direct, &other_config);
     let mut first = Harness::new(&config);
     let mut second = Harness::new(&config);
     let tools = discovery::collect(|params| first.rpc("tools/list", params));
@@ -198,51 +215,56 @@ fn two_stdio_harnesses_share_one_local_owner_and_reconcile_the_same_write() {
         second.call("mother_get_context", json!({}))["inventory"]["totalRecords"],
         1
     );
-    let authority =
-        mother::service::LocalClient::new(mother::service::load_service_config(&config).unwrap())
-            .unwrap();
-    mother::service::attachment::set_enabled(&authority, true).unwrap();
-    let catalog = discovery::collect(|params| second.rpc("tools/list", params));
-    let file_tool = catalog
-        .iter()
-        .find(|t| t["name"] == mother::service::attachment::HOST_FILE)
-        .unwrap();
-    assert_eq!(file_tool["_meta"]["openai/fileParams"], json!(["file"]));
-    assert!(
-        catalog
+    use mother::service::attachment::{PREPARE, STATUS, SUBMIT, UPLOAD};
+    use sha2::{Digest, Sha256};
+    assert!(tools.iter().all(|tool| tool["name"] != PREPARE));
+    let mut transfer = Harness::new(&other_config);
+    let catalog = discovery::collect(|params| transfer.rpc("tools/list", params));
+    let expected: Value =
+        serde_json::from_str(include_str!("../contracts/media-attachment-tools.json")).unwrap();
+    for entry in expected.as_array().unwrap() {
+        let actual = catalog
             .iter()
-            .all(|t| !t["name"].as_str().unwrap().starts_with("local_media_"))
+            .find(|tool| tool["name"] == entry["name"])
+            .unwrap();
+        assert_eq!(actual["inputSchema"], entry["inputSchema"]);
+    }
+    assert_eq!(catalog.len(), 17);
+    let bytes = include_bytes!("fixtures/attachment-sample.mp4");
+    let operation = uuid::Uuid::new_v4().to_string();
+    let target = transfer.call("mother_get_record", json!({"id":receipt["record"]["id"]}));
+    let input = json!({"operationId":operation,"memoryId":target["id"],"expectedRevision":target["revision"],
+        "file":{"fileName":"fixture.mp4","sizeBytes":bytes.len(),"sha256":format!("{:x}",Sha256::digest(bytes))}});
+    let denied = second.rpc("tools/call", json!({"name":PREPARE,"arguments":input}));
+    assert_eq!(denied["result"]["isError"], true);
+    let prepared = transfer.call(PREPARE, input.clone());
+    let token = prepared["transferToken"].clone();
+    let first_chunk = json!({"operationId":operation,"transferToken":token,"offset":0,"contentBase64":base64::encode(&bytes[..512])});
+    assert_eq!(transfer.call(UPLOAD, first_chunk)["receivedBytes"], 512);
+    drop(transfer);
+    let mut transfer = Harness::new(&other_config);
+    let query = json!({"operationId":operation});
+    assert_eq!(transfer.call(STATUS, query.clone())["receivedBytes"], 512);
+    assert_eq!(transfer.call(PREPARE, input)["transferToken"], token);
+    transfer.call(UPLOAD,json!({"operationId":operation,"transferToken":token,"offset":512,"contentBase64":base64::encode(&bytes[512..])}));
+    let staged = transfer.call(
+        SUBMIT,
+        json!({"operationId":operation,"transferToken":token}),
     );
-    let denied = second.rpc(
+    assert_eq!(staged["status"], "pending_owner_review");
+    let denied = transfer.rpc(
         "tools/call",
-        json!({"name":"local_media_finish_review","arguments":{}}),
+        json!({"name":"local_media_finish_review","arguments":query}),
     );
     assert!(denied["error"].is_object());
-    let selected = json!({"proposalId":uuid::Uuid::new_v4().to_string(),"memoryId":receipt["record"]["id"],
-        "fileName":"fixture.mp4","mediaType":"video/mp4","contentBase64":base64::encode(include_bytes!("fixtures/attachment-sample.mp4"))});
-    let staged = second.call("mother_propose_media_attachment", selected.clone());
-    assert_eq!(staged["status"], "pending_owner_review");
+    drop(transfer);
     drop(first);
     drop(second);
     drop(owner);
-    let mut direct_host = Harness::new(&direct);
+    let mut direct_host = Harness::new(&other_direct);
     let listed = discovery::collect(|params| direct_host.rpc("tools/list", params));
-    assert!(
-        listed
-            .iter()
-            .any(|tool| tool["name"] == "mother_propose_media_attachment")
-    );
-    assert_eq!(
-        direct_host.call(
-            "mother_get_media_attachment",
-            json!({"proposalId":selected["proposalId"]})
-        ),
-        staged
-    );
-    assert_eq!(
-        direct_host.call("mother_propose_media_attachment", selected),
-        staged
-    );
+    assert!(listed.iter().any(|tool| tool["name"] == PREPARE));
+    assert_eq!(direct_host.call(STATUS, query), staged);
     drop(direct_host);
     let reopened = GardenStore::open(&db).unwrap();
     assert!(reopened.v1_initialized().unwrap());
