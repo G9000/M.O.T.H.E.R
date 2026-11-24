@@ -22,30 +22,39 @@ struct Bridge {
 }
 impl ServerHandler for Bridge {
     fn get_info(&self) -> ServerConfig {
-        ServerConfig::new(ServerCapabilities::builder().enable_tools().build()).with_server_info(Implementation::new("mother-garden",env!("CARGO_PKG_VERSION"))).with_instructions("M.O.T.H.E.R shared garden through its local owner service. Your harness retains its memory, intelligence, permissions and instruction hierarchy. Read authorized shared context, resolve complete records, and publish only selected attributed content. Pending proposals remain outside canonical recall until local owner approval. MCP cannot grant, approve, migrate, activate or launch. Preserve operation UUIDs after uncertain results and reconcile receipts; this bridge never retries a mutation automatically. Media tools appear only when separately granted. To keep a photo or recording from the conversation, propose a pending attachment (source urn:mother:media:pending) and ask the owner to finish it in Mother; never say media is saved before approval.")
+        ServerConfig::new(ServerCapabilities::builder().enable_tools().build()).with_server_info(Implementation::new("mother-garden",env!("CARGO_PKG_VERSION"))).with_instructions("M.O.T.H.E.R shared garden through its local owner service. Your harness retains its memory, intelligence, permissions and instruction hierarchy. Read authorized shared context, resolve complete records, and publish only selected attributed content. Pending proposals remain outside canonical recall until local owner approval. MCP cannot grant, approve, migrate, activate or launch. Preserve operation UUIDs after uncertain results and reconcile receipts; this bridge never retries a mutation automatically. Attachment proposals require a dedicated owner grant. Use advertised attachment tools, retain the operation UUID, and require a verified receipt before reporting success. If the host cannot supply original bytes, use the owner file handoff.")
     }
     async fn list_tools(
         &self,
         request: Option<PaginatedRequestParams>,
         _: RequestContext<RoleServer>,
     ) -> std::result::Result<ListToolsResult, ErrorData> {
-        super::discovery::list_tools(&self.tools, request)
+        let client = self.client.clone();
+        super::attachment::list_tools(&self.tools, request, move || {
+            let caps = client.call("mother_get_capabilities", &json!({}))?;
+            Ok(caps["mediaAttachmentBridge"]["available"] == true)
+        })
+        .await
     }
     async fn call_tool(
         &self,
         request: CallToolRequestParams,
         _: RequestContext<RoleServer>,
     ) -> std::result::Result<CallToolResponse, ErrorData> {
-        if !self.tools.iter().any(|tool| tool.name == request.name) {
+        if !self.tools.iter().any(|tool| tool.name == request.name)
+            && !super::attachment::is_tool(&request.name)
+        {
             return Err(ErrorData::invalid_params("Unknown tool name.", None));
         }
         let client = self.client.clone();
         let name = request.name.clone();
         let result = tokio::task::spawn_blocking(move || {
-            client.call(
-                &request.name,
-                &Value::Object(request.arguments.unwrap_or_default()),
-            )
+            let args = Value::Object(request.arguments.unwrap_or_default());
+            if super::attachment::is_tool(&request.name) {
+                super::attachment::call(&client, &request.name, args)
+            } else {
+                client.call(&request.name, &args)
+            }
         })
         .await;
         let reply = match result {
@@ -79,22 +88,20 @@ pub(super) async fn serve(path: &Path) -> Result<()> {
         let graph_available = available["garden"]["available"]
             .as_bool()
             .ok_or_else(input_error)?;
-        Ok(Bridge {
-            client,
-            tools: if graph_available {
-                let granted: Vec<&str> = available["garden"]["availableTools"]
-                    .as_array()
-                    .ok_or_else(input_error)?
-                    .iter()
-                    .filter_map(Value::as_str)
-                    .collect();
-                garden::with_media(garden::advertised_tools(enabled)?, &granted)?
-            } else if enabled {
-                garden::advertised_context_tools()?
-            } else {
-                return Err(input_error());
-            },
-        })
+        let tools = if graph_available {
+            let granted: Vec<&str> = available["garden"]["availableTools"]
+                .as_array()
+                .ok_or_else(input_error)?
+                .iter()
+                .filter_map(Value::as_str)
+                .collect();
+            garden::with_media(garden::advertised_tools(enabled)?, &granted)?
+        } else if enabled {
+            garden::advertised_context_tools()?
+        } else {
+            return Err(input_error());
+        };
+        Ok(Bridge { client, tools })
     })
     .await
     .map_err(|_| Error::domain("STORE_UNAVAILABLE", UNCONFIRMED))??;

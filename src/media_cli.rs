@@ -24,6 +24,13 @@ pub(crate) struct Media {
 
 #[derive(Debug, Subcommand)]
 enum MediaCommand {
+    /// Transfer one explicitly selected file using a harness grant.
+    Bridge {
+        #[arg(long)]
+        config: PathBuf,
+        #[command(subcommand)]
+        command: BridgeCommand,
+    },
     /// Review and attach an exported file to an existing v1 memory.
     Backfill {
         #[command(subcommand)]
@@ -116,6 +123,23 @@ enum MediaCommand {
         sha256: String,
         #[arg(long)]
         out: PathBuf,
+    },
+}
+
+#[derive(Debug, Subcommand)]
+enum BridgeCommand {
+    /// Stage a selected original for review in the local live Garden.
+    Propose {
+        #[arg(long)]
+        file: PathBuf,
+        #[arg(long)]
+        memory: String,
+        #[arg(long)]
+        operation: String,
+        #[arg(long)]
+        revision: u64,
+        #[arg(long)]
+        source_locator: Option<String>,
     },
 }
 
@@ -264,6 +288,23 @@ fn print(value: Value) -> Result<()> {
 
 pub(crate) fn run(args: Media) -> Result<()> {
     match *args.command {
+        MediaCommand::Bridge { config, command } => match command {
+            BridgeCommand::Propose {
+                file,
+                memory,
+                operation,
+                revision,
+                source_locator,
+            } => {
+                let client = mother::service::attachment::client(&config)?;
+                print(mother::service::attachment::send_file(
+                    client.as_ref(),
+                    &file,
+                    json!({"operationId":operation,"memoryId":memory,"expectedRevision":revision,
+                    "sourceLocator":source_locator}),
+                )?)
+            }
+        },
         MediaCommand::Backfill { command } => match command {
             BackfillCommand::Plan {
                 db,

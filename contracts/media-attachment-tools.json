@@ -1,0 +1,197 @@
+[
+  {
+    "name": "mother_media_attachment_prepare",
+    "title": "Prepare a memory attachment",
+    "description": "Use a new operation UUID and the revision returned by mother_get_record. Declare original bytes only when the host has access. If the source supplies only a locator, omit file to open a local owner file handoff with SOURCE_BYTES_UNAVAILABLE. Never use a model-generated digest or media sample.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "operationId": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "memoryId": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "expectedRevision": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "sourceLocator": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "maxLength": 480
+        },
+        "file": {
+          "type": [
+            "object",
+            "null"
+          ],
+          "properties": {
+            "fileName": {
+              "type": "string",
+              "maxLength": 255
+            },
+            "sizeBytes": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 33554432
+            },
+            "sha256": {
+              "type": "string",
+              "pattern": "^[a-f0-9]{64}$"
+            },
+            "mediaType": {
+              "type": [
+                "string",
+                "null"
+              ],
+              "maxLength": 80
+            }
+          },
+          "required": [
+            "fileName",
+            "sizeBytes",
+            "sha256"
+          ],
+          "additionalProperties": false
+        }
+      },
+      "required": [
+        "operationId",
+        "memoryId",
+        "expectedRevision"
+      ],
+      "additionalProperties": false
+    },
+    "annotations": {
+      "readOnlyHint": false,
+      "destructiveHint": false,
+      "idempotentHint": true,
+      "openWorldHint": false
+    }
+  },
+  {
+    "name": "mother_media_attachment_upload",
+    "title": "Transfer an original file chunk",
+    "description": "Transfer actual base64 file bytes in chunks of up to 64 KiB. Resume at receivedBytes. Retry the same offset and identical bytes after an uncertain acknowledgement. Keep transferToken private.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "operationId": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "transferToken": {
+          "type": "string",
+          "minLength": 36,
+          "maxLength": 36
+        },
+        "offset": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 33554432
+        },
+        "contentBase64": {
+          "type": "string",
+          "minLength": 4,
+          "maxLength": 87384
+        }
+      },
+      "required": [
+        "operationId",
+        "transferToken",
+        "offset",
+        "contentBase64"
+      ],
+      "additionalProperties": false
+    },
+    "annotations": {
+      "readOnlyHint": false,
+      "destructiveHint": false,
+      "idempotentHint": true,
+      "openWorldHint": false
+    }
+  },
+  {
+    "name": "mother_media_attachment_submit",
+    "title": "Submit staged bytes for owner review",
+    "description": "Check the complete file against its declaration and open review in the local Garden. Await owner approval and use status to verify the canonical receipt.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "operationId": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "transferToken": {
+          "type": "string",
+          "minLength": 36,
+          "maxLength": 36
+        }
+      },
+      "required": [
+        "operationId",
+        "transferToken"
+      ],
+      "additionalProperties": false
+    },
+    "annotations": {
+      "readOnlyHint": false,
+      "destructiveHint": false,
+      "idempotentHint": true,
+      "openWorldHint": false
+    }
+  },
+  {
+    "name": "mother_media_attachment_status",
+    "title": "Read attachment status and receipt",
+    "description": "Check this credential's operation. Confirm the attachment only when status is approved and verification.verified is true, with the durable canonical receipt and active link in verification.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "operationId": {
+          "type": "string",
+          "format": "uuid"
+        }
+      },
+      "required": [
+        "operationId"
+      ],
+      "additionalProperties": false
+    },
+    "annotations": {
+      "readOnlyHint": true,
+      "destructiveHint": false,
+      "idempotentHint": true,
+      "openWorldHint": false
+    }
+  },
+  {
+    "name": "mother_media_attachment_cancel",
+    "title": "Cancel a pending attachment",
+    "description": "Stop this credential's pending attachment and discard staged bytes. An already committed attachment returns its receipt and remains subject to owner revocation.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "operationId": {
+          "type": "string",
+          "format": "uuid"
+        }
+      },
+      "required": [
+        "operationId"
+      ],
+      "additionalProperties": false
+    },
+    "annotations": {
+      "readOnlyHint": false,
+      "destructiveHint": true,
+      "idempotentHint": true,
+      "openWorldHint": false
+    }
+  }
+]

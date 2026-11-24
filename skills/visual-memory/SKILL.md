@@ -9,7 +9,9 @@ M.O.T.H.E.R keeps the original media as evidence. Your descriptions are attribut
 
 ## Keep media from this conversation
 
-You almost never have the original file. What you see in the conversation may be a resized copy, and tool arguments are text. Never paste encoded image bytes into a tool call or claim they are the original.
+For an existing narrative memory, read its UUID and revision with `mother_get_record` and check `mediaAttachmentBridge.available` in `mother_get_capabilities`. Use `mother_media_attachment_prepare` with a stable operation UUID. Supply a file declaration only when your host can read the authorized original bytes, then stream bounded chunks and submit for review. If the source provides only a locator, omit `file` and direct the owner to **Attachment review** in their local live Garden to select the original. Preserve the operation UUID and keep the transfer token private. Check `mother_media_attachment_status` for `approved` with `verification.verified` and the matching canonical receipt before reporting success. See the [media bridge guide](../../docs/media-bridge.md).
+
+For a graph assertion where the owner will select the source file during review:
 
 1. Find the memory it belongs with. Search or read with the graph tools until you have the target assertion's exact ID and current revision. If you are unsure which memory, ask the owner.
 2. Propose one pending attachment with `mother_garden_propose`: a single `create` evidence item whose `source` is `{"type":"uri","uri":"urn:mother:media:pending"}` and whose `excerpt` is null. Its extensions hold `mother.media:pending` (schemaVersion 1) with `target` (`{"kind":"assertion","id":...}`), `expectedRevision`, and optionally `description` and `eventTime`. Put your description of the media in `description`, not in the excerpt. Preserve the operation UUID if you retry.

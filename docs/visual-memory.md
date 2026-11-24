@@ -79,7 +79,7 @@ The gallery uses the same single-use loopback link as the explorer, and it never
 
 ## Attaching a photo from a conversation
 
-Hosts generally do not pass the original bytes of an uploaded image to an MCP server. A model may see a resized copy, but tool arguments are text, so Mother never treats bytes in a conversation as the original. The flow is:
+For a narrative memory, the [shared media bridge](media-bridge.md) accepts a selected file from an authorized harness and verifies the stored link after owner approval. For a graph assertion, a harness can propose pending evidence and the owner can select the original file during review.
 
 1. The harness calls `mother_garden_propose` with one evidence item whose source is `{"type":"uri","uri":"urn:mother:media:pending"}`. Its `mother.media:pending` extension (schema version 1) carries the target `{"kind":"assertion","id":...}`, the target's `expectedRevision`, an optional `description` and an optional `eventTime`. The target must be visible to the proposer. The proposal carries no path and no bytes.
 2. The harness tells you to finish in Mother. It must not say the photo is saved.

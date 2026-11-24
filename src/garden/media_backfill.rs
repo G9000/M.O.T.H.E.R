@@ -17,6 +17,12 @@ pub struct AttachmentPlan {
     pub memory_title: String,
     pub expected_revision: u64,
     pub local_path: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub original_filename: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub proposed_by: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub request_id: Option<String>,
     pub source_file_id: Option<String>,
     pub sha256: String,
     pub size_bytes: u64,
@@ -27,12 +33,35 @@ pub struct AttachmentPlan {
 }
 
 impl AttachmentPlan {
+    pub(crate) fn with_original_display(mut self) -> Result<Self> {
+        self.allow_original_in_owner_garden = true;
+        self.operation_id = self.approval_id()?;
+        Ok(self)
+    }
+
+    pub(crate) fn bind_sender(
+        mut self,
+        client: &str,
+        name: &str,
+        request_id: &str,
+    ) -> Result<Self> {
+        let mut input = AcquisitionInput::new(MediaOrigin::Imported);
+        input.original_filename = Some(name.into());
+        input.validate()?;
+        self.original_filename = input.original_filename;
+        self.proposed_by = Some(client.into());
+        self.request_id = Some(request_id.into());
+        self.operation_id = self.approval_id()?;
+        Ok(self)
+    }
     fn binding(&self) -> Result<Value> {
         let hash = Sha256::digest(serde_json::to_vec(self).map_err(storage_error)?);
-        Ok(
-            json!({"planHash":format!("{hash:x}"),"operationId":self.operation_id,
-            "generation":self.generation,"memoryId":self.memory_id,"expectedRevision":self.expected_revision,"allowOriginal":self.allow_original_in_owner_garden}),
-        )
+        let mut binding = json!({"planHash":format!("{hash:x}"),"operationId":self.operation_id,
+            "generation":self.generation,"memoryId":self.memory_id,"expectedRevision":self.expected_revision,"allowOriginal":self.allow_original_in_owner_garden});
+        if let Some(client) = &self.proposed_by {
+            binding["proposedBy"] = json!(client);
+        }
+        Ok(binding)
     }
     fn approval_id(&self) -> Result<String> {
         let mut unsigned = self.clone();
@@ -244,6 +273,9 @@ impl GardenStore {
                 .as_u64()
                 .ok_or_else(|| invalid("Invalid memory revision"))?,
             local_path: file.into(),
+            original_filename: None,
+            proposed_by: None,
+            request_id: None,
             source_file_id: source,
             sha256: format!("{:x}", Sha256::digest(&bytes)),
             size_bytes: bytes.len() as u64,
@@ -327,20 +359,47 @@ impl GardenStore {
         if format!("{:x}", Sha256::digest(&bytes)) != plan.sha256 {
             return Err(invalid("Selected bytes changed after review"));
         }
-        drop(bytes);
+        self.verify_stored_attachment(plan)
+    }
+
+    /// Verify the reviewed canonical link and stored bytes after the transfer copy is discarded.
+    pub fn verify_stored_attachment(&self, plan: &AttachmentPlan) -> Result<Value> {
+        self.attachment_outcome(plan)?
+            .filter(|item| item["verified"] == true)
+            .ok_or_else(|| invalid("No active owner-approved attachment for this manifest"))
+    }
+
+    /// Reconcile the immutable owner receipt and verify bytes for an active binding.
+    pub(crate) fn attachment_outcome(&self, plan: &AttachmentPlan) -> Result<Option<Value>> {
+        if plan.version != 1 || plan.approval_id()? != plan.operation_id {
+            return Err(invalid("Invalid review manifest"));
+        }
         let tx = self.db.begin_read().map_err(storage_error)?;
         let state = state_read(&tx)?;
         envelope(&state, &plan.workspace_id, &plan.generation)?;
+        let receipts = tx.open_table(RECEIPTS).map_err(storage_error)?;
+        let key = operation_key(&plan.generation, inbox::OWNER, &plan.operation_id);
+        let Some(row) = receipts.get(key.as_str()).map_err(storage_error)? else {
+            return Ok(None);
+        };
+        let stored: StoredOperation = decode(row.value())?;
+        let binding = plan.binding()?;
+        if !stored.records.iter().any(|r| matches!(&r.draft, GardenDraft::Evidence {extensions,..} if extensions.get(BINDING).is_some_and(|e| e.payload == binding))) {
+            return Err(invalid("Receipt belongs to another attachment"));
+        }
         let table = tx.open_table(ASSETS).map_err(storage_error)?;
         let asset = asset_read(&table, &plan.sha256)?
             .ok_or_else(|| invalid("Media has not been imported"))?;
         let links = memory_links(&tx, &uses(&tx, &asset)?)?;
         let link = links
             .into_iter()
-            .find(|l| l["operationId"] == plan.operation_id && l["memoryId"] == plan.memory_id)
-            .ok_or_else(|| invalid("No active owner-approved attachment for this manifest"))?;
-        read_bytes(&tx, &plan.sha256)?;
-        Ok(json!({"verified":true,"sha256":plan.sha256,"link":link}))
+            .find(|l| l["operationId"] == plan.operation_id && l["memoryId"] == plan.memory_id);
+        if link.is_some() {
+            read_bytes(&tx, &plan.sha256)?;
+        }
+        Ok(Some(
+            json!({"verified":link.is_some(),"sha256":plan.sha256,"link":link,"receipt":stored.receipt}),
+        ))
     }
 
     /// Commit a reviewed selection and retain the exact owner receipt for replay.
@@ -396,7 +455,11 @@ impl GardenStore {
             return Err(invalid("Selected bytes changed after review"));
         }
         let mut input = AcquisitionInput::new(MediaOrigin::Imported);
-        input.original_filename = plan.local_path.rsplit('/').next().map(str::to_owned);
+        input.original_filename = if plan.proposed_by.is_some() {
+            plan.original_filename.clone()
+        } else {
+            plan.local_path.rsplit('/').next().map(str::to_owned)
+        };
         input.source.clone_from(&plan.source_file_id);
         input.declared_media_type = Some(plan.media_type.clone());
         let report = ingest_tx(
