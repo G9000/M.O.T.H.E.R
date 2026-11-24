@@ -164,7 +164,8 @@ fn private_directory(path: &Path) -> Result<()> {
     #[cfg(not(unix))]
     let builder = &mut builder;
     match builder.create(path) {
-        Ok(()) => (),
+        // Only a directory created here is restricted; an existing one must already pass.
+        Ok(()) => crate::private_paths::restrict_new_directory(path)?,
         Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => (),
         Err(e) => return Err(e.into()),
     }
@@ -1156,5 +1157,52 @@ mod tests {
             .unwrap();
         assert_eq!(stale["status"], "stale");
         assert_eq!(f.store.media_verify().unwrap()["assetsChecked"], 0);
+    }
+
+    /// Reproduces the live Windows failure: a staging root created under a parent
+    /// whose inheritable entries include a foreign read grant (mask 0x001200a9).
+    #[cfg(windows)]
+    #[test]
+    fn staging_root_is_owner_only_under_a_parent_with_an_inherited_read_grant() {
+        use windows_permissions::{
+            LocalBox, SecurityDescriptor,
+            constants::{SeObjectType, SecurityInformation},
+        };
+        let parent =
+            tempfile::tempdir_in(std::fs::canonicalize(std::env::temp_dir()).unwrap()).unwrap();
+        let current = windows_permissions::utilities::current_process_sid().unwrap();
+        let sd: LocalBox<SecurityDescriptor> = format!(
+            "D:P(A;OICI;FA;;;{current})(A;OICI;FA;;;SY)(A;OICI;FA;;;BA)(A;OICI;0x1200a9;;;BU)"
+        )
+        .parse()
+        .unwrap();
+        windows_permissions::wrappers::SetNamedSecurityInfo(
+            parent.path().as_os_str(),
+            SeObjectType::SE_FILE_OBJECT,
+            SecurityInformation::Dacl | SecurityInformation::ProtectedDacl,
+            None,
+            None,
+            sd.dacl(),
+            None,
+        )
+        .unwrap();
+        // The pre-fix creation path inherits the read grant and is fenced.
+        let inherited = parent.path().join("inherited");
+        fs::create_dir(&inherited).unwrap();
+        let error = crate::private_paths::owner_directory(&inherited).unwrap_err();
+        assert_eq!(error.code(), "MIGRATION_FENCED");
+        assert!(error.to_string().contains("0x001200a9"), "{error}");
+        // An existing insecure directory is never repaired, so it still fails closed.
+        assert_eq!(
+            private_directory(&inherited).unwrap_err().code(),
+            "MIGRATION_FENCED"
+        );
+        // A newly created staging root is owner-only and its sessions inherit that.
+        let staging = parent.path().join("attachment-sessions-synthetic");
+        private_directory(&staging).unwrap();
+        crate::private_paths::owner_directory(&staging).unwrap();
+        private_directory(&staging).unwrap();
+        let session = private_temp(&staging).unwrap();
+        crate::private_paths::owner_directory(session.path()).unwrap();
     }
 }
