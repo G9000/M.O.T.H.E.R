@@ -185,18 +185,17 @@ fn record(tx: &impl View, id: &str) -> Result<Value> {
     tx.get(RECORDS, id)?.ok_or_else(not_found)
 }
 fn principal(tx: &impl View, auth: &Auth, scope: &str) -> Result<Principal> {
-    let value = tx.get(PRINCIPALS, &auth.client_id)?.ok_or_else(|| {
+    principal_for_hash(tx, &auth.client_id, &contracts::hash(&auth.token), scope)
+}
+fn principal_for_hash(tx: &impl View, client: &str, hash: &str, scope: &str) -> Result<Principal> {
+    let value = tx.get(PRINCIPALS, client)?.ok_or_else(|| {
         Error::domain(
             "UNAUTHORIZED",
             "Client is unknown, revoked, or has an invalid token.",
         )
     })?;
     let p: Principal = serde_json::from_value(value)?;
-    if !bool::from(
-        p.token_hash
-            .as_bytes()
-            .ct_eq(contracts::hash(&auth.token).as_bytes()),
-    ) {
+    if !bool::from(p.token_hash.as_bytes().ct_eq(hash.as_bytes())) {
         return Err(Error::domain(
             "UNAUTHORIZED",
             "Client is unknown, revoked, or has an invalid token.",
@@ -213,7 +212,7 @@ fn principal(tx: &impl View, auth: &Auth, scope: &str) -> Result<Principal> {
     if p.access.mode == AccessMode::Shared
         && !matches!(
             scope,
-            "read" | "context:propose" | "garden:read" | "garden:propose"
+            "read" | "context:propose" | "garden:read" | "garden:propose" | "media:attach"
         )
     {
         return Err(Error::domain(
@@ -350,6 +349,16 @@ impl GardenStore {
         metadata(&tx, "workspace")?;
         principal(&tx, auth, scope)?;
         Ok(())
+    }
+    pub(crate) fn v1_attachment_record(&self, client: &str, hash: &str, id: &str) -> Result<Value> {
+        let tx = self.db.begin_read().map_err(unavailable)?;
+        metadata(&tx, "workspace")?;
+        principal_for_hash(&tx, client, hash, "media:attach")?;
+        let p = principal_for_hash(&tx, client, hash, "read")?;
+        p.access.require(id)?;
+        let mut value = record(&tx, id)?;
+        p.access.scrub(&mut value);
+        Ok(value)
     }
     /// Read a policy under the currently authenticated native v1 credential.
     pub fn v1_access_for(&self, auth: &Auth) -> Result<ClientAccess> {
@@ -699,7 +708,12 @@ fn prepare_grant(
             || scopes.iter().any(|s| {
                 !matches!(
                     s.as_str(),
-                    "read" | "context:propose" | "garden:read" | "garden:propose" | "media:meta"
+                    "read"
+                        | "context:propose"
+                        | "garden:read"
+                        | "garden:propose"
+                        | "media:meta"
+                        | "media:attach"
                 )
             }))
     {
@@ -707,6 +721,11 @@ fn prepare_grant(
             "FORBIDDEN",
             "Shared grants cannot receive canonical writes or full graph visibility.",
         ));
+    }
+    if scopes.iter().any(|scope| scope == "media:attach")
+        && !scopes.iter().any(|scope| scope == "read")
+    {
+        return Err(invalid("media:attach requires read"));
     }
     super::media::validate_scopes(scopes, access.mode == AccessMode::Shared).map_err(invalid)?;
     let mut bytes = [0; 32];

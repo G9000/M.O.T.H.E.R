@@ -76,7 +76,7 @@ async function launch() {
     const cmd = process.platform === 'win32' ? 'rundll32' : process.platform === 'darwin' ? 'open' : 'xdg-open';
     const args = process.platform === 'win32' ? ['url.dll,FileProtocolHandler', link] : [link];
     spawn(cmd, args, { stdio: 'ignore', windowsHide: true }).on('error', () => {
-      console.error('Could not open the browser. Open this private link locally:', link);
+      console.error('Could not open the browser for the local Garden preview.');
     });
     console.log('Opened the updated live Garden. Leave this terminal open while walking. Press Ctrl+C to close.');
   });

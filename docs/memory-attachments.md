@@ -40,4 +40,3 @@ Open the memory in any of the three Garden Reader lenses and choose the file und
 Each approval is one redb transaction. It stores the original bytes and acquisition, creates artifact evidence, creates a graph entity representing this association, and records the target memory UUID in a graph assertion. The receipt binds these three graph IDs. Linking another memory can reuse the same content-addressed bytes. The write leaves the v1 narrative and revision history intact.
 
 The private manifest and its hash identify exactly what the owner reviewed. Only the owner CLI publishes or retracts these links. The reader resolves the evidence against the immutable direct-owner receipt, the current binding revision and the existing active memory. Retracted bindings and client-created lookalikes cannot authorize inline attachments. An authenticated local Garden session serves the selected bytes. No new MCP write authority is required for import.
-

@@ -1,0 +1,36 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Attachment review · Memory Garden</title>
+  <script src="/attachment-review.js" type="module"></script>
+  <style>
+    :root { color-scheme: dark; font: 16px/1.55 system-ui, sans-serif; background: #15171f; color: #f5f0e9; }
+    main { max-width: 48rem; margin: 3rem auto; padding: 0 1rem; }
+    nav, .actions { display: flex; align-items: center; flex-wrap: wrap; gap: .75rem; }
+    a { color: #e1d1ff; }
+    h1 { margin-bottom: .25rem; }
+    section { border: 1px solid #494755; border-radius: 1rem; background: #211f2b; padding: 1rem 1.25rem; margin: 1rem 0; }
+    h2 { font-size: 1.15rem; margin: 0; }
+    dl { display: grid; grid-template-columns: minmax(8rem, auto) minmax(0, 1fr); gap: .25rem .75rem; }
+    dt { color: #c1bacb; }
+    dd { margin: 0; overflow-wrap: anywhere; }
+    button, input { font: inherit; }
+    button { border: 1px solid #8c829d; background: #333041; color: inherit; padding: .35rem .75rem; border-radius: .6rem; cursor: pointer; }
+    button.approve { background: #ddd0ff; color: #1c132b; }
+    button:disabled { opacity: .55; }
+    #notice { color: #ffd9a5; }
+    @media (max-width: 420px) { dl { grid-template-columns: 1fr; } dd { margin-bottom: .35rem; } }
+  </style>
+</head>
+<body>
+  <main>
+    <nav><a href="/">Memory Garden</a><button id="refresh" type="button">Refresh</button></nav>
+    <h1>Attachment review</h1>
+    <p>Approve the exact file and memory shown below. Approved media appears under <strong>Moments captured</strong>.</p>
+    <p id="notice" role="status"></p>
+    <div id="items"></div>
+  </main>
+</body>
+</html>

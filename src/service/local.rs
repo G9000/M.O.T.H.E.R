@@ -464,7 +464,15 @@ impl LocalService {
     pub fn store(&self) -> &GardenStore {
         &self.store
     }
-    /// Lend the browser explorer a read source within this owner process.
+    /// Locate private transfer staging for this workspace generation.
+    pub fn attachment_root(&self) -> Result<PathBuf> {
+        super::attachment::root(
+            &self.database_path,
+            &self.info.workspace_id,
+            &self.info.generation,
+        )
+    }
+    /// Lend the local Garden its trusted store within this owner process.
     pub fn explorer_store(&self) -> std::sync::Weak<GardenStore> {
         Arc::downgrade(&self.store)
     }
@@ -484,7 +492,15 @@ impl LocalService {
     /// # Errors
     /// Returns listener failures; the owner must keep this service alive until serving ends.
     pub fn serve(&self, stopped: &AtomicBool) -> Result<()> {
+        let root = self.attachment_root()?;
+        let mut last_sweep = std::time::Instant::now();
         while !stopped.load(Ordering::Acquire) {
+            if last_sweep.elapsed() >= std::time::Duration::from_secs(60) {
+                if let Err(error) = super::attachment::sweep(&self.store, &root) {
+                    eprintln!("Attachment staging cleanup failed ({})", error.code());
+                }
+                last_sweep = std::time::Instant::now();
+            }
             match self.listener.accept() {
                 Ok(stream) => self.handle(Connection(stream)),
                 Err(error) if error.kind() == io::ErrorKind::WouldBlock => {
@@ -585,23 +601,14 @@ impl LocalService {
         };
         let name = request.method.as_str();
         let args = request.arguments;
-        let bridge_root = super::attachment::root(
-            &self.database_path,
-            &self.info.workspace_id,
-            &self.info.generation,
-            &auth.client_id,
-            &auth.token,
-        )?;
-        if matches!(
-            name,
-            "local_media_location"
-                | "local_media_policy"
-                | "local_media_target"
-                | "local_media_stage"
-                | "local_media_finish_review"
-                | super::attachment::STATUS
-        ) {
-            return super::attachment::dispatch(&self.store, auth, &bridge_root, name, &args);
+        if super::attachment::is_tool(name) {
+            return super::attachment::dispatch(
+                &self.store,
+                auth,
+                &self.attachment_root()?,
+                name,
+                &args,
+            );
         }
         if name == "mother_get_capabilities" {
             if args.as_object().is_none_or(|object| !object.is_empty()) {
@@ -618,8 +625,7 @@ impl LocalService {
                     "definedTools":GRAPH_TOOLS,
                     "reason":if !graph_available {"native_context_only_current_grant"} else if self.info.v1_available {"native_v1_compatibility_with_independent_graph_authority"} else {"graph_only_prototype_without_v1_compatibility_or_migration"}}}))
             .map(|mut value| {
-                let enabled = self.info.v1_available && super::attachment::enabled(&bridge_root) && self.store.v1_authorize(auth,"read").is_ok();
-                value["mediaAttachmentBridge"] = super::attachment::capabilities(enabled);
+                value["mediaAttachmentBridge"] = super::attachment::capabilities(&self.store, auth);
                 crate::garden::media_tools::add_capabilities(
                     &mut value,
                     &self.store.media_tools(auth).unwrap_or_default(),

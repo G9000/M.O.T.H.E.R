@@ -51,4 +51,3 @@ test('approved video is visible in each lens and fetched only on demand', async 
   reader.close();
   assert.equal(await attachmentBlob('invalid'), null);
 });
-

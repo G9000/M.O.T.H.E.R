@@ -14,7 +14,7 @@ Create a context-only credential with an explicit allowlist of existing canonica
 mother garden grant-v1 reader-b --db "C:\private-data\mother\garden.redb" --out "C:\private-data\mother\reader-b.native.json" --access shared --subject agent-b --records "<record-id>,<record-id>" --scopes read,context:propose
 ```
 
-Omitting `--records` shares no canonical records. Companion access does not add write scopes. Shared policies accept `read` and optional `context:propose`; they cannot write canonical records. Use separate names and private output files. Follow [service setup](garden-service.md) to bind each direct native credential to the running owner and explicitly configure its harness.
+Omitting `--records` shares no canonical records. Companion access does not add write scopes. Shared clients can receive `read`, `context:propose` and `media:attach` for explicitly scoped read and reviewed capture. The latter is detailed in the [media bridge guide](media-bridge.md). Use separate names and private output files. Follow [service setup](garden-service.md) to bind each direct native credential to the running owner and explicitly configure its harness.
 
 The v1 context/search `access` metadata identifies the stored policy. Shared responses omit persona; inventory, omitted counts, previews, unsettled work and search candidates cover only allowed records and label their coverage `granted_records`. Full records omit references to hidden IDs. Filters cannot expand access. Current policy and revocation are rechecked before returning data; restricted vector caches cannot reveal full-workspace coverage.
 
