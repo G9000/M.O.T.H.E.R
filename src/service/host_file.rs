@@ -108,6 +108,42 @@ fn download(start: &str) -> Result<Vec<u8>> {
     ))
 }
 
+/// Describe what the host sent for `file` by shape only: never values, links or IDs.
+fn received(file: &Value) -> String {
+    let shape = match file {
+        Value::Null => "no file argument".to_owned(),
+        Value::String(text) if text.starts_with("file") => {
+            "a bare file ID string, not a host file object; the host did not authorize this file for the tool".to_owned()
+        }
+        Value::String(_) => "a plain string, not a host file object".to_owned(),
+        Value::Object(fields) => {
+            let mut keys: Vec<&str> = fields.keys().map(String::as_str).collect();
+            keys.sort_unstable();
+            let keys: Vec<String> = keys
+                .iter()
+                .take(8)
+                .map(|key| key.chars().take(24).collect())
+                .collect();
+            let id = match fields.get("file_id").and_then(Value::as_str) {
+                Some(id) if file_id(id) => "valid",
+                Some(_) => "unrecognised",
+                None => "missing",
+            };
+            let link = if fields.get("download_url").is_some_and(Value::is_string) {
+                "present"
+            } else {
+                "missing"
+            };
+            format!(
+                "an object with keys [{}], file_id {id}, download_url {link}",
+                keys.join(", ")
+            )
+        }
+        other => format!("a JSON {}", if other.is_array() { "array" } else { "scalar" }),
+    };
+    format!("The host did not provide a downloadable file: it sent {shape}.")
+}
+
 /// Keep only the final path component of a host-supplied name.
 fn base_name(name: &str) -> Option<String> {
     let name = name.rsplit(['/', '\\']).next()?.trim();
@@ -146,10 +182,10 @@ pub(crate) fn import_with(
     let id = file["file_id"]
         .as_str()
         .filter(|id| file_id(id))
-        .ok_or_else(|| unavailable("The host did not provide a file reference."))?;
+        .ok_or_else(|| unavailable(&received(file)))?;
     let link = file["download_url"]
         .as_str()
-        .ok_or_else(|| unavailable("The host did not provide the original bytes."))?;
+        .ok_or_else(|| unavailable(&received(file)))?;
     // An existing operation is reconciled without downloading again.
     match client.request(STATUS, &json!({"operationId":operation})) {
         Ok(state) if state["status"] != "uploading" => return Ok(state),
@@ -229,6 +265,23 @@ mod tests {
         assert!(file_id("file-AbC123"));
         assert!(!file_id("chat_upload"));
         assert!(!file_id("file_../../x"));
+    }
+
+    #[test]
+    fn unresolved_files_are_described_by_shape_without_values() {
+        let id = "file_00000000b6f8820790d24bf6796d36f5";
+        let bare = received(&json!(id));
+        assert!(bare.contains("bare file ID string"), "{bare}");
+        assert!(!bare.contains(id));
+        let partial = received(&json!({"file_id": id, "name": "IMG_4408.mp4"}));
+        assert!(partial.contains("keys [file_id, name]"), "{partial}");
+        assert!(partial.contains("file_id valid") && partial.contains("download_url missing"));
+        assert!(!partial.contains(id) && !partial.contains("IMG_4408"));
+        let link =
+            received(&json!({"download_url": "https://files.oaiusercontent.com/x?sig=secret"}));
+        assert!(link.contains("file_id missing") && link.contains("download_url present"));
+        assert!(!link.contains("secret"));
+        assert!(received(&Value::Null).contains("no file argument"));
     }
 
     struct Recorder(std::sync::Mutex<Vec<String>>);
