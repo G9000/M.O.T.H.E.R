@@ -16,7 +16,7 @@ use crate::{
     contracts::{self, Auth},
     garden::{access::GardenAction, contracts::*},
 };
-pub use backfill::AttachmentPlan;
+pub use backfill::{AttachmentAuthorization, AttachmentPlan};
 use redb::{Durability, ReadableDatabase, ReadableTable, TableDefinition, TableHandle};
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};

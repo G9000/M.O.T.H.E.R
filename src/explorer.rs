@@ -45,6 +45,8 @@ fn asset(path: &str) -> Option<(&'static str, &'static [u8])> {
         "/" => ("text/html; charset=utf-8", asset!("index.html")),
         "/attachments" => ("text/html; charset=utf-8", asset!("attachments.html")),
         "/attachment-review.js" => (JS, asset!("attachment-review.js")),
+        "/trust" => ("text/html; charset=utf-8", asset!("trust.html")),
+        "/trust.js" => (JS, asset!("trust.js")),
         "/assets/index.js" => (JS, asset!("assets/index.js")),
         "/assets/bake.worker.js" => (JS, asset!("assets/bake.worker.js")),
         "/glasshouse-pool.jpg" => (JPEG, asset!("glasshouse-pool.jpg")),
@@ -296,7 +298,7 @@ impl Site {
             {
                 let html = String::from_utf8_lossy(asset!("index.html")).replacen(
                     r#"<button class="btn glass" aria-label="Reading Path" id="pathBtn""#,
-                    r#"<a class="btn glass" href="/attachments" aria-label="Attachment review" title="Attachment review" style="color:inherit;text-decoration:none"><svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><path d="m8 12 5-5a3 3 0 0 1 4 4l-7 7a4 4 0 0 1-6-6l7-7"/></svg></a><button class="btn glass" aria-label="Reading Path" id="pathBtn""#,
+                    r#"<a class="btn glass" href="/attachments" aria-label="Attachment review" title="Attachment review" style="color:inherit;text-decoration:none"><svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><path d="m8 12 5-5a3 3 0 0 1 4 4l-7 7a4 4 0 0 1-6-6l7-7"/></svg></a><a class="btn glass" href="/trust" aria-label="Agent trust" title="Agent trust" style="color:inherit;text-decoration:none"><svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3 5 6v5c0 4.5 3 8.3 7 10 4-1.7 7-5.5 7-10V6z"/></svg></a><button class="btn glass" aria-label="Reading Path" id="pathBtn""#,
                     1,
                 );
                 Reply {
@@ -331,6 +333,100 @@ impl Site {
                     status: 200,
                     kind: JSON,
                     body,
+                }
+            }
+            ("GET", "/api/trust") | ("POST", "/api/trust") => {
+                if !self.signed_in(bearer) {
+                    return Reply::refuse(401, "Open Agent trust from the live Garden.");
+                }
+                let Some(live) = &self.live else {
+                    return Reply::refuse(404, "Agent trust requires the live Garden.");
+                };
+                let result = live.store().and_then(|store| {
+                    let activity = |store: &GardenStore| match &live.attachment_root {
+                        Some(root) => {
+                            attachment::owner_request(store, root, "activity", &json!({}))
+                        }
+                        None => Ok(json!({"items": []})),
+                    };
+                    if method == "GET" {
+                        let mut overview = store.trust_overview()?;
+                        overview["activity"] = activity(&store)?["items"].take();
+                        return Ok(overview);
+                    }
+                    if origin.is_none() {
+                        return Err(Error::domain(
+                            "FORBIDDEN",
+                            "A same-origin owner request is required.",
+                        ));
+                    }
+                    if header("content-type") != Some("application/json")
+                        || body.len() > MAX_REVIEW_BODY
+                    {
+                        return Err(Error::domain(
+                            "INVALID_INPUT",
+                            "Expected a bounded JSON body.",
+                        ));
+                    }
+                    let body: serde_json::Value = serde_json::from_str(body)?;
+                    match body["action"].as_str() {
+                        Some("set") => {
+                            let mode: mother::garden::store::trust::TrustMode =
+                                serde_json::from_value(body["mode"].clone()).map_err(|_| {
+                                    Error::domain("INVALID_INPUT", "Unknown trust mode.")
+                                })?;
+                            let number = |key: &str| {
+                                body[key].as_u64().ok_or_else(|| {
+                                    Error::domain("INVALID_INPUT", format!("Missing {key}."))
+                                })
+                            };
+                            let policy = store.set_trust_policy(
+                                body["clientId"].as_str().ok_or_else(|| {
+                                    Error::domain("INVALID_INPUT", "Missing clientId.")
+                                })?,
+                                mode,
+                                u32::try_from(number("maxAutoCommitsPerDay")?).map_err(|_| {
+                                    Error::domain("INVALID_INPUT", "Limit too large.")
+                                })?,
+                                number("maxAutoBytesPerDay")?,
+                                number("expectedRevision")?,
+                            )?;
+                            Ok(json!({"policy": policy}))
+                        }
+                        Some("retract") => match &live.attachment_root {
+                            Some(root) => attachment::owner_request(&store, root, "retract", &body),
+                            None => Err(Error::domain(
+                                "NOT_FOUND",
+                                "Attachment activity is unavailable.",
+                            )),
+                        },
+                        _ => Err(Error::domain("INVALID_INPUT", "Unknown trust action.")),
+                    }
+                });
+                match result {
+                    Ok(value) => Reply {
+                        status: 200,
+                        kind: JSON,
+                        body: Cow::Owned(value.to_string().into_bytes()),
+                    },
+                    Err(error) => {
+                        let status = match error.code() {
+                            "FORBIDDEN" => 403,
+                            "NOT_FOUND" => 404,
+                            "CONFLICT" => 409,
+                            "STORE_UNAVAILABLE" => 503,
+                            _ => 400,
+                        };
+                        Reply {
+                            status,
+                            kind: JSON,
+                            body: Cow::Owned(
+                                json!({"code":error.code(),"message":error.to_string()})
+                                    .to_string()
+                                    .into_bytes(),
+                            ),
+                        }
+                    }
                 }
             }
             ("GET", "/api/attachments") | ("POST", "/api/attachments") => {
@@ -473,7 +569,7 @@ fn read_head(stream: &mut TcpStream) -> Option<String> {
         return None;
     }
     let headers = std::str::from_utf8(&head[..end]).ok()?;
-    if headers.starts_with("POST /api/attachments ") {
+    if headers.starts_with("POST /api/attachments ") || headers.starts_with("POST /api/trust ") {
         let mut length = None;
         for line in headers.lines().skip(1) {
             if let Some((name, value)) = line.split_once(':') {
@@ -946,6 +1042,113 @@ mod tests {
                 .status,
             404
         );
+    }
+
+    #[test]
+    fn owner_trust_routes_require_a_session_same_origin_and_an_eligible_grant() {
+        let temp = tempfile::tempdir().unwrap();
+        let store = Arc::new(
+            GardenStore::initialize(
+                temp.path().join("test.redb"),
+                &uuid::Uuid::new_v4().to_string(),
+                &uuid::Uuid::new_v4().to_string(),
+            )
+            .unwrap(),
+        );
+        store.v1_initialize("Synthetic persona").unwrap();
+        for (client, scopes) in [
+            ("companion", &["read", "media:attach"][..]),
+            ("reader", &["read"][..]),
+        ] {
+            store
+                .v1_grant(
+                    client,
+                    &scopes.iter().map(|s| s.to_string()).collect::<Vec<_>>(),
+                    &Default::default(),
+                    None,
+                )
+                .unwrap();
+        }
+        let mut site = site();
+        site.live = Some(LiveView {
+            store: Arc::downgrade(&store),
+            limit: 1,
+            attachment_root: Some(temp.path().join("synthetic-sessions")),
+        });
+        let home = site.respond(&request("GET", "/", &[]));
+        assert!(
+            std::str::from_utf8(&home.body)
+                .unwrap()
+                .contains(r#"href="/trust" aria-label="Agent trust""#)
+        );
+        assert_eq!(site.respond(&request("GET", "/trust", &[])).status, 200);
+        assert_eq!(site.respond(&request("GET", "/trust.js", &[])).status, 200);
+        let path = "/api/trust";
+        assert_eq!(site.respond(&request("GET", path, &[])).status, 401);
+        let bearer = format!("Authorization: Bearer {}", session(&site));
+        let overview = site.respond(&request("GET", path, &[&bearer]));
+        assert_eq!(overview.status, 200);
+        let text = std::str::from_utf8(&overview.body).unwrap();
+        assert!(text.contains("\"companion\"") && !text.contains("token"));
+        let kind = "Content-Type: application/json";
+        let set = |client: &str, mode: &str, revision: u64| {
+            json!({"action":"set","clientId":client,"mode":mode,"maxAutoCommitsPerDay":5,
+                "maxAutoBytesPerDay":1048576,"expectedRevision":revision})
+            .to_string()
+        };
+        let post = |headers: &[&str], body: String| {
+            site.respond(&(request("POST", path, headers) + &body))
+                .status
+        };
+        assert_eq!(
+            post(&[&bearer, kind], set("companion", "trusted_companion", 0)),
+            403
+        );
+        assert_eq!(
+            post(
+                &[&bearer, "Origin: http://127.0.0.1:4101", kind],
+                set("companion", "trusted_companion", 0)
+            ),
+            403
+        );
+        assert_eq!(
+            post(&[ORIGIN, kind], set("companion", "trusted_companion", 0)),
+            401
+        );
+        assert_eq!(
+            post(
+                &[&bearer, ORIGIN, kind],
+                set("reader", "trusted_companion", 0)
+            ),
+            403
+        );
+        assert_eq!(
+            post(&[&bearer, ORIGIN, kind], set("companion", "superuser", 0)),
+            400
+        );
+        assert_eq!(
+            post(
+                &[&bearer, ORIGIN, kind],
+                set("companion", "trusted_companion", 0)
+            ),
+            200
+        );
+        assert_eq!(
+            post(
+                &[&bearer, ORIGIN, kind],
+                set("companion", "trusted_companion", 0)
+            ),
+            409
+        );
+        assert_eq!(store.trust_policy("companion").unwrap().revision, 1);
+        assert_eq!(
+            post(
+                &[&bearer, ORIGIN, kind],
+                set("companion", "manual_review", 1)
+            ),
+            200
+        );
+        assert!(!store.trust_policy("companion").unwrap().automatic());
     }
 
     #[test]

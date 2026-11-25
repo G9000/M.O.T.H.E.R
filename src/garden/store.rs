@@ -50,6 +50,8 @@ pub(crate) mod query;
 pub(crate) mod search;
 #[path = "service_auth.rs"]
 pub(crate) mod service_auth;
+#[path = "trust.rs"]
+pub mod trust;
 
 const MAX_TRANSACTION_OBJECTS: usize = 10_000;
 

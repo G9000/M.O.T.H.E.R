@@ -30,9 +30,47 @@ pub struct AttachmentPlan {
     pub embedded_metadata: Vec<String>,
     pub allow_original_in_owner_garden: bool,
     pub operation_id: String,
+    /// Present only when an owner-granted trust policy, not a manual owner decision,
+    /// authorized the commit. Absent plans keep their original hash and binding.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub authorization: Option<AttachmentAuthorization>,
+}
+
+/// How a canonical attachment was authorized when it was not a manual owner approval.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct AttachmentAuthorization {
+    /// Always `owner_granted_trust_policy`.
+    pub mechanism: String,
+    pub client_id: String,
+    pub trust_mode: String,
+    pub policy_revision: u64,
+    pub decided_at: String,
 }
 
 impl AttachmentPlan {
+    /// Bind an owner-granted trust policy decision into this exact plan.
+    pub(crate) fn with_authorization(
+        mut self,
+        authorization: AttachmentAuthorization,
+    ) -> Result<Self> {
+        if authorization.mechanism != "owner_granted_trust_policy"
+            || self.proposed_by.as_deref() != Some(authorization.client_id.as_str())
+        {
+            return Err(invalid(
+                "A trust policy can only authorize its own credential's proposal",
+            ));
+        }
+        self.authorization = Some(authorization);
+        self.operation_id = self.approval_id()?;
+        Ok(self)
+    }
+    /// The recorded authorization mechanism for a committed plan.
+    pub fn mechanism(&self) -> &str {
+        self.authorization
+            .as_ref()
+            .map_or("owner_manual_approval", |a| a.mechanism.as_str())
+    }
     pub(crate) fn with_original_display(mut self) -> Result<Self> {
         self.allow_original_in_owner_garden = true;
         self.operation_id = self.approval_id()?;
@@ -60,6 +98,9 @@ impl AttachmentPlan {
             "generation":self.generation,"memoryId":self.memory_id,"expectedRevision":self.expected_revision,"allowOriginal":self.allow_original_in_owner_garden});
         if let Some(client) = &self.proposed_by {
             binding["proposedBy"] = json!(client);
+        }
+        if let Some(authorization) = &self.authorization {
+            binding["authorization"] = json!(authorization);
         }
         Ok(binding)
     }
@@ -283,6 +324,7 @@ impl GardenStore {
             embedded_metadata: found.embedded.into_iter().map(str::to_owned).collect(),
             allow_original_in_owner_garden,
             operation_id: String::new(),
+            authorization: None,
         };
         plan.operation_id = plan.approval_id()?;
         Ok(plan)
