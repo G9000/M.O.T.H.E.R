@@ -1420,9 +1420,13 @@ fn excerpt(content: &str, max: usize) -> String {
         })
         .collect()
 }
-fn preview(r: &Value) -> Value {
+fn preview(r: &Value, max: usize) -> Value {
     let content = r["content"].as_str().unwrap_or_default();
-    json!({"id":r["id"],"kind":r["kind"],"title":r["title"],"status":r["status"],"revision":r["revision"],"actor":r["actor"],"updatedAt":r["updatedAt"],"excerpt":excerpt(content,400),"truncated":content.encode_utf16().count()>400})
+    let mut p = json!({"id":r["id"],"kind":r["kind"],"title":r["title"],"status":r["status"],"revision":r["revision"],"actor":r["actor"],"createdAt":r["createdAt"],"updatedAt":r["updatedAt"],"excerpt":excerpt(content,max),"truncated":content.encode_utf16().count()>max});
+    if let Some(basis) = r.get("basis") {
+        p["basis"] = basis.clone();
+    }
+    p
 }
 fn counts() -> Value {
     json!({"memory":0,"decision":0,"task":0,"checkpoint":0,"artifact":0,"action":0})
@@ -1455,8 +1459,18 @@ fn context(
             "updatedSince",
             "updatedBefore",
             "profile",
+            "actor",
+            "status",
+            "basis",
+            "order",
+            "cursor",
+            "includePersona",
+            "includePinned",
+            "previewMaxChars",
         ],
     )?;
+    let filters = crate::pagination::Filters::parse(&query)?;
+    let view = crate::pagination::View::parse(&query)?;
     let profile = query
         .get("profile")
         .map(|_| string(&query, "profile"))
@@ -1489,18 +1503,30 @@ fn context(
     if q.is_some_and(|q| q.encode_utf16().count() > 200) {
         return Err(invalid("Query too long"));
     }
-    let kind = query
-        .get("kind")
-        .map(|_| string(&query, "kind"))
-        .transpose()?;
-    if let Some(k) = kind {
-        Kind::parse(k)?;
-    }
+    let kind = crate::pagination::kind(&query)?;
+    let kind = kind.as_deref();
     let limit = if query.get("limit").is_some() {
         integer(&query, "limit", 1, 100)? as usize
     } else {
         20
     };
+    let filtered =
+        q.is_some() || kind.is_some() || since.is_some() || before.is_some() || filters.any();
+    let order = match query.get("order") {
+        Some(_) => crate::pagination::Order::parse(string(&query, "order")?)?,
+        None if query.get("cursor").is_some() => {
+            crate::pagination::Cursor::decode(string(&query, "cursor")?)?
+                .order()
+                .ok_or_else(|| invalid("Invalid cursor. Restart pagination without a cursor."))?
+        }
+        None if filtered => crate::pagination::Order::Recent,
+        None => crate::pagination::Order::Balanced,
+    };
+    if order == crate::pagination::Order::Balanced && query.get("cursor").is_some() {
+        return Err(invalid(
+            "The balanced overview is a single page. Use order \"recent\" or \"created\" to paginate.",
+        ));
+    }
     let all: Vec<_> = tx
         .values(RECORDS)?
         .into_iter()
@@ -1522,6 +1548,7 @@ fn context(
         .iter()
         .filter(|r| {
             recallable(r)
+                && filters.matches(r)
                 && kind.is_none_or(|k| r["kind"] == k)
                 && q.is_none_or(|q| {
                     format!(
@@ -1546,7 +1573,8 @@ fn context(
     for r in &matching {
         increment(&mut matching_kind, string(r, "kind")?, 1);
     }
-    let balanced = q.is_none() && kind.is_none() && since.is_none() && before.is_none();
+    let balanced = order == crate::pagination::Order::Balanced;
+    let mut pagination: Value;
     matching.sort_by(recent);
     if balanced {
         let seats = [
@@ -1587,10 +1615,30 @@ fn context(
         }
         matching = selected;
         matching.sort_by(recent);
+        pagination = json!({"order":"balanced","returnedRecords":matching.len(),
+            "remainingAfterPage":total-matching.len(),"hasMore":total>matching.len(),"nextCursor":null,
+            "changed":[],"note":"The balanced overview is one page. Use order \"recent\" or \"created\" with cursor to enumerate every matching record."});
     } else {
-        matching.truncate(limit);
+        let binding = crate::pagination::binding(&json!([
+            workspace["generation"],
+            client,
+            q,
+            kind,
+            filters.describe(),
+            since,
+            before,
+            order.name(),
+            profile
+        ]));
+        let page = crate::pagination::keyset(matching, order, limit, &query, &binding)?;
+        matching = page.records;
+        pagination = page.pagination;
     }
-    let records = matching.iter().map(preview).collect::<Vec<_>>();
+    pagination["matchingRecords"] = json!(total);
+    let records = matching
+        .iter()
+        .map(|r| preview(r, view.preview_chars))
+        .collect::<Vec<_>>();
     let mut work = all
         .iter()
         .filter(|r| unsettled(r))
@@ -1604,13 +1652,13 @@ fn context(
         .map(|r| json!({"id":r["id"],"kind":r["kind"],"status":r["status"]}))
         .collect::<Vec<_>>();
     let c = &inventory["recallableByKind"];
-    let order = if balanced {
+    let order_note = if balanced {
         " Previews take turns across categories, newest first within each, so recent checkpoints do not displace older memories and decisions; selection.omittedByKind lists what was left out."
     } else {
         ""
     };
     let summary = format!(
-        "Shared context has {} recallable records: {} memories, {} decisions, {} tasks, {} checkpoints, {} artifacts and {} actions. {} retained historical records are excluded from recall. This request matches {total} records and returns {} previews.{order}",
+        "Shared context has {} recallable records: {} memories, {} decisions, {} tasks, {} checkpoints, {} artifacts and {} actions. {} retained historical records are excluded from recall. This request matches {total} records and returns {} previews.{order_note}",
         inventory["recallableRecords"],
         c["memory"],
         c["decision"],
@@ -1628,9 +1676,9 @@ fn context(
         increment(&mut returned, k, 1);
         increment(&mut omitted, k, -1);
     }
-    let selection = json!({"query":q,"kind":kind,"updatedSince":since,"updatedBefore":before,"order":if balanced {"balanced"} else {"recent"},"matchingRecords":total,"returnedRecords":records.len(),"omittedRecords":total-records.len(),"returnedByKind":returned,"omittedByKind":omitted});
+    let selection = json!({"query":q,"kind":kind,"actor":filters.actor,"status":filters.status,"basis":filters.basis,"updatedSince":since,"updatedBefore":before,"order":order.name(),"previewMaxChars":view.preview_chars,"matchingRecords":total,"returnedRecords":records.len(),"omittedRecords":total-records.len(),"returnedByKind":returned,"omittedByKind":omitted});
     let work_summary = json!({"total":work_total,"returned":work.len(),"omitted":work_total-work.len(),"scope":"Workspace-wide tasks in doing/blocked and actions in pending/unknown. Checkpoint next steps and open questions are not counted as unsettled task/action records."});
-    let mut result = json!({"workspace":workspace,"access":access.metadata(),"capturedAt":clock.now().to_rfc3339_opts(SecondsFormat::Millis,true),"inventory":inventory,"selection":selection,"summary":summary,"omitted":total-records.len(),"records":records,"unsettledWork":work,"unsettledWorkSummary":work_summary,"unsettledWorkTruncated":work_total>20,"note":"Inventory counts cover all canonical record categories, independently of this request's query/kind filters and preview limit. Zero memory-category records is not an empty workspace when other categories contain records. Unreviewed inbox proposals are excluded. Excerpts are navigation, not complete records; retrieve IDs before relying on details or editing. Unsettled work counts only the task/action states described in unsettledWorkSummary. A handoff does not pause running jobs."});
+    let mut result = json!({"workspace":workspace,"access":access.metadata(),"capturedAt":clock.now().to_rfc3339_opts(SecondsFormat::Millis,true),"inventory":inventory,"selection":selection,"summary":summary,"omitted":total-records.len(),"records":records,"unsettledWork":work,"unsettledWorkSummary":work_summary,"unsettledWorkTruncated":work_total>20,"pagination":pagination,"note":"Inventory counts cover all canonical record categories, independently of this request's query/kind filters and preview limit. Zero memory-category records is not an empty workspace when other categories contain records. Unreviewed inbox proposals are excluded. Excerpts are navigation, not complete records; retrieve IDs before relying on details or editing. Unsettled work counts only the task/action states described in unsettledWorkSummary. A handoff does not pause running jobs."});
     pins.sort_by(|a, b| {
         a["pinnedAt"]
             .as_str()
@@ -1650,6 +1698,13 @@ fn context(
     }
     result["pinnedSummary"] = json!({"total":pins_total,"shown":pinned.len(),"inactive":pins_total-pinned.len(),"limit":crate::pins::MAX_PINS});
     result["pinned"] = json!(pinned);
+    let mut sections = json!({"persona":"not_available","pinned":"included"});
+    if !view.include_pinned {
+        result["pinned"] = json!([]);
+        result["pinnedSummary"]["shown"] = json!(0);
+        result["pinnedSummary"]["excluded"] = json!(true);
+        sections["pinned"] = json!("excluded");
+    }
     let mut assignments = tx
         .values(ASSIGNMENTS)?
         .into_iter()
@@ -1681,7 +1736,12 @@ fn context(
     result["assignedToYouSummary"] = json!({"total":total_assigned,"shown":assigned.len()});
     result["assignedToYou"] = json!(assigned);
     if access.mode != AccessMode::Shared {
-        result["persona"] = metadata(tx, "persona")?;
+        if view.include_persona {
+            result["persona"] = metadata(tx, "persona")?;
+            sections["persona"] = json!("included");
+        } else {
+            sections["persona"] = json!("excluded");
+        }
         result["harnesses"] = json!(client_names(tx)?);
     } else {
         result["selection"]["scope"] = json!("granted_records");
@@ -1692,6 +1752,7 @@ fn context(
             "Inventory, selection and unsettled-work counts cover only this client's granted canonical records. Unreviewed inbox proposals are excluded. Excerpts are navigation; retrieve full records before relying on them. A handoff does not pause running jobs."
         );
     }
+    result["contextSections"] = sections;
     if let Some(profile) = profile {
         result["selection"]["profile"] = json!(profile);
         result["selection"]["scope"] = json!("profiled_granted_records");

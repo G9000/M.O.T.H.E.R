@@ -208,6 +208,10 @@ pub(crate) enum GardenCommand {
         #[arg(long)]
         db: PathBuf,
     },
+    /// Report semantic index coverage; optionally rebuild or reset the derived vectors.
+    /// The running owner service already indexes in the background; stop it before using
+    /// this command, which opens the database directly.
+    SemanticIndex(SemanticIndexArgs),
     /// Open the read-only memory garden from the running owner or an offline snapshot.
     Explore {
         /// Read an offline snapshot directly from a database.
@@ -356,6 +360,7 @@ pub(crate) fn execute_garden(command: GardenCommand) -> Result<()> {
         | GardenCommand::ExportV1 { db, .. }
         | GardenCommand::ImportV1 { db, .. }
         | GardenCommand::Inbox { db, .. }
+        | GardenCommand::SemanticIndex(SemanticIndexArgs { db, .. })
         | GardenCommand::V1Inbox { db, .. }
         | GardenCommand::Explore { db: Some(db), .. }
         | GardenCommand::Service { db, .. } => Some(db),
@@ -370,6 +375,7 @@ pub(crate) fn execute_garden(command: GardenCommand) -> Result<()> {
         GardenCommand::SuggestLink(args) => crate::relationships::suggest(args),
         GardenCommand::Media(args) => crate::media_cli::run(args),
         GardenCommand::Tend(args) => crate::tending::run(args),
+        GardenCommand::SemanticIndex(args) => semantic_index(&args.db, args.build, args.repair),
         GardenCommand::Review { db, request, graph } => {
             let store = GardenStore::open_active(absolute(&db)?)?;
             let request = read_json(&absolute(&request)?, 2_097_152)?;
@@ -588,4 +594,47 @@ pub(crate) fn execute_garden(command: GardenCommand) -> Result<()> {
         }
         GardenCommand::Mcp { .. } => unreachable!("Graph MCP is dispatched asynchronously"),
     }
+}
+
+/// Owner semantic-index status, rebuild or reset (kept out of the dispatcher's frame).
+#[inline(never)]
+fn semantic_index(db: &std::path::Path, build: bool, repair: bool) -> Result<()> {
+    let store = mother::garden::store::GardenStore::open_active(absolute(db)?)?;
+    let search = mother::garden::v1_search::NativeSearch::from_environment();
+    let mut report = json!({});
+    if repair {
+        report["repair"] = mother::garden::v1_search::reset_index(&store)?;
+    }
+    if build {
+        let mut totals = json!({"indexed":0,"failed":0,"skippedChanged":0});
+        loop {
+            let Some(step) = search.index_next(&store)? else {
+                continue;
+            };
+            for key in ["indexed", "failed", "skippedChanged"] {
+                let add = serde_json::to_value(&step)?[key].as_u64().unwrap_or(0);
+                totals[key] = json!(totals[key].as_u64().unwrap_or(0) + add);
+            }
+            if step.indexed + step.failed + step.skipped_changed == 0 {
+                break;
+            }
+        }
+        report["build"] = totals;
+    }
+    report["status"] = search.index_status(&store, None)?;
+    print_json(report)
+}
+
+/// Arguments for `garden semantic-index`; a separate struct keeps clap's generated
+/// command builder small enough for the debug main-thread stack.
+#[derive(Debug, clap::Args)]
+pub struct SemanticIndexArgs {
+    #[arg(long)]
+    db: PathBuf,
+    /// Index every pending record now with the installed local model (never downloads).
+    #[arg(long, conflicts_with = "repair")]
+    build: bool,
+    /// Discard all derived vectors and indexing state; canonical records are untouched.
+    #[arg(long)]
+    repair: bool,
 }

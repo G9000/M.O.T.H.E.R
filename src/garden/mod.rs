@@ -10,7 +10,8 @@ pub mod store;
 /// Optional learned v1 search over native canonical records and disposable native vectors.
 pub mod v1_search {
     pub use super::store::compat::learned::{
-        EncodedPassage, EncodedPassages, Encoder, NativeSearch,
+        EncodedPassage, EncodedPassages, Encoder, IndexReport, NativeSearch, index_status,
+        index_with, reset_index,
     };
 }
 
