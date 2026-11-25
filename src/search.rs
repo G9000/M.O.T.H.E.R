@@ -197,7 +197,8 @@ impl Snapshot {
             metadata["effectiveMode"],
             metadata["indexedRecords"],
             metadata["partialRecords"]
-        ));
+        ))[..32]
+            .to_owned();
         let start = crate::pagination::search_offset(&query.args, &binding, &stamp)?;
         let total = hits.len();
         let preview = query.view.preview_chars;
@@ -217,7 +218,7 @@ impl Snapshot {
         self.base["pagination"] = json!({"order":"ranked","matchingRecords":total,"offset":start,
             "returnedRecords":records.len(),"remainingAfterPage":total-end,"hasMore":has_more,
             "nextCursor":crate::pagination::search_cursor(&binding,&stamp,end),
-            "consistency":"Search pages share one ranking. Any change to matching records, the grant or semantic index coverage invalidates the cursor with CURSOR_STALE; use mother_get_context with order \"created\" for a stable enumeration."});
+            "consistency":"ranking_snapshot"});
         self.base["records"] = json!(records);
         self.base["omitted"] = json!(omitted);
         self.base["search"] = metadata;
