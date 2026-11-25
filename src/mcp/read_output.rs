@@ -102,9 +102,11 @@ fn note_removed(value: &mut Value, collection: &str, item: &Value) -> Option<()>
         increment(&mut selection["omittedByKind"], kind)?;
         let matching = selection["matchingRecords"].as_u64()?;
         let total = value["inventory"]["recallableRecords"].as_u64()?;
-        value["summary"] = json!(format!(
-            "Shared context has {total} recallable records. This request matches {matching} records and returns {shown} previews within the response byte budget."
-        ));
+        if value.get("summary").is_some() {
+            value["summary"] = json!(format!(
+                "Shared context has {total} recallable records. This request matches {matching} records and returns {shown} previews within the response byte budget."
+            ));
+        }
     }
     Some(())
 }
@@ -161,6 +163,28 @@ fn pack(value: &mut Value) -> Option<(usize, usize, usize)> {
     Some((total - dropped, compacted, dropped))
 }
 
+/// Drop fixed explanatory prose (documented in the tool description and docs) so data,
+/// the persona and pinned context keep the space. Reported in `responseBudget`.
+fn compact_notes(value: &mut Value) {
+    let mut removed = Vec::new();
+    if let Some(object) = value.as_object_mut() {
+        for key in ["note", "summary"] {
+            if object.remove(key).is_some() {
+                removed.push(key);
+            }
+        }
+    }
+    // Scope fields describe authorization boundaries and always stay.
+    if let Some(object) = value.get_mut("pagination").and_then(Value::as_object_mut)
+        && object.remove("note").is_some()
+    {
+        removed.push("pagination.note");
+    }
+    if !removed.is_empty() {
+        value["responseBudget"]["notesOmitted"] = json!(true);
+    }
+}
+
 fn omit_persona(value: &mut Value) -> bool {
     let Some(persona) = value
         .get("persona")
@@ -206,6 +230,10 @@ fn bound_records(value: Value, context: bool) -> Option<Value> {
             continue;
         }
         let mut candidate = value.clone();
+        // Past the first level, fixed explanatory notes give way before pins or persona.
+        if pins || persona || need < floor {
+            compact_notes(&mut candidate);
+        }
         if persona && !omit_persona(&mut candidate) {
             continue;
         }
@@ -731,6 +759,7 @@ mod tests {
         assert!(overview["persona"]["omitted"].is_null());
         // An 8 KiB persona leaves room for at least one compact record beside it.
         assert!(!overview["records"].as_array().unwrap().is_empty());
+        assert_eq!(overview["responseBudget"]["personaOmitted"], false);
         assert_eq!(overview["pagination"]["order"], "balanced");
         // Full enumeration through budget-trimmed pages: re-minted cursors lose nothing.
         for args in [
