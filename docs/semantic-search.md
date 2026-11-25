@@ -6,7 +6,7 @@ M.O.T.H.E.R retrieves selected context; harnesses choose what to remember, inter
 
 V1 MCP `mother_search_context` accepts `hybrid` (default), `semantic` and `literal` modes. `mother_get_context` remains the context/navigation operation. Graph queries expose separate lexical/vector component scores and coverage for the consuming harness to combine; they do not use v1 hybrid ranking.
 
-The current executable has no `model install/status`, general owner `search` or v1 `index` commands. It can load already installed, verified pinned local Candle assets. Startup, search and graph preparation never download a model. There is no built-in installation workflow in this release; absent or invalid assets produce an explicit literal fallback instead of a hidden download or provider call.
+The current executable has no `model install` or general owner `search` command. It can load already installed, verified pinned local Candle assets. Startup, search and graph preparation never download a model. There is no built-in installation workflow in this release; absent or invalid assets produce an explicit literal fallback instead of a hidden download or provider call.
 
 `MOTHER_MODEL_DIR` selects an absolute model directory. Existing verified all-MiniLM-L6-v2 assets can remain usable; the loader checks the pinned files/profile rather than trusting arbitrary model content. Model absence, corruption or an invalid path setting leaves ordinary context reads/writes and literal search available. The English model's relevance and multilingual quality require their own evaluation.
 
@@ -26,7 +26,29 @@ Responses report requested/effective mode, whether semantics participated, fallb
 
 Semantic passage previews include byte offsets into the exact `title + "\n" + content` string and explicit truncation. Contextual preview offsets and exact scored embedding offsets remain separate. Fetch the current full record before editing or acting; a vector score or excerpt is navigation, not proof of the claim.
 
-Native v1 search prepares at most eight missing records and 32 new passages per request. Its derived cache is bounded to 32,000 passages and 128 MiB. Canonical native storage has no legacy 10,000-record lifetime cap; that does not promise bounded v1 snapshot-search latency at every scale. Cache keys bind workspace/generation, client visibility, pinned model/profile, record revision and content digest.
+## Background indexing
+
+The running owner service keeps the v1 semantic index current on its own, so coverage no longer depends on clients repeating searches. Earlier, each search embedded at most eight records or 32 passages. One long record could use the whole allowance, and each client kept a separate cache, so coverage crept up by one or two records per search.
+
+- The indexer runs as one low-priority thread in `mother garden service`. It embeds one record at a time, newest first, and releases the model between records so searches can use it. When work is pending it pauses 100 ms between records. When idle it checks every 10 seconds.
+- Vectors live in one derived table shared by all clients, keyed by embedding profile and record ID. Each vector is valid only for the exact revision and text digest it was computed from. A vector is published only if the record is unchanged when the write commits. Visibility is still decided per caller by the authorized snapshot; the cache never selects records.
+- Revised records are re-embedded. Vectors for retracted, superseded or deleted records, and for other embedding profiles, are pruned.
+- Progress and per-record failures are stored in the database, so a restart resumes where indexing stopped. A failed record is retried when it changes, or after six hours.
+- With no verified local model installed, the indexer stays idle and literal search covers every authorized record. Mother never downloads a model or sends memory text anywhere. Set `MOTHER_SEMANTIC_INDEX=off` for the service to disable background indexing.
+
+`mother_get_capabilities` reports `semanticIndex` for the caller's authorized records: eligible, indexed, partially indexed, unembeddable, pending and failed counts, progress, model and profile, model state, whether background indexing is running, and the last run, success and error. Searches still embed up to eight missing records inline when the background indexer hasn't reached them yet.
+
+With the service stopped, the owner can inspect or repair the derived index directly:
+
+```powershell
+mother garden semantic-index --db "$env:LOCALAPPDATA\MOTHER\garden.redb"
+mother garden semantic-index --db "$env:LOCALAPPDATA\MOTHER\garden.redb" --build
+mother garden semantic-index --db "$env:LOCALAPPDATA\MOTHER\garden.redb" --repair
+```
+
+`--build` indexes every pending record now with the installed model. `--repair` discards all derived vectors and indexing state, including the older per-client cache, so the service rebuilds them. Canonical records are never modified.
+
+The shared index is bounded by the number of recallable records, at most 32 passages each. Canonical native storage has no legacy 10,000-record lifetime cap; that does not promise bounded v1 snapshot-search latency at every scale.
 
 Before publishing derived data or returning candidates, search rechecks the current canonical snapshot and grant. A changed workspace yields fresh literal fallback; revocation fails closed. Missing/busy models, corrupt caches and unavailable infrastructure report their fallback honestly. Cache capacity does not evict/re-index indefinitely. Writes and full restore do not depend on embeddings; backups exclude rebuildable vectors.
 

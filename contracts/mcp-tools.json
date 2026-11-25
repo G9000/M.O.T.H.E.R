@@ -1,7 +1,7 @@
 [
   {
     "name": "mother_get_context",
-    "description": "Read M.O.T.H.E.R shared context across all record categories, including memories, decisions, tasks and checkpoints. Returns workspace-wide category counts, explicit query/kind selection counts, bounded previews and task/action unsettled-work totals. Zero memory-category records does not mean the workspace is empty. Without a query or kind filter, previews are balanced: categories take turns for the limit, newest first within each, so recent checkpoints do not displace older memories and decisions, and selection.omittedByKind reports what was left out. updatedSince and updatedBefore limit previews to records last updated in that window. With any filter, previews are the newest matches. Retrieve full records by ID before relying on details. pinned always lists the owner's pinned core memories and decisions, independent of filters and limit. Content excerpts may be shortened to fit the response budget, with truncated flags and responseBudget details; use mother_get_record for complete records. assignedToYou lists open tasks another harness handed to this one; harnesses names the harnesses a task can be handed to with mother_assign_task.",
+    "description": "Read M.O.T.H.E.R shared context across all record categories, including memories, decisions, tasks and checkpoints. Returns workspace-wide category counts, explicit query/kind selection counts, bounded previews and task/action unsettled-work totals. Zero memory-category records does not mean the workspace is empty. Without a query or kind filter, previews are balanced: categories take turns for the limit, newest first within each, so recent checkpoints do not displace older memories and decisions, and selection.omittedByKind reports what was left out. updatedSince and updatedBefore limit previews to records last updated in that window. With any filter, previews are the newest matches. Retrieve full records by ID before relying on details. pinned always lists the owner's pinned core memories and decisions, independent of filters and limit. Content excerpts may be shortened to fit the response budget, with truncated flags and responseBudget details; use mother_get_record for complete records. assignedToYou lists open tasks another harness handed to this one; harnesses names the harnesses a task can be handed to with mother_assign_task. Pagination: with filters or an explicit order of recent or created, pagination reports matchingRecords, returnedRecords, remainingAfterPage, hasMore and nextCursor; follow nextCursor until hasMore is false to enumerate every authorized match, and filter server-side by actor, status and basis. pagination.changed lists records revised or added behind the cursor since the previous page, so concurrent changes are reported rather than skipped. Response budget: the persona, pinned excerpts and previews share one budget; previews degrade to compact metadata (compact: true) before the page shrinks, at least three matching records are kept when they exist, and the persona text is replaced by an explicit omitted marker only when nothing else fits. responseBudget reports every omission; use includePersona and includePinned false on repeated calls.",
     "inputSchema": {
       "type": "object",
       "properties": {
@@ -42,6 +42,70 @@
           "type": "string",
           "maxLength": 40,
           "description": "Only records last updated before this time. Same formats as updatedSince; must be later than it."
+        },
+        "actor": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 200,
+          "description": "Only records whose attributed actor (the client ID that wrote them) is exactly this value."
+        },
+        "status": {
+          "type": "string",
+          "enum": [
+            "active",
+            "proposed",
+            "confirmed",
+            "todo",
+            "doing",
+            "blocked",
+            "done",
+            "pending",
+            "succeeded",
+            "failed",
+            "unknown"
+          ],
+          "description": "Only recallable records with this status. Retracted, superseded and cancelled versions are read with mother_get_record_history."
+        },
+        "basis": {
+          "type": "string",
+          "enum": [
+            "owner_statement",
+            "source",
+            "model_inference"
+          ],
+          "description": "Only memories with this basis: the owner's own statement, a verified source, or an assistant interpretation."
+        },
+        "cursor": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 2048,
+          "description": "Opaque pagination.nextCursor from a previous page of the same query. Repeat the original filters; a cursor for other filters, another client or a restored workspace is refused."
+        },
+        "includePersona": {
+          "type": "boolean",
+          "default": true,
+          "description": "Set false on repeated calls to leave the persona out and give its space to records. contextSections reports what was included."
+        },
+        "includePinned": {
+          "type": "boolean",
+          "default": true,
+          "description": "Set false on repeated calls to leave pinned core context out. pinnedSummary still reports the total."
+        },
+        "previewMaxChars": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 2000,
+          "default": 400,
+          "description": "Excerpt length per record in UTF-16 units; 0 returns compact metadata only. Use mother_get_record for complete records."
+        },
+        "order": {
+          "type": "string",
+          "enum": [
+            "balanced",
+            "recent",
+            "created"
+          ],
+          "description": "balanced (the default without filters) is a single overview page. recent (the default with filters) is newest updatedAt first; created is oldest createdAt first and never moves a record when it is revised. Both return pagination.nextCursor."
         }
       },
       "$schema": "http://json-schema.org/draft-07/schema#",
@@ -59,7 +123,7 @@
   },
   {
     "name": "mother_search_context",
-    "description": "Search title/content locally with hybrid (default), semantic, or literal retrieval. Hybrid puts exact substring matches first. Missing or unavailable local models produce explicit literal fallback. Results are bounded previews with coverage metadata; resolve full records before relying on details. Retracted, superseded and cancelled records are excluded. Search never downloads a model or sends text remotely. updatedSince and updatedBefore limit candidates to records last updated in that window.",
+    "description": "Search title/content locally with hybrid (default), semantic, or literal retrieval. Hybrid puts exact substring matches first. Missing or unavailable local models produce explicit literal fallback. Results are bounded previews with coverage metadata; resolve full records before relying on details. Retracted, superseded and cancelled records are excluded. Search never downloads a model or sends text remotely. updatedSince and updatedBefore limit candidates to records last updated in that window. Filter server-side by actor, status and basis. pagination reports matchingRecords, hasMore and nextCursor over one ranking; a cursor becomes CURSOR_STALE when records, the grant or semantic index coverage change, so use mother_get_context with order created for stable enumeration. The owner service indexes records in the background; mother_get_capabilities reports semanticIndex coverage.",
     "inputSchema": {
       "type": "object",
       "properties": {
@@ -103,6 +167,61 @@
           "type": "string",
           "maxLength": 40,
           "description": "Only records last updated before this time. Same formats as updatedSince; must be later than it."
+        },
+        "actor": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 200,
+          "description": "Only records whose attributed actor (the client ID that wrote them) is exactly this value."
+        },
+        "status": {
+          "type": "string",
+          "enum": [
+            "active",
+            "proposed",
+            "confirmed",
+            "todo",
+            "doing",
+            "blocked",
+            "done",
+            "pending",
+            "succeeded",
+            "failed",
+            "unknown"
+          ],
+          "description": "Only recallable records with this status. Retracted, superseded and cancelled versions are read with mother_get_record_history."
+        },
+        "basis": {
+          "type": "string",
+          "enum": [
+            "owner_statement",
+            "source",
+            "model_inference"
+          ],
+          "description": "Only memories with this basis: the owner's own statement, a verified source, or an assistant interpretation."
+        },
+        "cursor": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 2048,
+          "description": "Opaque pagination.nextCursor from a previous page of the same query. Repeat the original filters; a cursor for other filters, another client or a restored workspace is refused."
+        },
+        "includePersona": {
+          "type": "boolean",
+          "default": true,
+          "description": "Set false on repeated calls to leave the persona out and give its space to records. contextSections reports what was included."
+        },
+        "includePinned": {
+          "type": "boolean",
+          "default": true,
+          "description": "Accepted for symmetry with mother_get_context; search results never include pinned context."
+        },
+        "previewMaxChars": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 2000,
+          "default": 400,
+          "description": "Excerpt length per record in UTF-16 units; 0 returns compact metadata only. Use mother_get_record for complete records."
         }
       },
       "required": [

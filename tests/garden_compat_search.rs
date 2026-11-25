@@ -33,7 +33,7 @@ fn corrupt_unselected_derived_cache_row_falls_back_without_affecting_canonical_r
     {
         let mut table = tx
             .open_table(redb::TableDefinition::<(&str, &str), &[u8]>::new(
-                "garden_v1_vectors_v1",
+                "garden_v1_vectors_v2",
             ))
             .unwrap();
         table

@@ -181,6 +181,8 @@ fn known_tables() -> BTreeSet<String> {
                 "garden_v1_admissions",
                 "garden_v1_pending_dedup",
                 "garden_v1_vectors_v1",
+                "garden_v1_vectors_v2",
+                "garden_v1_index_state",
                 "garden_media_stages",
             ]
             .into_iter()

@@ -11,6 +11,7 @@ mod handoffs;
 mod inbox;
 pub mod limits;
 pub mod media;
+pub mod pagination;
 mod pins;
 mod portability;
 mod private_paths;

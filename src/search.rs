@@ -43,6 +43,10 @@ pub(crate) struct Query {
     pub(crate) mode: Mode,
     pub(crate) updated_since: Option<String>,
     pub(crate) updated_before: Option<String>,
+    pub(crate) filters: crate::pagination::Filters,
+    pub(crate) view: crate::pagination::View,
+    /// The request, kept to validate its optional cursor against the final ranking.
+    pub(crate) args: Value,
 }
 impl Query {
     pub(crate) fn parse(v: Value) -> Result<Self> {
@@ -55,8 +59,17 @@ impl Query {
                 "mode",
                 "updatedSince",
                 "updatedBefore",
+                "actor",
+                "status",
+                "basis",
+                "cursor",
+                "includePersona",
+                "includePinned",
+                "previewMaxChars",
             ],
         )?;
+        let filters = crate::pagination::Filters::parse(&v)?;
+        let view = crate::pagination::View::parse(&v)?;
         let (updated_since, updated_before) = contracts::time_window(&v)?;
         let text = contracts::normalize_search_query(contracts::string(&v, "query")?)?;
         let kind = v
@@ -89,6 +102,9 @@ impl Query {
             mode,
             updated_since,
             updated_before,
+            filters,
+            view,
+            args: v,
         })
     }
     pub(crate) fn includes(&self, r: &Record) -> bool {
@@ -97,6 +113,7 @@ impl Query {
         self.kind
             .as_ref()
             .is_none_or(|k| r.value["kind"].as_str() == Some(k))
+            && self.filters.matches(&r.value)
             && self
                 .updated_since
                 .as_deref()
@@ -124,7 +141,7 @@ pub(crate) struct Snapshot {
     pub(crate) fingerprint: String,
 }
 impl Snapshot {
-    pub(crate) fn literal_response(self, query: &Query, reason: Option<&str>) -> Value {
+    pub(crate) fn literal_response(self, query: &Query, reason: Option<&str>) -> Result<Value> {
         let eligible = self.records.iter().filter(|r| query.includes(r)).count();
         let hits = self
             .records
@@ -140,7 +157,7 @@ impl Snapshot {
         let metadata = json!({"requestedMode":query.mode.name(),"effectiveMode":"literal","semanticUsed":false,"reason":reason,"model":null,"eligibleRecords":eligible,"indexedRecords":0,"unindexedRecords":eligible,"partialRecords":0,"newlyIndexedRecords":0});
         self.response(query, hits, metadata)
     }
-    fn response(mut self, query: &Query, mut hits: Vec<Hit>, metadata: Value) -> Value {
+    fn response(mut self, query: &Query, mut hits: Vec<Hit>, metadata: Value) -> Result<Value> {
         hits.sort_by(|a, b| {
             let ra = &self.records[a.ordinal];
             let rb = &self.records[b.ordinal];
@@ -162,16 +179,45 @@ impl Snapshot {
                 })
                 .then_with(|| ra.id.cmp(&rb.id))
         });
-        let omitted = hits.len().saturating_sub(query.limit);
-        let records=hits.into_iter().take(query.limit).map(|h|{
+        // Pages are offsets into one ranking; the stamp changes with records, grant,
+        // index coverage and effective mode, and an outdated cursor is refused.
+        let binding = crate::pagination::binding(&json!([
+            self.base["workspace"]["generation"],
+            serde_json::to_value(&self.access)?,
+            query.text,
+            query.kind,
+            query.filters.describe(),
+            query.updated_since,
+            query.updated_before,
+            query.mode.name()
+        ]));
+        let stamp = crate::contracts::hash(&format!(
+            "{}|{}|{}|{}",
+            self.fingerprint,
+            metadata["effectiveMode"],
+            metadata["indexedRecords"],
+            metadata["partialRecords"]
+        ));
+        let start = crate::pagination::search_offset(&query.args, &binding, &stamp)?;
+        let total = hits.len();
+        let preview = query.view.preview_chars;
+        let records=hits.into_iter().skip(start).take(query.limit).map(|h|{
             let r=&self.records[h.ordinal];let v=&r.value;let content=v["content"].as_str().unwrap_or_default();
-            let mut p=json!({"id":r.id,"kind":v["kind"],"title":v["title"],"status":v["status"],"revision":r.revision,"actor":v["actor"],"updatedAt":v["updatedAt"],"excerpt":excerpt(content),"truncated":content.encode_utf16().count()>400});
+            let mut p=json!({"id":r.id,"kind":v["kind"],"title":v["title"],"status":v["status"],"revision":r.revision,"actor":v["actor"],"createdAt":v["createdAt"],"updatedAt":v["updatedAt"],"excerpt":crate::pagination::excerpt(content,preview),"truncated":content.encode_utf16().count()>preview});
+            if let Some(basis)=v.get("basis") {p["basis"]=basis.clone();}
             if let Some((embedding_start,embedding_end))=h.span {
                 let (start,end)=context_span(&r.text,embedding_start,embedding_end);
                 p["match"]=json!({"text":excerpt(&r.text[start..end]),"startByte":start,"endByte":end,"embeddingStartByte":embedding_start,"embeddingEndByte":embedding_end,"source":"title+newline+content","similarity":h.similarity,"truncated":r.text[start..end].encode_utf16().count()>400});
             }
             p
         }).collect::<Vec<_>>();
+        let end = (start + records.len()).min(total);
+        let omitted = total - records.len();
+        let has_more = end < total;
+        self.base["pagination"] = json!({"order":"ranked","matchingRecords":total,"offset":start,
+            "returnedRecords":records.len(),"remainingAfterPage":total-end,"hasMore":has_more,
+            "nextCursor":crate::pagination::search_cursor(&binding,&stamp,end),
+            "consistency":"Search pages share one ranking. Any change to matching records, the grant or semantic index coverage invalidates the cursor with CURSOR_STALE; use mother_get_context with order \"created\" for a stable enumeration."});
         self.base["records"] = json!(records);
         self.base["omitted"] = json!(omitted);
         self.base["search"] = metadata;
@@ -180,7 +226,7 @@ impl Snapshot {
         if self.base["access"]["mode"] == "shared" {
             self.base["search"]["scope"] = json!("granted_records");
         }
-        self.base
+        Ok(self.base)
     }
 }
 // A short matched sentence may depend on its neighbour. Include whole adjacent
@@ -236,14 +282,7 @@ fn context_span(text: &str, start: usize, end: usize) -> (usize, usize) {
     )
 }
 fn excerpt(content: &str) -> String {
-    let mut used = 0;
-    content
-        .chars()
-        .take_while(|c| {
-            used += c.len_utf16();
-            used <= 400
-        })
-        .collect()
+    crate::pagination::excerpt(content, 400)
 }
 #[derive(Debug)]
 struct Hit {
@@ -312,7 +351,7 @@ pub(crate) fn semantic_response_validated(
         } else {
             "index_incomplete"
         };
-        let mut result = snapshot.literal_response(query, Some(reason));
+        let mut result = snapshot.literal_response(query, Some(reason))?;
         result["search"]["unembeddableRecords"] = json!(unembeddable);
         result["search"]["newlyIndexedRecords"] = json!(progress.new_records);
         return Ok(result);
@@ -325,7 +364,7 @@ pub(crate) fn semantic_response_validated(
         None
     };
     let metadata = json!({"requestedMode":query.mode.name(),"effectiveMode":query.mode.name(),"semanticUsed":true,"reason":reason,"model":MODEL_ID,"profile":PROFILE,"similarityFloor":0.35,"eligibleRecords":eligible,"indexedRecords":indexed,"unindexedRecords":eligible-indexed,"partialRecords":partial,"unembeddableRecords":unembeddable,"newlyIndexedRecords":progress.new_records,"newlyIndexedPassages":progress.new_passages});
-    Ok(snapshot.response(query, hits, metadata))
+    snapshot.response(query, hits, metadata)
 }
 #[cfg(test)]
 mod tests;

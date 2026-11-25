@@ -2,6 +2,8 @@
 
 `mother_get_context` covers all canonical record categories by default: memory, decision, task, checkpoint, artifact and action. A memory is one category of shared context. A workspace can have no recallable memory-category records and still contain useful checkpoints or decisions.
 
+To filter by actor, status or basis, page through every match, or leave the persona out of repeated calls, see [context retrieval](context-retrieval.md).
+
 ## Collector and keeper
 
 Each harness selects useful knowledge, interprets it and decides what to put in its own working context. M.O.T.H.E.R preserves attributed records, evidence, relationships, revisions and review outcomes. It runs no extraction model and does not ingest whole conversations automatically. Sharing memory is additive; adopting the workspace persona is a separate harness choice.

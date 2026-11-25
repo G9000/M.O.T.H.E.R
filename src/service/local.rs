@@ -493,10 +493,56 @@ impl LocalService {
     /// Returns listener failures; the owner must keep this service alive until serving ends.
     pub fn serve(&self, stopped: &AtomicBool) -> Result<()> {
         let root = self.attachment_root()?;
+        let finished = AtomicBool::new(false);
+        thread::scope(|scope| {
+            if background_indexing_enabled() {
+                scope.spawn(|| self.index_in_background(stopped, &finished));
+            }
+            let served = self.accept_until(stopped, &root);
+            finished.store(true, Ordering::Release);
+            served
+        })
+    }
+    /// Keep the shared semantic index current from canonical records, one record at a
+    /// time, so retrieval quality never depends on clients repeating searches. Uses only
+    /// the installed local model; with none, it stays idle and literal search is unchanged.
+    fn index_in_background(&self, stopped: &AtomicBool, finished: &AtomicBool) {
+        use std::time::{Duration, Instant};
+        let done = || stopped.load(Ordering::Acquire) || finished.load(Ordering::Acquire);
+        let pause = |wait: Duration| {
+            let until = Instant::now() + wait;
+            while !done() && Instant::now() < until {
+                thread::sleep(Duration::from_millis(50));
+            }
+        };
+        self.search.set_background(true);
+        // Let the service accept its first connections before loading the model.
+        pause(Duration::from_secs(2));
+        while !done() {
+            match self.search.index_next(&self.store) {
+                // Busy model: a search is running. Yield briefly.
+                Ok(None) => pause(Duration::from_millis(250)),
+                // Pace work so one CPU core is never saturated for long.
+                Ok(Some(report)) if report.indexed + report.failed > 0 => {
+                    pause(Duration::from_millis(100))
+                }
+                Ok(Some(_)) => pause(Duration::from_secs(10)),
+                Err(error) if error.code() == "MODEL_UNAVAILABLE" => {
+                    pause(Duration::from_secs(600))
+                }
+                Err(error) => {
+                    eprintln!("Semantic indexing paused ({})", error.code());
+                    pause(Duration::from_secs(60))
+                }
+            }
+        }
+        self.search.set_background(false);
+    }
+    fn accept_until(&self, stopped: &AtomicBool, root: &Path) -> Result<()> {
         let mut last_sweep = std::time::Instant::now();
         while !stopped.load(Ordering::Acquire) {
             if last_sweep.elapsed() >= std::time::Duration::from_secs(60) {
-                if let Err(error) = super::attachment::sweep(&self.store, &root) {
+                if let Err(error) = super::attachment::sweep(&self.store, root) {
                     eprintln!("Attachment staging cleanup failed ({})", error.code());
                 }
                 last_sweep = std::time::Instant::now();
@@ -626,6 +672,10 @@ impl LocalService {
                     "reason":if !graph_available {"native_context_only_current_grant"} else if self.info.v1_available {"native_v1_compatibility_with_independent_graph_authority"} else {"graph_only_prototype_without_v1_compatibility_or_migration"}}}))
             .map(|mut value| {
                 value["mediaAttachmentBridge"] = super::attachment::capabilities(&self.store, auth);
+                value["semanticIndex"] = self
+                    .search
+                    .index_status(&self.store, Some(auth))
+                    .unwrap_or_else(|e| json!({"error":e.code()}));
                 crate::garden::media_tools::add_capabilities(
                     &mut value,
                     &self.store.media_tools(auth).unwrap_or_default(),
@@ -697,4 +747,9 @@ impl Drop for LocalService {
             let _ = fs::remove_file(&self.endpoint_path);
         }
     }
+}
+
+/// Background indexing is on unless the owner sets `MOTHER_SEMANTIC_INDEX=off`.
+fn background_indexing_enabled() -> bool {
+    std::env::var("MOTHER_SEMANTIC_INDEX").map_or(true, |v| !v.eq_ignore_ascii_case("off"))
 }

@@ -322,19 +322,22 @@ fn profile_scope_and_budgets_match_on_direct_and_owner_bridge_even_after_grant_c
 }
 
 #[test]
-fn profile_keeps_the_bounded_error_when_required_metadata_cannot_fit() {
+fn profile_marks_an_oversized_persona_omitted_instead_of_emptying_records() {
     let fixture = RecallFixture::new(&"Escaped persona 記憶🪽 \\ \" \n ".repeat(570), 1);
     let store = GardenStore::open_active(&fixture.fixture.database).unwrap();
     let auth = rotate_grant(&store, &fixture.ids, false);
     drop(store);
-    let assert_error = |client: &mut Client| {
+    // A persona larger than the whole budget is replaced by an explicit marker that says
+    // how to read it alone; matching records still come back.
+    let assert_marked = |client: &mut Client| {
         let value = client.result("mother_get_context", json!({"profile":"all"}));
-        assert_eq!(value["isError"], true);
-        assert_eq!(
-            result_body(&value)["error"]["code"],
-            "READ_RESULT_TOO_LARGE"
-        );
+        assert_ne!(value["isError"], true);
+        let body = result_body(&value);
+        assert_eq!(body["persona"]["omitted"], true);
+        assert_eq!(body["responseBudget"]["personaOmitted"], true);
+        assert_eq!(body["contextSections"]["persona"], "omitted_budget");
+        assert!(!body["records"].as_array().unwrap().is_empty());
     };
-    assert_error(&mut fixture.direct(auth.clone()));
-    fixture.service(|service| assert_error(&mut fixture.bridge(service, auth)));
+    assert_marked(&mut fixture.direct(auth.clone()));
+    fixture.service(|service| assert_marked(&mut fixture.bridge(service, auth)));
 }

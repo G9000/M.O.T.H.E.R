@@ -2,6 +2,8 @@
 
 Memory Gardening gives you a short list of records worth revisiting. It works on an authorized slice of the native v1 context and proposes linked annotations through the Living Memory inbox.
 
+Any harness can also review every memory attributed to one actor, read-only, by paging `mother_get_context` with `actor` and `order: "created"`. See [reviewing a harness's memories](context-retrieval.md#reviewing-a-harnesss-memories).
+
 ## Run a pass
 
 Use a direct native or owner-service configuration that can read v1 context. Create an empty owner-private directory outside source control for the pass state. Use the same directory, reviewing connection and scope on later runs.

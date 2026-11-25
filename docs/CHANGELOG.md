@@ -1,5 +1,10 @@
 # Documentation changes
 
+## 26 November 2026
+
+- Added the [context retrieval guide](context-retrieval.md): server-side `actor`, `status` and `basis` filters, `order`, cursor pagination with explicit consistency rules, `includePersona`, `includePinned` and `previewMaxChars`, the new response-budget order, and a read-only workflow for reviewing a harness's memories. Updated [bounded MCP reads](bounded-mcp-reads.md) to match.
+- Documented background semantic indexing, shared derived vectors, `semanticIndex` status in capabilities and the owner `garden semantic-index` command in [semantic search](semantic-search.md). Checked with synthetic records and encoders only.
+
 ## 22 November 2026
 
 - Described the memory garden's synthesized ambience and its sound button in the [explorer guide](garden-explorer.md): wind, leaves, birds, water and crickets made in the page in place of the recordings that can't be shipped, a chime when a record or photo opens, and `M` to turn sound on and off (off by default).

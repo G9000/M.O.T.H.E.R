@@ -167,6 +167,9 @@ fn dispatch(
             "definedTools":["mother_garden_get","mother_garden_query","mother_garden_apply","mother_garden_propose","mother_garden_get_proposal","mother_garden_get_receipt","mother_garden_changes"],
             "reason":if !graph_available {"native_context_only_current_grant"} else if v1_enabled {"native_v1_compatibility_with_independent_graph_authority"} else {"graph_only_prototype_without_v1_compatibility_or_migration"}}});
         value["mediaAttachmentBridge"] = mother::service::attachment::capabilities(store, &auth);
+        value["semanticIndex"] = search
+            .index_status(store, Some(&auth))
+            .unwrap_or_else(|e| json!({"error":e.code()}));
         mother::garden::media_tools::add_capabilities(
             &mut value,
             &store.media_tools(&auth).map_err(domain_error)?,
