@@ -2,7 +2,7 @@
   {
     "name": "mother_media_attachment_prepare",
     "title": "Prepare a memory attachment",
-    "description": "Use a new operation UUID and the revision returned by mother_get_record. Declare original bytes only when the host has access. If the source supplies only a locator, omit file to open a local owner file handoff with SOURCE_BYTES_UNAVAILABLE. Never use a model-generated digest or media sample.",
+    "description": "Use a new operation UUID and the revision returned by mother_get_record. Declare original bytes only when the host has access. If the source supplies only a locator, omit file to open a local owner file handoff with SOURCE_BYTES_UNAVAILABLE. Never use a model-generated digest or media sample. Check mother_get_capabilities.mediaAttachmentBridge.trust first: when routineAttachments is \"automatic\", a confirmed, in-policy submission returns approved with a verified receipt; otherwise it returns pending_owner_review with reviewReason.",
     "inputSchema": {
       "type": "object",
       "properties": {
@@ -58,6 +58,22 @@
             "sha256"
           ],
           "additionalProperties": false
+        },
+        "association": {
+          "type": "string",
+          "enum": [
+            "confirmed",
+            "uncertain"
+          ],
+          "description": "Your own judgement of the memory match. Only \"confirmed\" can commit without owner review, and only under an owner-granted trust policy. Use \"uncertain\" whenever the match rests on dates or guesses."
+        },
+        "initiation": {
+          "type": "string",
+          "enum": [
+            "owner_request",
+            "autonomous"
+          ],
+          "description": "\"owner_request\" when the owner asked for this attachment; \"autonomous\" for self-initiated backfill. Autonomous work commits automatically only under autonomous_gardening trust."
         }
       },
       "required": [
@@ -119,7 +135,7 @@
   {
     "name": "mother_media_attachment_submit",
     "title": "Submit staged bytes for owner review",
-    "description": "Check the complete file against its declaration and open review in the local Garden. Await owner approval and use status to verify the canonical receipt.",
+    "description": "Check the complete file against its declaration and open review in the local Garden. Await owner approval and use status to verify the canonical receipt. Check mother_get_capabilities.mediaAttachmentBridge.trust first: when routineAttachments is \"automatic\", a confirmed, in-policy submission returns approved with a verified receipt; otherwise it returns pending_owner_review with reviewReason.",
     "inputSchema": {
       "type": "object",
       "properties": {

@@ -2,7 +2,7 @@
   {
     "name": "mother_media_attachment_import",
     "title": "Import a host file for owner review",
-    "description": "Use when your host passes a file the owner attached or selected through this tool's file parameter as {download_url, file_id} (for example a ChatGPT conversation or Library file). Mother downloads the original from the host's file service, hashes the real bytes, streams them with the ordinary attachment protocol and stops at pending_owner_review. Use a new operation UUID and the revision from mother_get_record. Never invent a link or file reference. Typing a file ID as text is not a file: the owner must attach the file to the current conversation (upload or pick it from the Library) so the host can pass it. Hosts that can read a local file should use the selected-file helper or chunked uploads instead; with no bytes at all, call mother_media_attachment_prepare without file for the owner handoff. Report success only after mother_media_attachment_status shows a verified receipt.",
+    "description": "Use when your host passes a file the owner attached or selected through this tool's file parameter as {download_url, file_id} (for example a ChatGPT conversation or Library file). Mother downloads the original from the host's file service, hashes the real bytes, streams them with the ordinary attachment protocol and stops at pending_owner_review. Use a new operation UUID and the revision from mother_get_record. Never invent a link or file reference. Typing a file ID as text is not a file: the owner must attach the file to the current conversation (upload or pick it from the Library) so the host can pass it. Hosts that can read a local file should use the selected-file helper or chunked uploads instead; with no bytes at all, call mother_media_attachment_prepare without file for the owner handoff. Report success only after mother_media_attachment_status shows a verified receipt. Check mother_get_capabilities.mediaAttachmentBridge.trust first: when routineAttachments is \"automatic\", a confirmed, in-policy submission returns approved with a verified receipt; otherwise it returns pending_owner_review with reviewReason.",
     "inputSchema": {
       "type": "object",
       "properties": {
@@ -20,6 +20,22 @@
         },
         "file": {
           "$ref": "#/$defs/OpenAIFile"
+        },
+        "association": {
+          "type": "string",
+          "enum": [
+            "confirmed",
+            "uncertain"
+          ],
+          "description": "Your own judgement of the memory match. Only \"confirmed\" can commit without owner review, and only under an owner-granted trust policy. Use \"uncertain\" whenever the match rests on dates or guesses."
+        },
+        "initiation": {
+          "type": "string",
+          "enum": [
+            "owner_request",
+            "autonomous"
+          ],
+          "description": "\"owner_request\" when the owner asked for this attachment; \"autonomous\" for self-initiated backfill. Autonomous work commits automatically only under autonomous_gardening trust."
         }
       },
       "required": [

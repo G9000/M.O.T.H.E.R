@@ -218,7 +218,15 @@ pub(crate) fn import_with(
         .as_object()
         .ok_or_else(|| invalid("Expected tool arguments"))?;
     if let Some(key) = object.keys().find(|key| {
-        !["operationId", "memoryId", "expectedRevision", "file"].contains(&key.as_str())
+        ![
+            "operationId",
+            "memoryId",
+            "expectedRevision",
+            "file",
+            "association",
+            "initiation",
+        ]
+        .contains(&key.as_str())
     }) {
         return Err(invalid(format!("Unexpected argument {key}")));
     }
@@ -260,7 +268,18 @@ pub(crate) fn import_with(
             "expectedRevision": args["expectedRevision"],
             "sourceLocator": locator(id),
             "file": declared,
-        }),
+        })
+        .as_object()
+        .cloned()
+        .map(|mut prepare| {
+            for key in ["association", "initiation"] {
+                if let Some(value) = args.get(key) {
+                    prepare.insert(key.into(), value.clone());
+                }
+            }
+            Value::Object(prepare)
+        })
+        .unwrap_or_default(),
     )
 }
 

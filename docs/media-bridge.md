@@ -17,6 +17,8 @@ Check `mother_get_capabilities.mediaAttachmentBridge` and the host's actual tool
 
 ## Transfer and review
 
+By default every attachment waits for owner approval. To let a specific agent commit routine attachments itself, see [agent trust](agent-trust.md).
+
 1. Read the target memory with `mother_get_record`. Keep its exact UUID and current revision.
 2. Use a fresh operation UUID with `mother_media_attachment_prepare`. When the host supplies the original bytes, declare its basename, length and lowercase SHA-256. The optional source locator is an opaque label such as a file ID. Keep download URLs and tokens out of the locator.
 3. Stream the selected original with `mother_media_attachment_upload`. Each call carries a base64 chunk, byte offset and the temporary transfer token from prepare. Read `receivedBytes` after disconnection. An exact prepare retry with the same UUID and declaration recovers the token while uploading. Exact chunk retries compare the overlapping bytes before continuing.

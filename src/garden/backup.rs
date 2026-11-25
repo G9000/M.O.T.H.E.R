@@ -151,6 +151,8 @@ fn known_tables() -> BTreeSet<String> {
         .chain(
             [
                 "garden_principals",
+                // Trust policies follow grants: never exported, never restored.
+                "garden_trust_policies",
                 "garden_replacement_incoming",
                 "garden_revisions",
                 "garden_transaction_times",

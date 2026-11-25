@@ -116,7 +116,12 @@ pub fn capabilities(store: &GardenStore, auth: &Auth) -> Value {
     } else {
         &[]
     };
+    let trust = store
+        .trust_policy(&auth.client_id)
+        .unwrap_or_default()
+        .effective(available);
     json!({"available":available,"scope":SCOPE,"availableTools":if available {TOOLS.as_slice()} else {&[]},
+        "trust":trust,
         "hostFileTools":host_file,
         "maxFileBytes":MAX_BYTES,"maxChunkBytes":CHUNK,"expiresAfterSeconds":LIFETIME,
         "requiresOriginalBytes":true,"ownerFileHandoff":true})
@@ -228,12 +233,31 @@ impl FileSpec {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+enum Association {
+    Confirmed,
+    Uncertain,
+}
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+enum Initiation {
+    OwnerRequest,
+    Autonomous,
+}
+
 #[derive(Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 struct Prepare {
     operation_id: String,
     memory_id: String,
     expected_revision: u64,
+    /// The agent's own claim about the memory match. Only "confirmed" can auto-commit.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    association: Option<Association>,
+    /// Whether the owner asked for this attachment or the agent started it itself.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    initiation: Option<Initiation>,
     source_locator: Option<String>,
     file: Option<FileSpec>,
 }
@@ -273,6 +297,9 @@ struct Session {
     plan: Option<AttachmentPlan>,
     original_plan: Option<AttachmentPlan>,
     display: Option<String>,
+    /// Why an otherwise complete submission still waits for the owner.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    review_reason: Option<String>,
 }
 impl Session {
     fn spec(&self) -> Option<&FileSpec> {
@@ -285,7 +312,7 @@ impl Session {
         let mut item = json!({"operationId":self.request.operation_id,"memoryId":self.request.memory_id,
             "memoryTitle":self.title,"expectedRevision":self.request.expected_revision,"proposedBy":self.client,
             "sourceLocator":self.request.source_locator,"sourceOrigin":if self.request.file.is_some() {"host_selected"} else {"owner_selected"},
-            "file":self.spec(),"expiresAt":self.expires(),"status":self.phase,
+            "file":self.spec(),"createdAt":self.created,"expiresAt":self.expires(),"status":self.phase,
             "receivedBytes":if self.phase.pending() {length(dir)?} else {0},
             "reviewId":self.plan.as_ref().map(|p| &p.operation_id),
             "originalReviewId":self.original_plan.as_ref().map(|p| &p.operation_id),
@@ -297,6 +324,18 @@ impl Session {
             item["handoff"] = json!(
                 "Open Attachment review in the local live Garden and select the original file for this operation."
             );
+        }
+        if let Some(reason) = &self.review_reason {
+            item["reviewReason"] = json!(reason);
+        }
+        if let Some(plan) = &self.plan
+            && matches!(self.phase, Phase::OwnerDecisionRecorded | Phase::Published)
+        {
+            item["authorization"] =
+                json!({"mechanism": plan.mechanism(), "policy": plan.authorization});
+        }
+        if self.request.association.is_some() || self.request.initiation.is_some() {
+            item["declared"] = json!({"association": self.request.association, "initiation": self.request.initiation});
         }
         Ok(item)
     }
@@ -526,6 +565,7 @@ fn prepare(store: &GardenStore, auth: &Auth, root: &Path, args: &Value) -> Resul
             plan: None,
             original_plan: None,
             display: None,
+            review_reason: None,
         };
         let staging = private_temp(root)?;
         save(staging.path(), &session)?;
@@ -707,7 +747,19 @@ pub(super) fn dispatch(
             contracts::string(args, "contentBase64")?,
         )?,
         UPLOAD => return Err(conflict("This operation no longer accepts chunks")),
-        SUBMIT => submit(store, &dir, &mut session)?,
+        SUBMIT => {
+            let fresh = session.phase == Phase::Uploading;
+            submit(store, &dir, &mut session)?;
+            if fresh && session.phase == Phase::PendingOwnerReview {
+                match trust_review_reason(store, auth, root, &session)? {
+                    None => return commit_by_policy(store, auth, &dir, &mut session),
+                    Some(reason) => {
+                        session.review_reason = Some(reason.into());
+                        save(&dir, &session)?;
+                    }
+                }
+            }
+        }
         CANCEL if session.phase.pending() => close(&dir, &mut session, Phase::Cancelled)?,
         _ => (),
     }
@@ -734,8 +786,38 @@ pub fn owner_request(
         }
         return Ok(json!({"items":items,"maxFileBytes":MAX_BYTES,"maxChunkBytes":CHUNK}));
     }
+    if action == "activity" {
+        // Every recent operation, automatic or manual, with its recorded authorization.
+        let mut all = sessions(root)?;
+        all.sort_by(|a, b| b.1.created.cmp(&a.1.created));
+        let mut items = Vec::new();
+        for (dir, mut session) in all.into_iter().take(200) {
+            items.push(match outcome(store, &dir, &mut session)? {
+                Some(verified) => verified,
+                None => session.view(&dir)?,
+            });
+        }
+        return Ok(json!({"items":items}));
+    }
     let dir = root.join(uuid(contracts::string(args, "operationId")?)?);
     let mut session = load(&dir)?;
+    if action == "retract" {
+        // Removes the active link only; the original asset, evidence and receipt remain.
+        let plan = match (&session.phase, &session.plan) {
+            (Phase::Published, Some(plan)) => plan.clone(),
+            _ => return Err(conflict("Only a published attachment can be retracted")),
+        };
+        if args["reviewId"].as_str() != Some(plan.operation_id.as_str()) {
+            return Err(conflict(
+                "The displayed attachment changed. Refresh the activity.",
+            ));
+        }
+        store
+            .revoke_attachment(&plan, &plan.operation_id)
+            .map_err(domain_error)?;
+        return outcome(store, &dir, &mut session)?
+            .ok_or_else(|| conflict("The retraction receipt is unavailable"));
+    }
     if let Some(verified) = outcome(store, &dir, &mut session)? {
         return Ok(verified);
     }
@@ -819,22 +901,8 @@ pub fn owner_request(
                     "The displayed review changed. Refresh the proposal.",
                 ));
             }
-            session.original_plan = None;
-            session.phase = Phase::OwnerDecisionRecorded;
-            save(&dir, &session)?;
-            match store
-                .apply_attachment(&dir, plan, review)
-                .map_err(domain_error)
-            {
-                Ok(_) => {}
-                Err(error) if error.code() == "CONFLICT" => {
-                    close(&dir, &mut session, Phase::Stale)?;
-                    return session.view(&dir);
-                }
-                Err(error) => return Err(error),
-            }
-            return outcome(store, &dir, &mut session)?
-                .ok_or_else(|| conflict("A verified receipt is unavailable"));
+            let review = review.to_owned();
+            return commit(store, &dir, &mut session, &review);
         }
         _ => {
             return Err(conflict(
@@ -843,6 +911,115 @@ pub fn owner_request(
         }
     }
     session.view(&dir)
+}
+
+/// The single canonical commit used by owner approval and by owner-granted trust.
+fn commit(store: &GardenStore, dir: &Path, session: &mut Session, review: &str) -> Result<Value> {
+    let plan = session
+        .plan
+        .clone()
+        .ok_or_else(|| invalid("Missing review plan"))?;
+    session.original_plan = None;
+    session.phase = Phase::OwnerDecisionRecorded;
+    save(dir, session)?;
+    match store
+        .apply_attachment(dir, &plan, review)
+        .map_err(domain_error)
+    {
+        Ok(_) => {}
+        Err(error) if error.code() == "CONFLICT" => {
+            close(dir, session, Phase::Stale)?;
+            return session.view(dir);
+        }
+        Err(error) => return Err(error),
+    }
+    outcome(store, dir, session)?.ok_or_else(|| conflict("A verified receipt is unavailable"))
+}
+
+const DAY: u64 = 24 * 60 * 60;
+
+/// None when the owner's current trust policy authorizes this exact submission;
+/// otherwise the reason it stays in owner review. Everything is re-read now, so a
+/// policy or grant revoked a moment ago already applies.
+fn trust_review_reason(
+    store: &GardenStore,
+    auth: &Auth,
+    root: &Path,
+    session: &Session,
+) -> Result<Option<&'static str>> {
+    let policy = store.trust_policy(&auth.client_id)?;
+    if !policy.automatic() {
+        return Ok(Some("trust_policy_manual_review"));
+    }
+    if store.v1_authorize(auth, SCOPE).is_err()
+        || store.v1_authorize(auth, "read").is_err()
+        || !store.trust_eligible(&auth.client_id)?
+    {
+        return Ok(Some("credential_not_eligible"));
+    }
+    if session.display.as_deref() == Some("withheld_embedded_metadata")
+        || session.original_plan.is_some()
+    {
+        return Ok(Some("embedded_metadata_display"));
+    }
+    if session.request.association != Some(Association::Confirmed) {
+        return Ok(Some("association_review_required"));
+    }
+    if session.request.initiation == Some(Initiation::Autonomous)
+        && policy.mode != crate::garden::store::trust::TrustMode::AutonomousGardening
+    {
+        return Ok(Some("autonomous_work_not_permitted"));
+    }
+    let size = session.spec().map_or(0, |spec| spec.size_bytes);
+    let since = now().saturating_sub(DAY);
+    let (mut count, mut bytes) = (0u32, 0u64);
+    for (_, other) in sessions(root)? {
+        if other.client == auth.client_id
+            && other.created >= since
+            && matches!(other.phase, Phase::OwnerDecisionRecorded | Phase::Published)
+            && other
+                .plan
+                .as_ref()
+                .is_some_and(|plan| plan.authorization.is_some())
+        {
+            count += 1;
+            bytes += other.spec().map_or(0, |spec| spec.size_bytes);
+        }
+    }
+    if count >= policy.max_auto_commits_per_day {
+        return Ok(Some("daily_commit_limit"));
+    }
+    if bytes + size > policy.max_auto_bytes_per_day {
+        return Ok(Some("daily_byte_limit"));
+    }
+    Ok(None)
+}
+
+fn commit_by_policy(
+    store: &GardenStore,
+    auth: &Auth,
+    dir: &Path,
+    session: &mut Session,
+) -> Result<Value> {
+    let policy = store.trust_policy(&auth.client_id)?;
+    let plan = session
+        .plan
+        .clone()
+        .ok_or_else(|| invalid("Missing review plan"))?
+        .with_authorization(crate::garden::media_tools::AttachmentAuthorization {
+            mechanism: "owner_granted_trust_policy".into(),
+            client_id: auth.client_id.clone(),
+            trust_mode: serde_json::to_value(policy.mode)?
+                .as_str()
+                .unwrap_or_default()
+                .into(),
+            policy_revision: policy.revision,
+            decided_at: chrono::Utc::now().to_rfc3339(),
+        })
+        .map_err(domain_error)?;
+    let review = plan.operation_id.clone();
+    session.plan = Some(plan);
+    commit(store, dir, session, &review)
 }
 
 /// Reconcile interrupted publications and remove staged bytes after expiry.
@@ -1374,5 +1551,220 @@ mod tests {
         assert_eq!(error.code(), "SOURCE_BYTES_UNAVAILABLE");
         assert!(error.to_string().contains("over 480 bytes"));
         assert_eq!(f.store.media_verify().unwrap()["assetsChecked"], 0);
+    }
+
+    /// Trust policies relax review only for authorized, confirmed, in-limit work,
+    /// commit through the owner's canonical writer, and stay owner-controlled.
+    #[test]
+    fn owner_granted_trust_commits_routine_attachments_and_escalates_the_rest() {
+        use super::super::host_file::import_with;
+        use crate::garden::store::trust::TrustMode;
+        let f = Fixture::new();
+        // A synthetic PNG without embedded metadata, so it can be shown as the original.
+        let mut bytes = b"\x89PNG\r\n\x1a\n".to_vec();
+        for (kind, data) in [
+            (&b"IHDR"[..], &[0u8, 0, 0, 5, 0, 0, 0, 7, 8, 2, 0, 0, 0][..]),
+            (b"IDAT", &[1, 2, 3]),
+            (b"IEND", &[]),
+        ] {
+            bytes.extend_from_slice(&(data.len() as u32).to_be_bytes());
+            bytes.extend_from_slice(kind);
+            bytes.extend_from_slice(data);
+            bytes.extend_from_slice(&[0; 4]);
+        }
+        let send_as = |auth: &Auth,
+                       association: &str,
+                       initiation: Option<&str>,
+                       payload: &[u8],
+                       mime: &str| {
+            let target = f.write(None);
+            let mut args = json!({"operationId":Uuid::new_v4().to_string(),"memoryId":target["id"],
+                "expectedRevision":target["revision"],"association":association,
+                "file":{"download_url":"https://files.oaiusercontent.com/x","file_id":"file_synthetic",
+                    "mime_type":mime,"file_name":"synthetic-original"}});
+            if let Some(initiation) = initiation {
+                args["initiation"] = json!(initiation);
+            }
+            let payload = payload.to_vec();
+            (
+                target,
+                import_with(&Direct(&f, auth), &args, move |_| Ok(payload)).unwrap(),
+            )
+        };
+        let next = |association: &str, initiation: Option<&str>| {
+            send_as(&f.transfer, association, initiation, &bytes, "image/png")
+        };
+        let other = |association: &str, initiation: Option<&str>| {
+            send_as(&f.other, association, initiation, &bytes, "image/png")
+        };
+        // Escalated operations are cancelled once checked, keeping within pending quotas.
+        let cancel = |auth: &Auth, staged: &Value| {
+            let cancelled = dispatch(
+                &f.store,
+                auth,
+                &f.root,
+                CANCEL,
+                &json!({"operationId":staged["operationId"]}),
+            )
+            .unwrap();
+            assert_eq!(cancelled["status"], "cancelled");
+        };
+        // Default: manual review, even for a confirmed match.
+        let (_, staged) = next("confirmed", None);
+        assert_eq!(staged["status"], "pending_owner_review");
+        assert_eq!(staged["reviewReason"], "trust_policy_manual_review");
+        cancel(&f.transfer, &staged);
+        let caps = capabilities(&f.store, &f.transfer);
+        assert_eq!(caps["trust"]["routineAttachments"], "owner_review");
+        // Trust never substitutes for authorization, and revisions guard every change.
+        assert_eq!(
+            f.store
+                .set_trust_policy("reader", TrustMode::TrustedCompanion, 5, 1 << 20, 0)
+                .unwrap_err()
+                .code(),
+            "FORBIDDEN"
+        );
+        assert_eq!(
+            f.store
+                .set_trust_policy("codex-test", TrustMode::TrustedCompanion, 2, 64 << 20, 7)
+                .unwrap_err()
+                .code(),
+            "CONFLICT"
+        );
+        let policy = f
+            .store
+            .set_trust_policy("codex-test", TrustMode::TrustedCompanion, 2, 64 << 20, 0)
+            .unwrap();
+        assert_eq!(policy.revision, 1);
+        let caps = capabilities(&f.store, &f.transfer);
+        assert_eq!(caps["trust"]["routineAttachments"], "automatic");
+        assert_eq!(caps["trust"]["autonomousBackfill"], false);
+        // Another credential's policy is untouched.
+        assert_eq!(
+            capabilities(&f.store, &f.other)["trust"]["routineAttachments"],
+            "owner_review"
+        );
+        // A confirmed, owner-requested attachment commits with a verified receipt.
+        let (target, committed) = next("confirmed", Some("owner_request"));
+        assert_eq!(committed["status"], "approved");
+        assert_eq!(committed["verification"]["verified"], true);
+        assert_eq!(committed["verification"]["link"]["memoryId"], target["id"]);
+        assert_eq!(
+            committed["authorization"]["mechanism"],
+            "owner_granted_trust_policy"
+        );
+        assert_eq!(committed["authorization"]["policy"]["policyRevision"], 1);
+        assert_eq!(
+            committed["authorization"]["policy"]["clientId"],
+            "codex-test"
+        );
+        // The narrative memory is not revised by attaching evidence.
+        assert_eq!(
+            f.store
+                .v1_call(&f.writer, "mother_get_record", json!({"id":target["id"]}))
+                .unwrap(),
+            target
+        );
+        // Media with unstrippable embedded metadata still needs the owner's display decision.
+        let (_, tagged) = send_as(&f.transfer, "confirmed", None, &video(), "video/mp4");
+        assert_eq!(tagged["reviewReason"], "embedded_metadata_display");
+        cancel(&f.transfer, &tagged);
+        // Escalations: uncertain match, self-started work under companion trust.
+        let (_, uncertain) = next("uncertain", None);
+        assert_eq!(uncertain["reviewReason"], "association_review_required");
+        let (_, autonomous) = next("confirmed", Some("autonomous"));
+        assert_eq!(autonomous["reviewReason"], "autonomous_work_not_permitted");
+        cancel(&f.transfer, &autonomous);
+        // The daily limit (2) counts only automatic commits.
+        let (_, second) = next("confirmed", None);
+        assert_eq!(second["status"], "approved");
+        let (_, limited) = next("confirmed", None);
+        assert_eq!(limited["reviewReason"], "daily_commit_limit");
+        cancel(&f.transfer, &limited);
+        // Autonomous gardening (second credential) allows self-started work;
+        // returning to manual review applies to the very next submission.
+        f.store
+            .set_trust_policy(
+                "claude-test",
+                TrustMode::AutonomousGardening,
+                10,
+                64 << 20,
+                0,
+            )
+            .unwrap();
+        assert_eq!(
+            capabilities(&f.store, &f.other)["trust"]["autonomousBackfill"],
+            true
+        );
+        let (_, gardened) = other("confirmed", Some("autonomous"));
+        assert_eq!(gardened["status"], "approved");
+        f.store
+            .set_trust_policy("claude-test", TrustMode::ManualReview, 10, 64 << 20, 1)
+            .unwrap();
+        let (_, revoked) = other("confirmed", None);
+        assert_eq!(revoked["reviewReason"], "trust_policy_manual_review");
+        cancel(&f.other, &revoked);
+        // Agents have no tool that changes trust or approves.
+        for name in ["mother_trust_set", "approve"] {
+            assert_eq!(f.call(name, json!({})).unwrap_err().code(), "INVALID_INPUT");
+        }
+        // The owner can still approve an escalated one manually, recorded as such.
+        let manual = f
+            .owner(
+                "approve",
+                &json!({"operationId":uncertain["operationId"],"reviewId":uncertain["reviewId"]}),
+            )
+            .unwrap();
+        assert_eq!(
+            manual["authorization"]["mechanism"],
+            "owner_manual_approval"
+        );
+        assert!(manual["authorization"]["policy"].is_null());
+        // Owner activity shows every operation with its mechanism.
+        let activity = f.owner("activity", &json!({})).unwrap();
+        let mechanisms: Vec<_> = activity["items"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .filter_map(|item| item["authorization"]["mechanism"].as_str())
+            .collect();
+        assert_eq!(
+            mechanisms
+                .iter()
+                .filter(|m| **m == "owner_granted_trust_policy")
+                .count(),
+            3
+        );
+        assert_eq!(
+            mechanisms
+                .iter()
+                .filter(|m| **m == "owner_manual_approval")
+                .count(),
+            1
+        );
+        // Retracting one automatic link keeps the shared original for the others.
+        let retracted = f
+            .owner(
+                "retract",
+                &json!({"operationId":committed["operationId"],"reviewId":committed["reviewId"]}),
+            )
+            .unwrap();
+        assert_eq!(retracted["status"], "retracted");
+        assert_eq!(f.store.media_verify().unwrap()["assetsChecked"], 1);
+        assert_eq!(
+            f.call(STATUS, json!({"operationId":second["operationId"]}))
+                .unwrap()["verification"]["verified"],
+            true
+        );
+        // Backups accept the trust table and never export it.
+        let out = f._directory.path().join("backup");
+        f.store.backup_to(&out).unwrap();
+        let listing = fs::read_dir(&out)
+            .unwrap()
+            .map(|entry| fs::read(entry.unwrap().path()).unwrap_or_default())
+            .collect::<Vec<_>>()
+            .concat();
+        assert!(!String::from_utf8_lossy(&listing).contains("garden_trust_policies"));
+        assert!(!String::from_utf8_lossy(&listing).contains("autonomous_gardening"));
     }
 }
