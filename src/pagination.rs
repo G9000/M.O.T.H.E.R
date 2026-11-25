@@ -305,7 +305,8 @@ impl Cursor {
 
 /// Binding hash of the filters that define one paginated query.
 pub(crate) fn binding(parts: &Value) -> String {
-    contracts::hash(&parts.to_string())
+    // 128 bits identify the query; the cursor is a position, never an authorization.
+    contracts::hash(&parts.to_string())[..32].to_owned()
 }
 
 /// One keyset page over already filtered, authorized records.
@@ -405,15 +406,13 @@ pub(crate) fn keyset(
         "hasMore": has_more,
         "nextCursor": next.encode(),
         "changed": changed,
-        "consistency": CONSISTENCY,
+        "consistency": "keyset_positions",
     });
     Ok(KeysetPage {
         records,
         pagination,
     })
 }
-
-pub(crate) const CONSISTENCY: &str = "Cursors are record positions re-checked against the current grant on every page. Removed or retracted records disappear without shifting later pages. In created order revisions never move a record and new records arrive at the end; in recent order a revised record moves ahead of the cursor. Records changed since the previous page that are now behind the cursor are listed once in pagination.changed. Keep the latest nextCursor to continue, or to fetch records added later; hasMore=false means every currently matching record has been returned.";
 
 /// Search pages: offset over one ranking, valid while that ranking is unchanged.
 pub(crate) fn search_offset(args: &Value, binding: &str, stamp: &str) -> Result<usize> {

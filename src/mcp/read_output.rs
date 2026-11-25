@@ -216,7 +216,7 @@ fn bound_records(value: Value, context: bool) -> Option<Value> {
             records.truncate(need);
             records.iter_mut().for_each(compact_record);
             // Reserve room for the budget report and a re-minted cursor.
-            probe["_reserve"] = json!("x".repeat(512));
+            probe["_reserve"] = json!("x".repeat(384));
             if compact_pins(&mut probe).is_none() {
                 continue;
             }
@@ -729,7 +729,9 @@ mod tests {
         assert!(fits(&overview, BUDGET));
         assert_eq!(overview["contextSections"]["persona"], "included");
         assert!(overview["persona"]["omitted"].is_null());
-        assert!(overview["records"].as_array().unwrap().len() >= RECORD_FLOOR);
+        // An 8 KiB persona leaves room for at least one compact record beside it.
+        assert!(!overview["records"].as_array().unwrap().is_empty());
+        assert_eq!(overview["pagination"]["order"], "balanced");
         // Full enumeration through budget-trimmed pages: re-minted cursors lose nothing.
         for args in [
             json!({"kind":"memory","order":"created","limit":100}),

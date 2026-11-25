@@ -38,7 +38,7 @@ Every `recent` or `created` page includes `pagination`:
 - `returnedRecords`, `remainingAfterPage` and `hasMore`.
 - `nextCursor`: keep calling with it until `hasMore` is `false`. Keeping the last cursor also lets a harness pick up records added later.
 - `changed`: records revised or added behind the cursor since the previous page.
-- `consistency`: a one-line statement of these rules.
+- `consistency`: `keyset_positions` for context pages (`ranking_snapshot` for search), naming the rules below.
 
 How concurrent changes behave:
 
