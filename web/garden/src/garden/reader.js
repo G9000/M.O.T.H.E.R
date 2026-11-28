@@ -93,7 +93,7 @@ export function fromSnapshot(src, all) {
     basis: src.basis ?? null,
     createdAt: src.createdAt,
     updatedAt: src.updatedAt,
-    eventDate: null,
+    eventDate: src.eventDate ?? null,
     content: src.content,
     truncated: src.truncated,
     length: null,

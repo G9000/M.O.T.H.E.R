@@ -99,12 +99,11 @@ impl ServerHandler for GraphServer {
             let _guard = gate
                 .lock()
                 .map_err(|_| Error::domain("STORE_UNAVAILABLE", UNCONFIRMED))?;
+            let args = Value::Object(request.arguments.unwrap_or_default());
+            let budget = super::read_budget(&request.name, &args)?;
             if super::attachment::is_tool(&request.name) {
-                return super::attachment::call(
-                    &config,
-                    &request.name,
-                    Value::Object(request.arguments.unwrap_or_default()),
-                );
+                return super::attachment::call(&config, &request.name, args)
+                    .map(|value| (value, None));
             }
             let store = GardenStore::open_active(&config.database_path)?;
             config.authorize(&store)?;
@@ -114,12 +113,13 @@ impl ServerHandler for GraphServer {
                 &search,
                 &recall_profiles,
                 &request.name,
-                Value::Object(request.arguments.unwrap_or_default()),
+                args,
             )
+            .map(|value| (value, budget))
         })
         .await;
         let result = match result {
-            Ok(Ok(value)) => super::read_output::result(&name, value),
+            Ok(Ok((value, budget))) => super::read_output::result_with_budget(&name, value, budget),
             Ok(Err(error)) => tool_error(error),
             Err(_) => tool_error(Error::domain("STORE_UNAVAILABLE", UNCONFIRMED)),
         };
@@ -159,7 +159,7 @@ fn dispatch(
             }
             Err(error) => return Err(domain_error(error)),
         };
-        let mut value = json!({"version":1,"v1":{"available":v1_enabled,"contractVersion":1,"gardeningEvidenceReview":1},
+        let mut value = json!({"version":1,"v1":{"available":v1_enabled,"contractVersion":1,"gardeningEvidenceReview":1,"projectResume":1,"momentLookup":1,"explicitReadBudget":1,"readOriginal":1},
             "workspace":identity,"garden":{"contractVersion":2,"available":graph_available,"status":"prototype",
             "optionalVectorProfile":mother::search::embedding_profile(),"vectorPreparation":"explicit_local_sdk_or_owner_cli",
             "capabilities":if graph_available {vec!["garden.entities.v2","garden.assertions.v2","garden.proposals.v2","garden.query.v2","garden.changes.v2"]} else {vec![]},

@@ -147,7 +147,7 @@ fn native_discovery_pages_fit_host_frames_without_losing_tools() {
     let (config, _, _) = configured(dir.path(), true, true);
     let mut client = Client::connect(&config);
     let tools = client.tools();
-    assert_eq!(tools.len(), 19);
+    assert_eq!(tools.len(), 23);
     let names: std::collections::BTreeSet<_> = tools
         .iter()
         .map(|tool| tool["name"].as_str().unwrap())
@@ -166,7 +166,7 @@ fn context_only_native_discovery_preserves_v1_without_graph_descriptors() {
     let mut client = Client::connect(&config);
     let reply = client.rpc("tools/list", json!({}));
     let tools = reply["result"]["tools"].as_array().unwrap();
-    assert_eq!(tools.len(), 12);
+    assert_eq!(tools.len(), 16);
     assert!(
         tools
             .iter()
@@ -207,7 +207,7 @@ fn ordinary_mcp_selects_native_v1_and_preserves_legacy_schemas() {
     let (config, workspace, generation) = configured(dir.path(), true, false);
     let mut client = Client::connect(&config);
     let tools = client.tools();
-    assert_eq!(tools.len(), 12);
+    assert_eq!(tools.len(), 16);
     let legacy: Vec<Value> =
         serde_json::from_str(include_str!("../contracts/mcp-tools.json")).unwrap();
     for mut expected in legacy {

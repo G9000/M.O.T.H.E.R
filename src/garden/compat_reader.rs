@@ -181,6 +181,7 @@ impl GardenStore {
             return Ok(Vec::new());
         }
         let tx = self.db.begin_read().map_err(unavailable)?;
+        let settings = super::settings::Settings::load(&tx)?;
         let workspace = metadata(&tx, "workspace")?;
         let generation = string(&workspace, "generation")?;
         let mut all = tx.values(RECORDS)?;
@@ -266,8 +267,7 @@ impl GardenStore {
                     "basis": r.get("basis").filter(|v| v.is_string()).cloned().unwrap_or(Value::Null),
                     "createdAt": r["createdAt"],
                     "updatedAt": r["updatedAt"],
-                    // v1 records carry no event date; one is never guessed from the text.
-                    "eventDate": Value::Null,
+                    "eventDate": settings.date(id), "keepsake":settings.hidden(id),
                     "content": body,
                     "truncated": truncated,
                     "length": length,

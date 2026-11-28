@@ -1487,15 +1487,21 @@
         color: var(--text); background: transparent;
       }
       #atlas[open] { display: flex; flex-direction: column; justify-content: space-between; }
-      #atlas::backdrop { background: linear-gradient(180deg, #101f247a, transparent 23%, transparent 69%, #0e211ebd); }
+      #atlas::backdrop { background: linear-gradient(180deg, #10231ef0, transparent 25%, transparent 72%, #10231ed9); }
       .atlas-head, .atlas-foot, .atlas-stops, .atlas-tools { display: flex; align-items: center; gap: 8px; }
       .atlas-head { justify-content: space-between; align-items: flex-start; }
-      .atlas-head h2 { margin: 0; font: 400 clamp(30px, 4vw, 54px)/1.05 var(--display); text-shadow: 0 2px 8px #192a28; }
+      .atlas-head > div { min-width: 0; border-left: 2px solid var(--brass); padding-left: clamp(10px, 1vw, 18px); }
+      .atlas-head h2 { margin: 0; font: 400 clamp(27px, 4vw, 54px)/1.05 var(--display); text-shadow: 0 2px 8px #192a28; }
+      .atlas-head [data-caption] { overflow-wrap: anywhere; max-height: 4.5em; overflow: auto; }
       #atlas button, #atlas select { font-family: var(--face); font-size: 14px; cursor: pointer; }
       .atlas-head button, .atlas-tools, .atlas-stops { border: 1px solid var(--hair); border-radius: 12px; background: var(--glass); }
-      .atlas-head button { padding: 9px 15px; }
+      .atlas-head button { padding: 9px 15px; flex: none; }
       .atlas-foot { justify-content: space-between; align-items: flex-end; flex-wrap: wrap; }
-      .atlas-tools, .atlas-stops { padding: 5px; gap: 3px; }
+      .atlas-tools, .atlas-stops { max-width: 100%; padding: 5px; gap: 3px;
+        background: linear-gradient(135deg, #2c433bee, #152b25f5); box-shadow: inset 0 1px #eddbb41f, 0 4px 16px #13201b44; }
+      .atlas-stops { overflow-x: auto; scrollbar-width: thin; scrollbar-color: var(--hair) transparent; }
+      .atlas-stops button { flex: none; white-space: nowrap; }
+      .atlas-stops button:focus-visible { outline-offset: -3px; outline-color: currentColor; }
       .atlas-tools button, .atlas-stops button, .atlas-tools select {
         border: none; border-radius: 8px; padding: 9px 12px; background: transparent; color: var(--text);
       }
@@ -1507,10 +1513,18 @@
       .atlas-tools [data-travel]:hover { background: #fff0ce; }
       @media (max-width: 760px) {
         .atlas-foot { align-items: stretch; flex-direction: column; }
-        .atlas-stops { display: grid; grid-template-columns: 1fr 1fr; }
-        .atlas-tools { align-self: flex-end; }
+        .atlas-tools { flex-wrap: wrap; align-self: flex-end; }
         #atlasBtn { font-size: 12px; }
       }
+      .rpwalks { min-width: 0; border-bottom: 1px solid var(--hair-soft); padding-bottom: .7rem; }
+      .rpwalks summary { cursor: pointer; font-weight: 600; }
+      .rpwalks [data-editor]:not([hidden]), .rpwalks label { display: grid; gap: .4rem; }
+      .rpwalks [data-editor], .rpwalks [data-player] { margin-top: .8rem; }
+      .rpwalks select, .rpwalks input { width: 100%; min-width: 0; font: inherit; }
+      .rpwalks button { margin: .15rem 0; }
+      .rpwalks img { max-width: 100%; max-height: 40vh; object-fit: contain; }
+      .rpwalks [data-stop] p { white-space: pre-wrap; max-height: 28vh; overflow: auto; }
+      .rpwalks [role=status]:empty { display: none; }
     </style>
   </head>
   <body>

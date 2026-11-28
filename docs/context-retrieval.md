@@ -2,6 +2,14 @@
 
 `mother_get_context` and `mother_search_context` work the same way for every harness: ChatGPT, Codex, Claude Desktop, Hermes, AnimaOS and future clients. Nothing here is specific to one host. Every page re-applies the caller's current grant, so filters and cursors never widen what a credential can read.
 
+## Resuming a project
+
+Ask a connected harness “Where did we leave off on Nibs?” or “What changed on Nibs since my last visit?” Both use `mother_project_resume` with `{"project":"Nibs"}`. The service matches the project name as consecutive words in visible titles or text, ignoring case and punctuation. It returns the most recently updated confirmed decision, active checkpoint and open task. Each preview includes its record ID and revision for opening the original with `mother_get_record`. An empty slot means no matching record in the current grant.
+
+The same reply includes up to three unseen or revised records, newest first. On a later visit the comparison starts at the acknowledged revision. For an unseen revised record it uses the immediately preceding revision if retained. For example, a task moving from blocked to done carries both statuses. Text corrections include a window around the first changed character. Shared readers receive current wording only. A previously seen record that no longer mentions the project is flagged.
+
+After showing a page, call `mother_mark_project_seen` with its `project`, `workspaceId`, `generation` and a `seen` array of the displayed ID/revision pairs. If `remaining` is positive, read again. Repeating an acknowledgement or acknowledging an older revision cannot move the reading position backward. Positions are private to the project and credential, survive a service restart and are excluded from backups. Every harness with the relevant read grant can retrieve the shared project records.
+
 ## Filters
 
 Both tools accept these optional fields. All filtering happens in the service, before the response budget is applied.
@@ -69,6 +77,22 @@ Use this to garden a harness's memories without changing anything:
 2. Fetch each record you need with `mother_get_record`. History comes from `mother_get_record_history`, where the grant allows it.
 3. Compare duplicates, stale versions and contradictions within each `basis`. Keep owner statements, sources and model inferences distinct.
 4. Write recommendations as proposals, for example with `mother_propose_memory` or `mother garden tend`, for the owner to review. Reading and enumerating never modify canonical memories, and nothing is pruned automatically. Stories, snapshots, media associations and Witness Journal reflections stay intact.
+
+## Project names, keepsakes and event dates
+
+The owner can register a former project name, set a record aside as a keepsake, and supply the date an event happened. Run these commands with the owner service stopped. Replace the example arguments with the native database path and record ID.
+
+```text
+mother garden project-alias --db <database> --project <current-name> --alias <former-name>
+mother garden keepsake --db <database> --record <record-id>
+mother garden moment-date --db <database> --record <record-id> --date 2026-01-17
+```
+
+Use `--remove` on the same alias pair, `--release` on a keepsake, or `--clear` in place of the date to undo the setting. A full Garden backup carries these settings across restore.
+
+Project briefs recognize all registered names and consult reading positions saved under each name. Searching for a whole registered name also finds records mentioning another name in that project. Co-occurrence alone never creates an alias. Each preview’s `recallReason` identifies the relevant selection rule, matching project name or semantic match.
+
+Keepsakes stay available in the owner Garden, curated walks and authorized direct reads by ID. Ordinary context, pins, assignments, project briefs and search exclude them. Call `mother_find_moment` with a natural-language `clue` to find up to three accessible accounts by matching distinctive words. Set `includeKeepsakes` only for an explicit request. Each hit includes the matched words, record ID, revision, saved time and any owner-supplied event date. Follow linked record IDs with `mother_get_record`. Approved photos have digest handles when the client can see the graph relationship and has media metadata access. Image bytes require the usual additional permission. The response reports partial media coverage when it reaches the scan limit.
 
 ## Harness compatibility
 

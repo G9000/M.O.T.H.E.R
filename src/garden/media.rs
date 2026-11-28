@@ -1330,6 +1330,70 @@ fn visible_uses(
     }
     Ok(shown)
 }
+/// Attach approved, grant-visible image handles to the selected v1 accounts.
+pub(super) fn moment_media(
+    tx: &redb::ReadTransaction,
+    auth: &Auth,
+    records: &mut [Value],
+) -> Result<&'static str> {
+    if records.is_empty() {
+        return Ok("no matches");
+    }
+    let principal = match principal_read(tx, auth, GardenAction::Read) {
+        Ok(p) if has_scope(&p, "media:meta") => p,
+        Ok(_) => return Ok("unavailable"),
+        Err(e)
+            if matches!(
+                e.code,
+                GardenErrorCode::Forbidden | GardenErrorCode::Unauthorized
+            ) =>
+        {
+            return Ok("unavailable");
+        }
+        Err(e) => return Err(e),
+    };
+    let assets = tx.open_table(ASSETS).map_err(storage_error)?;
+    for record in records.iter_mut() {
+        record["photos"] = json!([]);
+    }
+    for (i, entry) in assets.iter().map_err(storage_error)?.enumerate() {
+        if i == SCAN_BUDGET {
+            return Ok("partial");
+        }
+        let (_, v) = entry.map_err(storage_error)?;
+        let asset: MediaAsset = decode(v.value())?;
+        if !asset.media_type.starts_with("image/") {
+            continue;
+        }
+        let ids = visible_uses(tx, &principal, &asset)?
+            .into_iter()
+            .filter_map(|v| v["evidenceId"].as_str().map(str::to_owned))
+            .collect::<Vec<_>>();
+        for link in backfill::memory_links(tx, &ids)? {
+            let Some(r) = records.iter_mut().find(|r| r["id"] == link["memoryId"]) else {
+                continue;
+            };
+            let assertion = link["assertionId"].as_str().unwrap_or_default();
+            let (current, replacements) = context_read(tx, &principal, vec![assertion.to_owned()])?;
+            if current
+                .get(assertion)
+                .is_none_or(|v| visible(&principal, v, &current, &replacements).is_err())
+            {
+                continue;
+            }
+            let photos = r["photos"].as_array_mut().expect("initialized");
+            if photos.iter().any(|p| p["sha256"] == asset.sha256) {
+                continue;
+            }
+            if photos.len() < 3 {
+                photos.push(json!({"sha256":asset.sha256,"mediaType":asset.media_type}));
+            } else {
+                r["morePhotos"] = json!(true);
+            }
+        }
+    }
+    Ok("complete")
+}
 fn authorize_media(
     tx: &redb::ReadTransaction,
     auth: &Auth,

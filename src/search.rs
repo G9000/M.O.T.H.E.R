@@ -66,10 +66,12 @@ impl Query {
                 "includePersona",
                 "includePinned",
                 "previewMaxChars",
+                "maxResponseBytes",
             ],
         )?;
         let filters = crate::pagination::Filters::parse(&v)?;
         let view = crate::pagination::View::parse(&v)?;
+        crate::pagination::response_budget(&v)?;
         let (updated_since, updated_before) = contracts::time_window(&v)?;
         let text = contracts::normalize_search_query(contracts::string(&v, "query")?)?;
         let kind = v
@@ -132,6 +134,7 @@ pub(crate) struct Record {
     pub(crate) text: String,
     pub(crate) value: Value,
     pub(crate) literal: bool,
+    pub(crate) alias: Option<String>,
 }
 #[derive(Debug)]
 pub(crate) struct Snapshot {
@@ -205,6 +208,8 @@ impl Snapshot {
         let records=hits.into_iter().skip(start).take(query.limit).map(|h|{
             let r=&self.records[h.ordinal];let v=&r.value;let content=v["content"].as_str().unwrap_or_default();
             let mut p=json!({"id":r.id,"kind":v["kind"],"title":v["title"],"status":v["status"],"revision":r.revision,"actor":v["actor"],"createdAt":v["createdAt"],"updatedAt":v["updatedAt"],"excerpt":crate::pagination::excerpt(content,preview),"truncated":content.encode_utf16().count()>preview});
+            let lexical = if r.literal && (query.mode!=Mode::Semantic || metadata["effectiveMode"]=="literal") {Some(r.alias.as_ref().map_or_else(||json!("query phrase"),|name|json!({"projectName":name})))} else {None};
+            p["recallReason"]=json!({"lexical":lexical,"semantic":h.span.is_some()});
             if let Some(basis)=v.get("basis") {p["basis"]=basis.clone();}
             if let Some((embedding_start,embedding_end))=h.span {
                 let (start,end)=context_span(&r.text,embedding_start,embedding_end);

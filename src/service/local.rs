@@ -351,6 +351,8 @@ impl LocalClient {
 /// One local process retaining the native database and an exclusive owner lease.
 #[derive(Debug)]
 pub struct LocalService {
+    // Service-lifetime observations, partitioned by authenticated credential.
+    bridge_activity: std::sync::Mutex<std::collections::HashMap<String, Value>>,
     store: Arc<GardenStore>,
     listener: Listener,
     info: ServiceInfo,
@@ -446,6 +448,7 @@ impl LocalService {
         file.persist_noclobber(endpoint_path)
             .map_err(|_| unavailable())?;
         Ok(Self {
+            bridge_activity: Default::default(),
             store: Arc::new(store),
             listener,
             info,
@@ -647,6 +650,32 @@ impl LocalService {
         };
         let name = request.method.as_str();
         let args = request.arguments;
+        if matches!(name, "local_bridge_activity" | "local_bridge_observe") {
+            let key = crate::contracts::hash(&auth.token);
+            let mut activity = self.bridge_activity.lock().map_err(|_| unavailable())?;
+            if name == "local_bridge_activity" {
+                crate::contracts::strict(&args, &[])?;
+                return Ok(activity.get(&key).cloned().unwrap_or_else(|| json!({})));
+            }
+            crate::contracts::strict(&args, &["event"])?;
+            let event = args["event"].as_str().ok_or_else(invalid)?;
+            if !matches!(
+                event,
+                "connected" | "record" | "empty" | "failed" | "too_large"
+            ) {
+                return Err(invalid());
+            }
+            let entry = activity.entry(key).or_insert_with(|| json!({}));
+            let now = json!(chrono::Utc::now());
+            entry["lastHostRequestAt"] = now.clone();
+            if event != "connected" {
+                entry["lastRead"] = json!({"at":now,"outcome":event});
+                if event == "record" {
+                    entry["lastRecordReadAt"] = now;
+                }
+            }
+            return Ok(json!({}));
+        }
         if super::attachment::is_tool(name) {
             return super::attachment::dispatch(
                 &self.store,
@@ -661,7 +690,8 @@ impl LocalService {
                 return Err(invalid());
             }
             return Ok(json!({"version":1,"workspace":identity,
-                "v1":{"available":self.info.v1_available,"contractVersion":1,"gardeningEvidenceReview":1},
+                "v1":{"available":self.info.v1_available,"contractVersion":1,"gardeningEvidenceReview":1,"projectResume":1,"momentLookup":1,"explicitReadBudget":1,"readOriginal":1},
+                "bridgeObservations":1,
                 "garden":{"contractVersion":2,"available":graph_available,"status":"prototype",
                     "optionalVectorProfile":crate::search::embedding_profile(),
                     "vectorPreparation":"explicit_local_sdk_or_owner_cli",
@@ -695,7 +725,13 @@ impl LocalService {
             }
             let catalog: Value =
                 serde_json::from_str(include_str!("../../contracts/mcp-tools.json"))?;
-            if !catalog
+            if !matches!(
+                name,
+                "mother_project_resume"
+                    | "mother_mark_project_seen"
+                    | "mother_find_moment"
+                    | "mother_read_original"
+            ) && !catalog
                 .as_array()
                 .is_some_and(|tools| tools.iter().any(|tool| tool["name"] == name))
             {

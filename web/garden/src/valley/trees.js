@@ -36,10 +36,16 @@ function leafTexture(flowering = false) {
   const leaf = (x, y, angle, len) => {
     const wid = len * (0.34 + random() * 0.16);
     // (red is how light this leaf is painted; green is where there is leaf at all)
-    g.fillStyle = `rgb(${130 + Math.floor(random() * 125)},255,0)`;
+    const tone = 130 + Math.floor(random() * 125);
     g.save();
     g.translate(x, y);
     g.rotate(angle);
+    const blade = g.createLinearGradient(-len * 0.12, -wid * 0.45, len * 0.12, wid * 0.45);
+    blade.addColorStop(0, `rgb(${tone},255,0)`);
+    blade.addColorStop(0.49, `rgb(${Math.min(255, tone + 29)},255,0)`);
+    blade.addColorStop(0.53, `rgb(${tone - 55},255,0)`);
+    blade.addColorStop(1, `rgb(${tone - 13},255,0)`);
+    g.fillStyle = blade;
     g.beginPath();
     g.moveTo(-len / 2, 0);
     // Slightly serrated margins and a tapered tip remain readable against the sky.
@@ -84,7 +90,12 @@ function leafTexture(flowering = false) {
       g.scale(1, 0.56 + random() * 0.44);
       for (let j = 0; j < 5; j++) {
         g.rotate(TAU / 5);
-        g.fillStyle = `rgb(${165 + Math.floor(random() * 90)},255,255)`;
+        const tip = 165 + Math.floor(random() * 90);
+        const wash = g.createLinearGradient(0, 0, -0.23 * r, -1.34 * r);
+        wash.addColorStop(0, 'rgb(102,255,255)');
+        wash.addColorStop(0.64, `rgb(${tip},255,255)`);
+        wash.addColorStop(1, `rgb(${Math.min(255, tip + 25)},255,255)`);
+        g.fillStyle = wash;
         g.beginPath();
         g.moveTo(0, 0);
         g.bezierCurveTo(-r, -r * 0.7, -r * 0.64, -r * 1.6, 0, -r * 1.25);

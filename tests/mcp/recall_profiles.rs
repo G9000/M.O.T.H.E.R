@@ -7,11 +7,217 @@ use mother::{
     recall_profiles::RecallProfiles,
     service::{LocalService, ServiceClientConfig},
 };
+use std::collections::BTreeSet;
 use std::{
     fs,
     sync::atomic::{AtomicBool, Ordering},
 };
 use uuid::Uuid;
+
+/// Exercise the real MCP envelope: its text copy can more than double the structured JSON.
+fn traverse_with_budget(
+    client: &mut Client,
+    tool: &str,
+    budget: usize,
+    expected: &BTreeSet<String>,
+    decision_id: &str,
+) {
+    let catalog = client.rpc("tools/list", json!({}));
+    let properties = &catalog["tools"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|entry| entry["name"] == tool)
+        .unwrap()["inputSchema"]["properties"];
+    assert_eq!(properties["maxResponseBytes"]["minimum"], 4096);
+    assert_eq!(properties["maxResponseBytes"]["maximum"], 12288);
+    assert_eq!(properties["cursor"]["type"], "string");
+
+    let mut args = json!({"query":"Synthetic recall fixture", "limit":7,
+        "maxResponseBytes":budget, "previewMaxChars":2000});
+    if tool == "mother_get_context" {
+        args["profile"] = json!("all");
+    } else {
+        args["mode"] = json!("literal");
+    }
+    let mut seen = BTreeSet::new();
+    for page_number in 1..=expected.len() {
+        let reply = client.result(tool, args.clone());
+        assert_ne!(reply["isError"], true, "{tool} page {page_number}: {reply}");
+        let size = serde_json::to_vec(&reply).unwrap().len();
+        assert!(
+            size <= budget,
+            "{tool} returned {size} bytes for a {budget} byte budget"
+        );
+        let page = result_body(&reply);
+        assert_eq!(page["responseBudget"]["maxBytes"], budget);
+        if tool == "mother_get_context" {
+            if page["access"]["mode"] == "shared" {
+                assert!(page.get("persona").is_none());
+            } else {
+                assert!(page["persona"]["omitted"] == true || page["persona"]["truncated"] == true);
+            }
+            let pins = page["pinned"].as_array().unwrap();
+            assert_eq!(page["pinnedSummary"]["shown"], pins.len());
+            let total = page["pinnedSummary"]["total"].as_u64().unwrap();
+            assert_eq!(
+                page["pinnedSummary"]["omittedForBudget"]
+                    .as_u64()
+                    .unwrap_or(0),
+                total - pins.len() as u64
+            );
+        }
+        let results = page["records"].as_array().unwrap();
+        assert!(
+            !results.is_empty(),
+            "{tool} returned an empty matching page"
+        );
+        for preview in results {
+            let id = preview["id"].as_str().unwrap().to_owned();
+            assert!(
+                expected.contains(&id),
+                "unauthorized or unrelated preview {id}"
+            );
+            assert!(!preview["title"].as_str().unwrap().is_empty());
+            assert!(!preview["excerpt"].as_str().unwrap().is_empty());
+            let writer = if id == decision_id {
+                "decision-writer"
+            } else {
+                "harness-a"
+            };
+            assert_eq!(preview["actor"], writer);
+            assert!(seen.insert(id), "duplicate preview on page {page_number}");
+        }
+        if page["pagination"]["hasMore"] == false {
+            assert_eq!(&seen, expected, "{tool} skipped available records");
+            return;
+        }
+        assert_eq!(page["pagination"]["hasMore"], true);
+        args["cursor"] = json!(page["pagination"]["nextCursor"].as_str().unwrap());
+    }
+    panic!("{tool} did not terminate pagination");
+}
+
+#[test]
+fn explicit_wire_budget_keeps_project_decision_and_support_resolvable_across_clients() {
+    let fixture = RecallFixture::new(&"Synthetic persona with quoted text. ".repeat(250), 12);
+    let store = GardenStore::open_active(&fixture.fixture.database).unwrap();
+    let owner = mother::garden::config::load_garden_config(&fixture.fixture.a_config)
+        .unwrap()
+        .auth();
+    let additional = store
+        .v1_call(&owner, "mother_get_context", json!({"query":title(12)}))
+        .unwrap();
+    let last = additional["records"][0]["id"].as_str().unwrap().to_owned();
+    let persona = &additional["persona"];
+    let supports = &fixture.ids[..2];
+    let writer = store
+        .v1_grant(
+            "decision-writer",
+            &["read".into(), "decision:write".into()],
+            &ClientAccess::default(),
+            None,
+        )
+        .unwrap();
+    let text = "Use the two cited rehearsal notes as the release checklist.";
+    let decision = store.v1_call(&writer,"mother_write_record", json!({
+        "workspaceId":fixture.workspace["id"],"generation":fixture.workspace["generation"],
+        "expectedRevision":0,"operationId":Uuid::new_v4().to_string(),
+        "record":{"kind":"decision","status":"confirmed","title":"Synthetic recall fixture decision",
+            "content":text,"references":supports}
+    })).unwrap()["record"].clone();
+    let id = decision["id"].as_str().unwrap();
+    let mut authorized: BTreeSet<String> = fixture.ids.iter().cloned().collect();
+    authorized.extend([last, id.to_owned()]);
+    let mut shared_ids = fixture.ids[..8].to_vec();
+    shared_ids.push(id.to_owned());
+    let guest = store
+        .v1_grant(
+            "recall-guest",
+            &["read".into()],
+            &ClientAccess {
+                mode: AccessMode::Shared,
+                subject: Some("synthetic-guest".into()),
+                records: shared_ids.clone(),
+            },
+            None,
+        )
+        .unwrap();
+    drop(store);
+    let verify = |client: &mut Client, budget: usize, expected: &BTreeSet<String>| {
+        for tool in ["mother_get_context", "mother_search_context"] {
+            traverse_with_budget(client, tool, budget, expected, id);
+        }
+        let original = client.call("mother_get_record", json!({"id":id}));
+        assert_eq!(original["content"], text);
+        assert_eq!(original["actor"], "decision-writer");
+        assert_eq!(original["references"], json!(supports));
+        for (index, support) in supports.iter().enumerate() {
+            let evidence = client.call("mother_get_record", json!({"id":support}));
+            assert_eq!(evidence["content"], full_content(index));
+            assert_eq!(evidence["actor"], "harness-a");
+            if index == 0 {
+                assert_eq!(
+                    read_original_pages(client, json!({"source":"record","id":support})),
+                    evidence
+                );
+            }
+        }
+    };
+    {
+        let mut direct = fixture.direct(owner.clone());
+        verify(&mut direct, 4096, &authorized);
+        assert_eq!(
+            read_original_pages(&mut direct, json!({"source":"persona"})),
+            *persona
+        );
+    }
+    fixture.service(|service| {
+        let mut companion = fixture.bridge(service, owner);
+        let mut shared = fixture.bridge(service, guest);
+        verify(&mut companion, 12288, &authorized);
+        assert_eq!(
+            read_original_pages(&mut companion, json!({"source":"persona"})),
+            *persona
+        );
+        verify(&mut shared, 4096, &shared_ids.into_iter().collect());
+        let denied = shared.result(
+            "mother_read_original",
+            json!({"source":"persona","maxResponseBytes":4096}),
+        );
+        assert_eq!(denied["structuredContent"]["error"]["code"], "FORBIDDEN");
+        assert_eq!(
+            shared.result("mother_get_record", json!({"id":fixture.ids[11]}))["isError"],
+            true
+        );
+    });
+}
+
+fn read_original_pages(client: &mut Client, mut args: Value) -> Value {
+    args["maxResponseBytes"] = json!(4096);
+    let mut serialized = String::new();
+    let mut cursors = BTreeSet::new();
+    loop {
+        let reply = client.result("mother_read_original", args.clone());
+        assert_ne!(reply["isError"], true, "{reply}");
+        assert!(serde_json::to_vec(&reply).unwrap().len() <= 4096);
+        let page = result_body(&reply);
+        assert_eq!(page["startByte"], serialized.len());
+        serialized.push_str(page["fragment"].as_str().unwrap());
+        assert_eq!(page["endByte"], serialized.len());
+        if page["nextCursor"].is_null() {
+            assert_eq!(page["totalBytes"], serialized.len());
+            assert!(!cursors.is_empty(), "fixture should span several pages");
+            return serde_json::from_str(&serialized).unwrap();
+        }
+        let cursor = page["nextCursor"].as_str().unwrap();
+        assert!(
+            cursors.insert(cursor.to_owned()),
+            "repeated original cursor"
+        );
+        args["cursor"] = json!(cursor);
+    }
+}
 
 fn title(index: usize) -> String {
     format!("Synthetic recall fixture {index:02} 記憶")

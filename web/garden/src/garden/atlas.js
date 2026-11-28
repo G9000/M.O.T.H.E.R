@@ -82,6 +82,8 @@ export function createAtlas({ heightAt, goTo, beforeOpen, beforeTravel, times, h
     selected = index;
     rotation = 0;
     buttons.forEach((button, i) => button.setAttribute('aria-pressed', String(i === selected)));
+    title.textContent = stops[index].name;
+    if (dialog.open) buttons[index].scrollIntoView({ block: 'nearest', inline: 'nearest' });
     visit.hidden = !stops[index].landing;
   }
   times.forEach((time, i) => light.add(new Option(time.name, String(i))));
@@ -95,6 +97,7 @@ export function createAtlas({ heightAt, goTo, beforeOpen, beforeTravel, times, h
     browser.hidden = !choices.hidden;
     caption.hidden = !choices.hidden;
     dialog.showModal();
+    if (!choices.hidden) buttons[selected].scrollIntoView({ block: 'nearest', inline: 'nearest' });
   }
   function showSpecimen() {
     const record = collection[index];
@@ -124,7 +127,6 @@ export function createAtlas({ heightAt, goTo, beforeOpen, beforeTravel, times, h
   }
   function showTree() {
     collection = [];
-    title.textContent = 'Garden atlas';
     select(stops.findIndex(stop => stop.name === 'Blossom tree'));
     open();
   }
@@ -138,7 +140,6 @@ export function createAtlas({ heightAt, goTo, beforeOpen, beforeTravel, times, h
   zoom.addEventListener('click', () => { whole = !whole; showSpecimen(); });
   opener.addEventListener('click', () => {
     collection = [];
-    title.textContent = 'Garden atlas';
     select(0);
     open();
   });
