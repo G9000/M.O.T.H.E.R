@@ -1,6 +1,6 @@
 use super::{
-    Auth, ClientAccess, RECORDS, Result, Value, View, contracts, excerpt, graph, invalid, metadata,
-    recallable, recent, settings,
+    Auth, ClientAccess, Result, Value, contracts, excerpt, graph, invalid, metadata, recallable,
+    recent, settings,
 };
 use serde_json::json;
 use std::collections::BTreeSet;
@@ -40,16 +40,12 @@ pub(super) fn find(
     }
     let settings = settings::Settings::load(tx)?;
     let workspace = metadata(tx, "workspace")?;
-    let records: Vec<_> = tx
-        .values(RECORDS)?
-        .into_iter()
-        .filter(|r| {
-            recallable(r)
-                && r["id"]
-                    .as_str()
-                    .is_some_and(|id| access.allows(id) && (include || !settings.hidden(id)))
-        })
-        .collect();
+    let records: Vec<_> = super::summary_review::records(tx, |id| {
+        access.allows(id) && (include || !settings.hidden(id))
+    })?
+    .into_iter()
+    .filter(recallable)
+    .collect();
     let mut hits = Vec::new();
     for r in &records {
         let title = settings::words(r["title"].as_str().unwrap_or_default());

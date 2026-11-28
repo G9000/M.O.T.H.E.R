@@ -3,7 +3,7 @@ const words = (s) => String(s ?? '').toLowerCase().match(/[\p{L}\p{N}]+/gu) ?? [
 
 export function rankMoments(records, clue, includeKeepsakes = false) {
   const terms = [...new Set(words(clue).filter((word) => !ignored.has(word)))];
-  return records.filter((r) => (includeKeepsakes || !r.keepsake) && !['retracted', 'superseded', 'cancelled'].includes(r.status)).map((record) => {
+  return records.filter((r) => !r.sourceReview && (includeKeepsakes || !r.keepsake) && !['retracted', 'superseded', 'cancelled'].includes(r.status)).map((record) => {
     const title = new Set(words(record.title));
     const content = new Set(words(record.content));
     const matched = terms.filter((term) => title.has(term) || content.has(term));

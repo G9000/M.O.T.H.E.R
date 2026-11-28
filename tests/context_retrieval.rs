@@ -91,6 +91,181 @@ fn ids(page: &Value) -> Vec<String> {
 }
 
 #[test]
+fn reviewed_project_correction_invalidates_only_linked_summaries() {
+    let f = Fixture::new();
+    let original = f.write(&f.chatgpt, "Lantern launch on Tuesday", "owner_statement");
+    let other = f.write(
+        &f.codex,
+        "Lantern team recalls Wednesday",
+        "owner_statement",
+    );
+    let derive = |source: &Value, title: &str| {
+        f.store.v1_call(&f.codex,"mother_write_record",json!({"workspaceId":f.workspace,"generation":f.generation,
+            "operationId":Uuid::new_v4().to_string(),"expectedRevision":0,"record":{"kind":"memory",
+            "title":title,"content":"Tuesday is the planned launch.","status":"active","basis":"model_inference","references":[source["id"]]}})).unwrap()["record"].clone()
+    };
+    let summary = derive(&original, "Lantern launch summary");
+    let recap = derive(&summary, "Lantern weekly recap");
+    let read_original = || {
+        f.store
+            .v1_call(
+                &f.codex,
+                "mother_read_original",
+                json!({"source":"record","id":summary["id"],"maxResponseBytes":4096}),
+            )
+            .unwrap()
+    };
+    let canonical = read_original();
+    assert_eq!(
+        serde_json::from_str::<Value>(canonical["fragment"].as_str().unwrap()).unwrap(),
+        summary
+    );
+    let encoder = Synthetic::default();
+    assert_eq!(index_with(&f.store, &encoder, 8).unwrap().indexed, 4);
+    f.store
+        .v1_call(
+            &f.codex,
+            "mother_pin_record",
+            json!({"id":summary["id"],"pinned":true}),
+        )
+        .unwrap();
+    let review = |action: &str, content: &str| {
+        let proposal = f.store.v1_call(&f.chatgpt,"mother_propose_memory",json!({"workspaceId":f.workspace,"generation":f.generation,
+            "operationId":Uuid::new_v4().to_string(),"expectedRevision":1,"id":original["id"],
+            "source":"Synthetic planning minutes","basis":"owner_statement","record":{"kind":"memory","title":"Lantern launch schedule",
+            "content":content,"basis":"owner_statement","status":"active","sources":[{"label":"Synthetic planning minutes","uri":"https://example.test/lantern"}]}})).unwrap()["proposal"].clone();
+        assert_eq!(proposal["actor"], "synthetic-chatgpt");
+        assert_eq!(proposal["targetId"], original["id"]);
+        f.store.v1_review_proposal(json!({"workspaceId":f.workspace,"generation":f.generation,"operationId":Uuid::new_v4().to_string(),
+            "proposalId":proposal["id"],"expectedRevision":1,"action":action})).unwrap()
+    };
+    let fetch = |auth: &Auth, r: &Value| {
+        f.store
+            .v1_call(auth, "mother_get_record", json!({"id":r["id"]}))
+            .unwrap()
+    };
+    assert_eq!(review("dismiss", "Proposed Friday")["status"], "dismissed");
+    assert!(fetch(&f.codex, &recap).get("sourceReview").is_none());
+    let saved = review("save", "Launch on Thursday");
+    assert_eq!(read_original(), canonical);
+    let status = index_status(&f.store, Some(&f.codex), &encoder.profile()).unwrap();
+    assert_eq!(status["eligibleRecords"], 2);
+    assert_eq!(index_with(&f.store, &encoder, 8).unwrap().pruned, 3);
+    assert_eq!(saved["receipt"]["record"]["revision"], 2);
+    assert_eq!(saved["receipt"]["record"]["actor"], "@owner-review");
+    let search = NativeSearch::new(f.dir.path().join("missing-model"));
+    for auth in [&f.codex, &f.chatgpt] {
+        let current = fetch(auth, &original);
+        assert_eq!(current["content"], "Launch on Thursday");
+        assert_eq!(current["sources"][0]["label"], "Synthetic planning minutes");
+        let context = f.context(auth, json!({"order":"recent"})).unwrap();
+        assert!(
+            !context["pinned"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|r| r["id"] == summary["id"])
+        );
+        let found = search
+            .search(&f.store, auth, json!({"mode":"literal","query":"Lantern"}))
+            .unwrap();
+        for page in [&context, &found] {
+            let matched = ids(page);
+            for r in [&other, &original] {
+                assert!(matched.contains(&r["id"].as_str().unwrap().to_owned()));
+            }
+            for r in [&summary, &recap] {
+                assert!(!matched.contains(&r["id"].as_str().unwrap().to_owned()));
+            }
+        }
+        for r in [&summary, &recap] {
+            let inspected = fetch(auth, r);
+            assert_eq!(inspected["content"], r["content"]);
+            assert_eq!(inspected["sourceReview"]["reason"], "revised_reference");
+            assert_eq!(inspected["sourceReview"]["sourceId"], original["id"]);
+        }
+    }
+    let past = f
+        .store
+        .v1_call(
+            &f.codex,
+            "mother_get_record_history",
+            json!({"id":original["id"],"revision":1}),
+        )
+        .unwrap();
+    assert_eq!(past["current"], false);
+    assert_eq!(past["record"], original);
+    assert_eq!(
+        f.store
+            .v1_garden_reader(summary["id"].as_str().unwrap())
+            .unwrap()["sourceReview"]["sourceRevision"],
+        2
+    );
+    let access = ClientAccess {
+        mode: AccessMode::Shared,
+        subject: Some("summary-guest".into()),
+        records: vec![summary["id"].as_str().unwrap().to_owned()],
+    };
+    let guest = f
+        .store
+        .v1_grant("summary-guest", &["read".into()], &access, None)
+        .unwrap();
+    let shared = fetch(&guest, &summary);
+    assert_eq!(
+        shared["sourceReview"],
+        json!({"state":"needs_review","reason":"unverified_reference"})
+    );
+    assert!(
+        !shared
+            .to_string()
+            .contains(original["id"].as_str().unwrap())
+    );
+}
+
+#[test]
+fn gardening_summary_uses_the_reviewed_revision_even_with_identical_timestamps() {
+    #[derive(Debug)]
+    struct FixedClock;
+    impl mother::garden::store::Clock for FixedClock {
+        fn now(&self) -> chrono::DateTime<chrono::Utc> {
+            "2090-01-01T12:00:00Z".parse().unwrap()
+        }
+    }
+    let mut f = Fixture::new();
+    drop(f.store);
+    f.store = GardenStore::open_with_clock(
+        f.dir.path().join("native.redb"),
+        std::sync::Arc::new(FixedClock),
+    )
+    .unwrap();
+    let first = f.write(&f.codex, "Lantern timetable", "owner_statement");
+    let source = f.revise(&f.codex, &first, "Launch on Thursday", "active");
+    let id = source["id"].as_str().unwrap();
+    let evidence = mother::gardening::source([(id, 2)]);
+    let proposal=f.store.v1_call(&f.chatgpt,"mother_propose_memory",json!({
+        "workspaceId":f.workspace,"generation":f.generation,"operationId":Uuid::new_v4().to_string(),
+        "expectedRevision":0,"source":evidence,"basis":"model_inference",
+        "record":{"kind":"memory","title":"Lantern schedule summary","content":"Launch is scheduled for Thursday.",
+            "status":"active","basis":"model_inference","references":[id]}
+    })).unwrap();
+    let saved=f.store.v1_review_proposal(json!({"workspaceId":f.workspace,"generation":f.generation,
+        "operationId":Uuid::new_v4().to_string(),"proposalId":proposal["proposal"]["id"],"expectedRevision":1,"action":"save"})).unwrap();
+    let summary = &saved["receipt"]["record"];
+    assert_eq!(source["updatedAt"], summary["updatedAt"]);
+    let fetch = || {
+        f.store
+            .v1_call(&f.codex, "mother_get_record", json!({"id":summary["id"]}))
+            .unwrap()
+    };
+    assert!(fetch().get("sourceReview").is_none());
+    f.revise(&f.codex, &source, "Archived timetable", "retracted");
+    assert_eq!(
+        fetch()["sourceReview"],
+        json!({"state":"needs_review","reason":"retired_reference","sourceId":id,"sourceRevision":3})
+    );
+}
+
+#[test]
 fn explicit_budget_requires_valid_size_and_pageable_order() {
     let f = Fixture::new();
     let auth = &f.codex;

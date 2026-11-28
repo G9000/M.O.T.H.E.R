@@ -64,7 +64,7 @@ function formOf(r) {
  */
 export function fromSnapshot(src, all) {
   const known = new Map(all.map((r) => [r.id, r]));
-  const brief = (r) => ({ id: r.id, kind: r.kind, title: r.title, status: r.status, updatedAt: r.updatedAt, basis: r.basis });
+  const brief = (r) => ({ id: r.id, kind: r.kind, title: r.title, status: r.status, updatedAt: r.updatedAt, basis: r.basis, sourceReview: r.sourceReview });
   const reviewed = src.actor === OWNER_REVIEW;
   const witnessOf = (r, relation) => ({
     recordId: r.id,
@@ -82,7 +82,7 @@ export function fromSnapshot(src, all) {
     sources: r.sources ?? [],
   });
   const naming = all.filter((r) => r.id !== src.id && (r.references ?? []).includes(src.id)).sort((a, b) => String(b.updatedAt).localeCompare(String(a.updatedAt)));
-  const witnesses = [...(reflection(src) ? [witnessOf(src, 'self')] : []), ...naming.filter((r) => reflection(r) && r.status === 'active').map((r) => witnessOf(r, 'references'))];
+  const witnesses = [...(reflection(src) ? [witnessOf(src, 'self')] : []), ...naming.filter((r) => reflection(r) && r.status === 'active' && !r.sourceReview).map((r) => witnessOf(r, 'references'))];
   return {
     recordId: src.id,
     kind: src.kind,
@@ -94,6 +94,7 @@ export function fromSnapshot(src, all) {
     createdAt: src.createdAt,
     updatedAt: src.updatedAt,
     eventDate: src.eventDate ?? null,
+    sourceReview: src.sourceReview ?? null,
     content: src.content,
     truncated: src.truncated,
     length: null,
@@ -150,6 +151,7 @@ export function createReader(root, { fetchReading, snapshotOf, all, order, walk,
       <header class="rhead">
         <p class="rkind">${esc(KIND[r.kind] ?? r.kind)}${retired ? ` · <span class="rretired">${retired}, kept as history</span>` : ''}</p>
         <h2 id="reader-title" tabindex="-1">${esc(r.title)}</h2>
+        ${r.sourceReview?.state === 'needs_review' ? '<p class="rlabel">Source review needed. This account is set aside from current recall until its references are verified.</p>' : ''}
         <p class="rdate">${r.eventDate?.value ? `${esc(r.eventDate.value)}` : `Recorded ${date(r.createdAt)}`}${r.updatedAt && r.updatedAt !== r.createdAt ? ` · last revised ${date(r.updatedAt)}` : ''}</p>
       </header>`;
   }
@@ -234,7 +236,7 @@ export function createReader(root, { fetchReading, snapshotOf, all, order, walk,
     const link = (b) =>
       b.available === false
         ? `<li><code>${esc(b.id)}</code> ${copy(b.id, 'record ID')}<br><span class="rgap">Not available here. This is a gap in what can be shown, not proof that it never existed.</span></li>`
-        : `<li><button class="chip" data-read="${esc(b.id)}">${esc(b.title)}</button> <span class="rmeta">${esc(b.kind)}${b.basis ? ` · ${esc(b.basis)}` : ''} · ${esc(b.status)}</span></li>`;
+        : `<li><button class="chip" data-read="${esc(b.id)}">${esc(b.title)}${b.sourceReview ? ' (source review needed)' : ''}</button> <span class="rmeta">${esc(b.kind)}${b.basis ? ` · ${esc(b.basis)}` : ''} · ${esc(b.status)}</span></li>`;
     const length = r.length == null ? (r.truncated ? 'Only the first 4,000 characters are in this snapshot' : 'As in the snapshot') : `${r.length.toLocaleString('en-GB')} characters${r.truncated ? ', cut short for reading' : ', complete'}`;
     return `
       <h3 id="provenance" tabindex="-1">This record</h3>
@@ -276,7 +278,7 @@ export function createReader(root, { fetchReading, snapshotOf, all, order, walk,
       <section class="rrelated" aria-labelledby="related-title">
         <h3 id="related-title">Linked records</h3>
         <p class="rmeta">Exact links stored with these records. Nothing here is a suggestion.</p>
-        <div class="chips">${links.map((b) => `<button class="chip" data-read="${esc(b.id)}">${esc(b.title)}${RETIRED[b.status] ? ` <span class="rgap">· ${RETIRED[b.status].toLowerCase()}</span>` : ''}</button>`).join('')}</div>
+        <div class="chips">${links.map((b) => `<button class="chip" data-read="${esc(b.id)}">${esc(b.title)}${b.sourceReview ? ' (source review needed)' : ''}${RETIRED[b.status] ? ` <span class="rgap">· ${RETIRED[b.status].toLowerCase()}</span>` : ''}</button>`).join('')}</div>
       </section>`;
   }
 

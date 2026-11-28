@@ -8,6 +8,7 @@ test('clues rank matching words, showing keepsakes only when requested', () => {
     {id: 'b', title: 'Script notes'},
     {id: 'c', title: 'Presented without a script', keepsake: true},
     {id: 'd', title: 'Presented without a script', status: 'retracted'},
+    {id: 'e', title: 'Presented without a script', sourceReview: {state: 'needs_review'}},
   ];
   const clue = 'Show me the day I presented without a script';
   assert.deepEqual(rankMoments(records, clue).map((h) => h.record.id), ['a', 'b']);

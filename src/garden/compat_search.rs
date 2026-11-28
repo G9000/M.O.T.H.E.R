@@ -609,11 +609,11 @@ fn eligible_record(value: &Value) -> Result<Eligible> {
     })
 }
 
-fn eligible(tx: &impl View) -> Result<Vec<Eligible>> {
+fn eligible(tx: &impl View, allowed: impl Fn(&str) -> bool) -> Result<Vec<Eligible>> {
     let settings = super::settings::Settings::load(tx)?;
-    tx.values(super::RECORDS)?
+    super::summary_review::records(tx, |id| allowed(id) && !settings.hidden(id))?
         .iter()
-        .filter(|r| recallable(r) && !settings.hidden(r["id"].as_str().unwrap_or_default()))
+        .filter(|r| recallable(r))
         .map(eligible_record)
         .collect()
 }
@@ -715,7 +715,11 @@ pub fn index_with(
     let now = store.clock.now();
     let (records, rows, mut state) = {
         let tx = store.db.begin_read().map_err(unavailable)?;
-        (eligible(&tx)?, cached_rows(&tx, &scope)?, read_state(&tx)?)
+        (
+            eligible(&tx, |_| true)?,
+            cached_rows(&tx, &scope)?,
+            read_state(&tx)?,
+        )
     };
     let mut report = IndexReport::default();
     let keep: HashMap<String, (u64, String)> = records
@@ -793,8 +797,12 @@ pub fn index_with(
             .map_err(unavailable)?;
         // Publish only for the exact canonical revision and text that were embedded.
         let settings = super::settings::Settings::load(&tx)?;
-        let current = tx
-            .get(super::RECORDS, &record.id)?
+        let mut current = tx.get(super::RECORDS, &record.id)?;
+        if let Some(r) = &mut current {
+            super::summary_review::Review::default()
+                .annotate(&tx, r, &|id| !settings.hidden(id))?;
+        }
+        let current = current
             .filter(|v| recallable(v) && !settings.hidden(&record.id))
             .map(|v| eligible_record(&v))
             .transpose()?;
@@ -844,10 +852,7 @@ pub fn index_status(
     let access = auth
         .map(|auth| principal(&tx, auth, "read").map(|p| p.access))
         .transpose()?;
-    let records: Vec<Eligible> = eligible(&tx)?
-        .into_iter()
-        .filter(|r| access.as_ref().is_none_or(|a| a.allows(&r.id)))
-        .collect();
+    let records = eligible(&tx, |id| access.as_ref().is_none_or(|a| a.allows(id)))?;
     let rows = cached_rows(&tx, &scope)?;
     let state = read_state(&tx)?;
     let (mut indexed, mut partial, mut unembeddable, mut failed, mut pending) = (0, 0, 0, 0, 0);
