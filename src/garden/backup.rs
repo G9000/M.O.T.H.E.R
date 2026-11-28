@@ -990,7 +990,8 @@ mod recall_restore_tests {
     use serde_json::json;
     #[test]
     fn full_restore_preserves_owner_recall_settings() {
-        let dir = tempfile::tempdir().unwrap();
+        let root = std::fs::canonicalize(std::env::temp_dir()).unwrap();
+        let dir = tempfile::tempdir_in(root).unwrap();
         let workspace = uuid::Uuid::new_v4().to_string();
         let generation = uuid::Uuid::new_v4().to_string();
         let store =

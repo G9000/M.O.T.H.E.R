@@ -789,7 +789,7 @@ pub fn owner_request(
     if action == "activity" {
         // Every recent operation, automatic or manual, with its recorded authorization.
         let mut all = sessions(root)?;
-        all.sort_by(|a, b| b.1.created.cmp(&a.1.created));
+        all.sort_by_key(|(_, entry)| std::cmp::Reverse(entry.created));
         let mut items = Vec::new();
         for (dir, mut session) in all.into_iter().take(200) {
             items.push(match outcome(store, &dir, &mut session)? {
