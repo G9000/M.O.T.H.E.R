@@ -56,7 +56,7 @@ pub(super) struct Scan {
     unavailable_sessions: usize,
     excluded_sessions: usize,
     skipped_turns_in_window: usize,
-    selected_items: usize,
+    pub(super) selected_items: usize,
     dates_with_readable_turns: Vec<NaiveDate>,
     dates_without_readable_turns: Vec<NaiveDate>,
 }
@@ -77,6 +77,7 @@ pub(super) struct Candidate {
     pub(super) kind: Kind,
     pub(super) title: String,
     pub(super) summary: String,
+    pub(super) original: String,
 }
 
 impl Candidate {
@@ -242,8 +243,8 @@ fn read_session(path: &Path, session: Uuid, window: Window) -> Result<Session> {
         let selected = (!excluded)
             .then(|| plain_text(content))
             .flatten()
-            .and_then(|text| selection(role, text));
-        let Some((kind, title, summary)) = selected else {
+            .and_then(|text| selection(role, text).map(|selected| (text, selected)));
+        let Some((original, (kind, title, summary))) = selected else {
             result.skipped += 1;
             continue;
         };
@@ -263,6 +264,7 @@ fn read_session(path: &Path, session: Uuid, window: Window) -> Result<Session> {
             kind,
             title,
             summary,
+            original: original.to_owned(),
         });
     }
     if result.excluded {
@@ -271,7 +273,7 @@ fn read_session(path: &Path, session: Uuid, window: Window) -> Result<Session> {
         let previously_selected = result.candidates.len();
         result.candidates.retain(|candidate| {
             candidate.kind != Kind::Observation
-                && ![&candidate.title, &candidate.summary]
+                && ![&candidate.title, &candidate.summary, &candidate.original]
                     .into_iter()
                     .any(|text| {
                         let normalized = words(text);
@@ -378,6 +380,10 @@ fn fragments(words: &[String]) -> Vec<String> {
 }
 
 fn selection(role: &str, text: &str) -> Option<(Kind, String, String)> {
+    // The original is stored verbatim, including boundary whitespace.
+    if text.encode_utf16().count() > 1024 {
+        return None;
+    }
     let text = text.trim();
     if text.chars().any(char::is_control) {
         return None;

@@ -49,6 +49,31 @@ To pause, set enabled to false. Capture checks policy at startup and immediately
 
 ## What can be selected
 
+### Select a passage explicitly
+
+`mother capture --policy /absolute/private/capture.json select` reads one JSON object on standard input. Supply only the passages you chose. This command requires an enabled policy with a private state directory and service configuration. It does not read the transcript directory. Use a fresh operation UUID for each selection and retain it to check the outcome or retry.
+
+```json
+{
+  "operationId": "0c5393df-6284-4d29-aed8-9c65c681069d",
+  "title": "Why we changed the rehearsal",
+  "sourceRef": "Rehearsal planning conversation",
+  "eventDate": "2026-09-05",
+  "originals": [
+    {"speaker":"user","author":"Alex","text":"We need a quieter room for the rehearsal.","spokenAt":"2026-09-03T19:01:00Z"},
+    {"speaker":"assistant","text":"I'll note the room requirement."}
+  ],
+  "summary": {"author":"Assistant","text":"Alex asked for a quieter rehearsal room."},
+  "whyItMattered": {"author":"Alex","text":"The rehearsal recordings need clear audio."}
+}
+```
+
+Supply a title and one to forty passages in conversation order. Each passage needs the original text and a speaker role of `user`, `assistant` or `other`. The author, utterance time, source reference, event date, attributed summary and attributed reason are optional. Omit unknown dates. Capture adds its own time when it prepares the private journal. The canonical content limit is 12,000 UTF-16 units including attribution and JSON formatting. An oversized selection fails in full. For original images, audio or video, use the [attachment workflow](media-bridge.md) on the approved narrative memory.
+
+The CLI prints submitted operation IDs. Approval produces the canonical memory ID and receipt. An authorized reader can open the full record with `mother_get_record`, or page its original through `mother_read_original` on a supporting owner. The record's `content` is JSON text identified by `format: "mother.selected-conversation.v1"`. The `originals` field retains the selected text including whitespace and line breaks. The notes have their own authors and do not replace those passages.
+
+### Select recognized Claude Code turns
+
 Capture uses a deliberately narrow local selector. Short, standalone first-person statements such as “I’ve decided to use the blue cover.” or “We finished the pilot today.” can be captured without a separate request. The selector derives a short title and attributed summary. Quoted or conditional proposals, tool results, generated metadata, sidechain turns, and unrecognized phrasing are skipped. It reads each eligible statement on its own, so an implicit reversal in a later turn may require a correction at review. Milestones reflect the owner’s report. An explicit assistant line in the form “Observation [Pilot pace]: The pilot seemed paced for beginners.” is labeled as an unverified agent observation.
 
 Use “Decision correction [Exact current title]: Use the yellow cover instead.” for a new revision proposal. Capture searches first and reads a unique current confirmed match in full. It carries its record ID and expected revision forward with its existing source references. If the title is ambiguous or the revision changes, capture skips the correction. A fresh correction turn can be considered against the current record. The owner reviews both new items and corrections through the existing inbox.
@@ -70,3 +95,23 @@ Add **--submit** to run. Resubmit the same window with the same policy, stable c
 A received proposal is counted as previously submitted on rerun, including when the owner has dismissed it. Only the owner can approve; proposals remain outside canonical search until approval. See [inbox review commands](living-memory.md).
 
 The repository tests exercise the CLI, the SessionEnd input, and the authenticated local service with synthetic Claude Code JSONL files. They do not load the hook into an installed Claude Code client or read any real conversation.
+
+## Recover an interrupted capture
+
+Use the same private policy and operation UUID after a disconnect or client restart. Omit `--operation` from `status` to list the operations journaled for this client, workspace and generation.
+
+```sh
+mother capture --policy /absolute/private/capture.json status --operation <original-uuid>
+mother capture --policy /absolute/private/capture.json retry --operation <original-uuid>
+```
+
+| Status | What to do |
+| --- | --- |
+| `queued` | The draft is on disk and the service has no visible receipt. Retry the original UUID to submit the journaled request. |
+| `awaiting_review` | The service received the proposal. Open the owner inbox and save or dismiss it. |
+| `saved` | Open the returned `recordId`. The result includes its saved revision and the owner's review operation ID. |
+| `dismissed` | The owner closed this proposal. Its review operation ID identifies the decision. |
+| `failed` | Inspect the error code and original draft. A changed correction target or reused UUID requires owner attention. |
+| `unconfirmed` | Follow the reported recovery action. Reconnect the original service or ask the owner to check current access. |
+
+`status` reads receipts even when the capture policy is paused. `retry` requires an enabled policy, checks the original receipt and submits the exact journaled request only when the operation is missing. Repeating it after approval resolves the original record and review operation ID. These commands return status and identifiers without printing the selected passages.

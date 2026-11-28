@@ -1,4 +1,5 @@
-//! Opt-in Claude Code adapter. The source reader never sends a transcript to the workspace.
+//! Opt-in capture of explicitly selected passages and narrowly selected Claude Code turns.
+mod selected;
 mod source;
 mod submission;
 
@@ -6,11 +7,11 @@ use crate::{
     config::{check_private_output, read_json},
     error::{Error, Result},
     private_paths::owner_directory,
-    service::{LocalClient, load_service_config},
+    service::{LocalClient, ServiceClientConfig, load_service_config},
 };
 use chrono::NaiveDate;
 use serde::{Deserialize, Serialize};
-use source::{Candidate, Scan, read_hook, scan};
+use source::{Scan, read_hook, scan};
 use std::{
     io::Read,
     path::{Path, PathBuf},
@@ -34,6 +35,8 @@ fn policy(path: &Path) -> Result<Policy> {
 
 /// An explicit Claude Code end-of-session invocation or bounded historical scan.
 pub enum CaptureRequest {
+    /// Read one owner-selected conversation from stdin.
+    Select,
     SessionEnd {
         session: Option<Uuid>,
     },
@@ -55,15 +58,83 @@ pub struct CaptureReport {
     coverage: Scan,
     submitted: usize,
     previously_submitted: usize,
+    operation_ids: Vec<String>,
     skipped_conflicts: usize,
     paused: bool,
+}
+
+enum Candidate {
+    Claude(source::Candidate),
+    Selected(selected::Selection),
+}
+
+impl Candidate {
+    fn operation(&self) -> String {
+        match self {
+            Self::Claude(turn) => turn.operation().to_string(),
+            Self::Selected(selection) => selection.operation_id.clone(),
+        }
+    }
 }
 
 fn capture_error(message: &str) -> Error {
     Error::domain("CAPTURE_UNAVAILABLE", message)
 }
 
-/// Read only the selected Claude Code project directory and optionally submit to the review inbox.
+/// Inspect journaled capture operations, or explicitly retry a single original
+/// request. Only counts and operation/proposal/record identifiers leave this path.
+pub fn recovery(path: &Path, operation: Option<Uuid>, retry: bool) -> Result<serde_json::Value> {
+    let initial = policy(path)?;
+    if retry && (!initial.enabled || operation.is_none()) {
+        return Err(capture_error(
+            "Retry requires an enabled capture policy and one original operation UUID.",
+        ));
+    }
+    let state = initial
+        .state_dir
+        .as_deref()
+        .filter(|p| p.is_absolute())
+        .ok_or_else(|| capture_error("Select an absolute private capture state directory."))?;
+    owner_directory(state)?;
+    let config_path = initial
+        .service_config
+        .as_deref()
+        .ok_or_else(|| capture_error("Select a private service configuration."))?;
+    check_private_output(config_path)?;
+    let config = load_service_config(config_path)?;
+    let call = capture_transport(&config)?;
+    let sink = submission::Inbox::new(
+        &call,
+        state,
+        &config.client_id,
+        &config.workspace_id,
+        &config.generation,
+    );
+    sink.recover(operation, retry, || Ok(policy(path)? == initial))
+}
+
+fn capture_transport(
+    config: &ServiceClientConfig,
+) -> Result<impl Fn(&str, &serde_json::Value) -> Result<serde_json::Value>> {
+    let service = match LocalClient::new(config.clone()) {
+        Ok(service) => Some(service),
+        Err(e) if e.code() == "STORE_UNAVAILABLE" => None,
+        Err(e) => return Err(e),
+    };
+    Ok(move |name: &str, args: &serde_json::Value| {
+        service
+            .as_ref()
+            .ok_or_else(|| {
+                Error::domain(
+                    "STORE_UNAVAILABLE",
+                    "Cannot reach the configured owner service.",
+                )
+            })?
+            .call(name, args)
+    })
+}
+
+/// Read selected input or one configured Claude Code source and optionally submit for review.
 /// Each invocation reloads owner policy and checks the same policy before each submission.
 pub fn run(path: &Path, request: CaptureRequest, hook_input: impl Read) -> Result<CaptureReport> {
     let initial = policy(path)?;
@@ -97,25 +168,32 @@ pub fn run(path: &Path, request: CaptureRequest, hook_input: impl Read) -> Resul
             "The policy changed during startup; restart capture.",
         ));
     }
-    let root = initial
-        .transcript_dir
-        .as_deref()
-        .ok_or_else(|| capture_error("Select one Claude Code project transcript directory."))?;
-    if !root.is_absolute() {
-        return Err(capture_error(
-            "The selected transcript directory must be absolute.",
-        ));
-    }
-    owner_directory(root)?;
-    let session = match request {
-        CaptureRequest::SessionEnd {
-            session: Some(session),
-        } => Some(session),
-        CaptureRequest::SessionEnd { session: None } => Some(read_hook(hook_input, root)?),
-        CaptureRequest::Backfill { .. } => None,
+    let candidates = if matches!(request, CaptureRequest::Select) {
+        report.coverage.selected_items = 1;
+        vec![Candidate::Selected(selected::read(hook_input)?)]
+    } else {
+        let root = initial
+            .transcript_dir
+            .as_deref()
+            .ok_or_else(|| capture_error("Select one Claude Code project transcript directory."))?;
+        if !root.is_absolute() {
+            return Err(capture_error(
+                "The selected transcript directory must be absolute.",
+            ));
+        }
+        owner_directory(root)?;
+        let session = match request {
+            CaptureRequest::SessionEnd {
+                session: Some(session),
+            } => Some(session),
+            CaptureRequest::SessionEnd { session: None } => Some(read_hook(hook_input, root)?),
+            CaptureRequest::Backfill { .. } => None,
+            CaptureRequest::Select => unreachable!(),
+        };
+        let (coverage, candidates) = scan(root, session, window)?;
+        report.coverage = coverage;
+        candidates.into_iter().map(Candidate::Claude).collect()
     };
-    let (coverage, candidates) = scan(root, session, window)?;
-    report.coverage = coverage;
     if report.preview || candidates.is_empty() {
         return Ok(report);
     }
@@ -134,21 +212,8 @@ pub fn run(path: &Path, request: CaptureRequest, hook_input: impl Read) -> Resul
         .as_deref()
         .ok_or_else(|| capture_error("Select a private service client configuration."))?;
     check_private_output(config)?;
-    let service = LocalClient::new(load_service_config(config)?)?;
-    submit(&mut report, path, &initial, &service, state, candidates)?;
-    Ok(report)
-}
-
-fn submit(
-    report: &mut CaptureReport,
-    path: &Path,
-    initial: &Policy,
-    service: &LocalClient,
-    state: &Path,
-    candidates: Vec<Candidate>,
-) -> Result<()> {
-    let call = |name: &str, args: &serde_json::Value| service.call(name, args);
-    let config = service.config();
+    let config = load_service_config(config)?;
+    let call = capture_transport(&config)?;
     let sink = submission::Inbox::new(
         &call,
         state,
@@ -157,13 +222,19 @@ fn submit(
         &config.generation,
     );
     for candidate in candidates {
-        if policy(path)? != *initial {
+        if policy(path)? != initial {
             report.paused = true;
             break;
         }
-        match sink.submit(&candidate, || Ok(policy(path)? == *initial))? {
-            submission::Outcome::Submitted => report.submitted += 1,
-            submission::Outcome::AlreadyReceived => report.previously_submitted += 1,
+        match sink.submit(&candidate, || Ok(policy(path)? == initial))? {
+            submission::Outcome::Submitted => {
+                report.submitted += 1;
+                report.operation_ids.push(candidate.operation());
+            }
+            submission::Outcome::AlreadyReceived => {
+                report.previously_submitted += 1;
+                report.operation_ids.push(candidate.operation());
+            }
             submission::Outcome::NoUniqueCurrentMatch => report.skipped_conflicts += 1,
             submission::Outcome::Paused => {
                 report.paused = true;
@@ -171,5 +242,5 @@ fn submit(
             }
         }
     }
-    Ok(())
+    Ok(report)
 }

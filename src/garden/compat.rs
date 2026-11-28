@@ -11,6 +11,8 @@ mod project;
 pub(crate) mod reader;
 #[path = "recall_settings.rs"]
 mod settings;
+#[path = "summary_review.rs"]
+mod summary_review;
 #[path = "compat_view.rs"]
 pub(crate) mod view;
 use super::{
@@ -591,8 +593,7 @@ impl GardenStore {
             "mother_project_resume" => project::resume(&tx, auth, &p.access, &args)?,
             "mother_get_record" => {
                 let id = required_id(&args, "id")?;
-                p.access.require(id)?;
-                record(&tx, id)?
+                summary_review::inspect(&tx, &p.access, id)?
             }
             "mother_get_record_history" => {
                 if p.access.mode == AccessMode::Shared {
@@ -1419,10 +1420,11 @@ fn audit_native(tx: &redb::ReadTransaction) -> Result<()> {
 }
 
 fn recallable(r: &Value) -> bool {
-    !matches!(
-        r["status"].as_str(),
-        Some("retracted" | "superseded" | "cancelled")
-    )
+    r["sourceReview"]["state"] != "needs_review"
+        && !matches!(
+            r["status"].as_str(),
+            Some("retracted" | "superseded" | "cancelled")
+        )
 }
 fn unsettled(r: &Value) -> bool {
     (r["kind"] == "task" && matches!(r["status"].as_str(), Some("doing" | "blocked")))
@@ -1460,15 +1462,7 @@ fn increment(counts: &mut Value, kind: &str, amount: i64) {
 }
 fn visible_records(tx: &impl View, access: &ClientAccess) -> Result<Vec<Value>> {
     let settings = settings::Settings::load(tx)?;
-    Ok(tx
-        .values(RECORDS)?
-        .into_iter()
-        .filter(|r| {
-            r["id"]
-                .as_str()
-                .is_some_and(|id| access.allows(id) && !settings.hidden(id))
-        })
-        .collect())
+    summary_review::records(tx, |id| access.allows(id) && !settings.hidden(id))
 }
 fn context(
     tx: &impl View,
@@ -1565,11 +1559,7 @@ fn context(
             "The balanced overview is a single page. Use order \"recent\" or \"created\" to paginate.",
         ));
     }
-    let all: Vec<_> = tx
-        .values(RECORDS)?
-        .into_iter()
-        .filter(|r| r["id"].as_str().is_some_and(visible))
-        .collect();
+    let all = summary_review::records(tx, visible)?;
     let mut by_kind = counts();
     let mut recallable_kind = counts();
     let mut recallable_total = 0;
@@ -1746,11 +1736,14 @@ fn context(
     let pins_total = pins.len();
     let mut pinned = Vec::new();
     for pin in pins {
-        let r = record(tx, string(&pin, "recordId")?)?;
-        if !recallable(&r) {
+        let id = string(&pin, "recordId")?;
+        let Some(r) = all.iter().find(|r| r["id"] == id) else {
+            continue;
+        };
+        if !recallable(r) {
             continue;
         }
-        let content = string(&r, "content")?;
+        let content = string(r, "content")?;
         let text = excerpt(content, 2000);
         pinned.push(json!({"id":r["id"],"kind":r["kind"],"title":r["title"],"status":r["status"],"revision":r["revision"],"updatedAt":r["updatedAt"],"content":text,"truncated":text.len()<content.len(),"recallReason":"pinned","pinnedBy":pin["actor"],"pinnedAt":pin["pinnedAt"]}));
     }

@@ -282,9 +282,23 @@ fn real_local_inbox_receives_only_selected_claude_turns_and_resumes_backfill() {
                 .unwrap()
                 .contains(live.to_string().as_str())
         );
-        let content = detail["record"]["content"].as_str().unwrap();
-        assert!(content.starts_with("Owner decided to use the blue cover."));
-        assert!(content.contains(detail["source"].as_str().unwrap()));
+        let content: Value =
+            serde_json::from_str(detail["record"]["content"].as_str().unwrap()).unwrap();
+        assert_eq!(
+            content["originals"][0]["text"],
+            "I've decided to use the blue cover."
+        );
+        assert_eq!(content["originals"][0]["speaker"], "user");
+        assert_eq!(
+            content["summary"]["text"],
+            "Owner decided to use the blue cover."
+        );
+        assert!(
+            detail["source"]
+                .as_str()
+                .unwrap()
+                .contains(content["sourceRef"].as_str().unwrap())
+        );
         assert_eq!(detail["record"]["status"], "confirmed");
 
         let client = LocalClient::new(config.clone()).unwrap();

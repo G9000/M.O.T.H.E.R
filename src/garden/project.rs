@@ -68,7 +68,9 @@ pub(super) fn resume(
     let seen = reading_position(&visits, &names);
     let mut records = visible_records(tx, access)?;
     records.retain(|r| {
-        project_match(r, &names).is_some() || seen.get(r["id"].as_str().unwrap_or("")).is_some()
+        r["sourceReview"]["state"] != "needs_review"
+            && (project_match(r, &names).is_some()
+                || seen.get(r["id"].as_str().unwrap_or("")).is_some())
     });
     records.sort_by(recent);
     let current: Vec<_> = records

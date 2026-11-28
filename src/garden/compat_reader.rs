@@ -7,7 +7,7 @@
 //! and never treats a title or guessed ID as a relationship: a reflection is shown only because
 //! its stored `references` name the record.
 use super::{
-    PROPOSALS, RECORDS, View, excerpt, inbox, metadata, recent, unavailable,
+    PROPOSALS, View, excerpt, inbox, metadata, recent, unavailable,
     view::{history, revisions},
 };
 use crate::{
@@ -110,6 +110,9 @@ fn brief(record: &Value) -> Value {
     if let Some(basis) = record.get("basis").filter(|v| v.is_string()) {
         out["basis"] = basis.clone();
     }
+    if let Some(flag) = record.get("sourceReview") {
+        out["sourceReview"] = flag.clone();
+    }
     out
 }
 
@@ -184,7 +187,7 @@ impl GardenStore {
         let settings = super::settings::Settings::load(&tx)?;
         let workspace = metadata(&tx, "workspace")?;
         let generation = string(&workspace, "generation")?;
-        let mut all = tx.values(RECORDS)?;
+        let mut all = super::summary_review::records(&tx, |_| true)?;
         all.sort_by(recent);
         let by_id: HashMap<&str, &Value> = all
             .iter()
@@ -229,7 +232,7 @@ impl GardenStore {
                 }
                 let candidates: Vec<&&Value> = naming
                     .iter()
-                    .filter(|n| is_reflection(n) && n["status"] == "active")
+                    .filter(|n| is_reflection(n) && n["status"] == "active" && super::recallable(n))
                     .collect();
                 let witness_omitted = candidates.len().saturating_sub(MAX_REFLECTIONS);
                 witnesses.extend(
@@ -283,6 +286,7 @@ impl GardenStore {
                     "defaultLens": lens,
                     "readOnly": true,
                 });
+                if let Some(review)=r.get("sourceReview"){out["sourceReview"]=review.clone();}
                 for key in [
                     "nextStep",
                     "completed",

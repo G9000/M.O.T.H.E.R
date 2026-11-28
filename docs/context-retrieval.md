@@ -94,6 +94,14 @@ Project briefs recognize all registered names and consult reading positions save
 
 Keepsakes stay available in the owner Garden, curated walks and authorized direct reads by ID. Ordinary context, pins, assignments, project briefs and search exclude them. Call `mother_find_moment` with a natural-language `clue` to find up to three accessible accounts by matching distinctive words. Set `includeKeepsakes` only for an explicit request. Each hit includes the matched words, record ID, revision, saved time and any owner-supplied event date. Follow linked record IDs with `mother_get_record`. Approved photos have digest handles when the client can see the graph relationship and has media metadata access. Image bytes require the usual additional permission. The response reports partial media coverage when it reaches the scan limit.
 
+## Corrections to source records
+
+Derived memories with `basis: model_inference` and checkpoints may cite other records through `references`. On a fresh read, the Garden follows those links, including links through other derived accounts. A revised or retired source can mark a summary `sourceReview.state = needs_review`. Such summaries stay available by ID and in the owner’s archive with their original wording, attribution and revision history. Ordinary current recall skips them. A client unable to verify a linked source receives a generic review flag without that source’s identity.
+
+For summaries saved through Memory Gardening, review compares the exact source revisions accepted by the owner. Older plain references store only IDs. For those, a revision after the summary’s last update, or in the same timestamp interval, requires review. Independent accounts without a source link keep their own status.
+
+`mother_get_record` includes the current review flag. `mother_read_original` returns the stored record and its stable digest. Reading a historical revision also returns the stored record as written.
+
 ## Harness compatibility
 
 Existing calls keep their meaning. `{}` still returns the balanced overview with the persona and pins, and every older field is unchanged. All new fields are additive: `pagination`, `contextSections`, `createdAt`, `basis` and `compact`. A harness that ignores them still works, but it should read `pagination.hasMore` before claiming it has seen every record.

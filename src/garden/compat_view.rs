@@ -1,6 +1,6 @@
 //! Owner-only read model of the native v1 view for the local memory garden explorer.
 //! One read transaction: it never writes, widens a grant, or returns persona or credentials.
-use super::{ASSIGNMENTS, OPERATIONS, PINS, RECORDS, View, excerpt, metadata, recent, unavailable};
+use super::{ASSIGNMENTS, OPERATIONS, PINS, View, excerpt, metadata, recent, unavailable};
 use crate::{
     contracts::string,
     error::{Error, Result},
@@ -58,7 +58,7 @@ impl GardenStore {
         let settings = super::settings::Settings::load(&tx)?;
         let pins = keyed(tx.values(PINS)?);
         let assignments = keyed(tx.values(ASSIGNMENTS)?);
-        let mut records = tx.values(RECORDS)?;
+        let mut records = super::summary_review::records(&tx, |_| true)?;
         let total = records.len();
         records.sort_by(recent);
         records.sort_by_key(|r| !r["id"].as_str().is_some_and(|id| pins.contains_key(id)));
@@ -90,6 +90,9 @@ impl GardenStore {
                     "history": history,
                     "historyOmitted": omitted,
                 });
+                if let Some(review) = r.get("sourceReview") {
+                    out["sourceReview"] = review.clone();
+                }
                 if let Some(basis) = r.get("basis").filter(|v| v.is_string()) {
                     out["basis"] = basis.clone();
                 }

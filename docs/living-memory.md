@@ -12,7 +12,7 @@ The active agent calls `mother_propose_memory` once per candidate. It can propos
 
 The harness chooses and interprets the candidate; M.O.T.H.E.R keeps its provenance and review outcome. Selection, proposal admission, canonical approval, semantic indexing and actual recall in another host are separate steps. Approval makes a record eligible for authorized retrieval; it does not guarantee vectors or prompt inclusion. Each harness retains its own native memory, and sharing does not require adopting the workspace persona.
 
-Claude Code also supports [opt-in capture and resumable backfill](claude-code-capture.md) from one owner-selected local transcript directory. It submits to the same inbox.
+To preserve exact wording, provide one [explicit selection](claude-code-capture.md#select-a-passage-explicitly). It can include several speakers, their original passages and an attributed reason the exchange mattered. Claude Code also supports [opt-in capture and resumable backfill](claude-code-capture.md) from one owner-selected local transcript directory. Both submit to the same inbox.
 
 For a private, dated letter written from the witnessing agent's perspective, use the [Witness Journal skill](witness-journal.md). Drafts enter the inbox only when you ask to submit them.
 
