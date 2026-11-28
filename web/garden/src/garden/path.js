@@ -5,6 +5,8 @@
 // Read-only like the rest: it shows the snapshot it was given and opens records in the reader. Nothing it holds is
 // kept in browser storage.
 import { createReader } from './reader.js';
+import { rankMoments } from './moments.js';
+import { createWalks } from './walks.js';
 import { illustrateWisteria } from './botanical.js';
 import specimenSamples from './specimen-samples.jpg?inline';
 import { attachmentListing } from './session.js';
@@ -48,7 +50,10 @@ const reflection = (r) => r.kind === 'memory' && r.basis === 'model_inference' &
  */
 export function createReadingPath(root, { snapshot, read, closeable = true, banner = '', onOpen = () => {}, onClose = () => {}, signal }) {
   let records = [];
+  let clueMatches = new Map();
   let mediaMemories = new Set();
+  let photos = [];
+  const walks = createWalks(snapshot, read);
   let reflections = new Map();
   let opener = null;
   let behind = [];
@@ -57,6 +62,7 @@ export function createReadingPath(root, { snapshot, read, closeable = true, bann
   function take(next) {
     snapshot = next;
     records = (next.records ?? []).filter((r) => KINDS.includes(r.kind));
+    walks.update(records, photos);
     reflections = new Map();
     for (const r of records) if (reflection(r)) for (const id of new Set(r.references ?? [])) if (id !== r.id) reflections.set(id, (reflections.get(id) ?? 0) + 1);
   }
@@ -67,13 +73,19 @@ export function createReadingPath(root, { snapshot, read, closeable = true, bann
     if (want.media && !mediaMemories.has(r.id)) return false;
     if (!want.kinds.has(r.kind)) return false;
     if (want.retired && RETIRED[r.status]) return false;
-    if (!want.words.length) return true;
+    if (want.clue || !want.words.length) return true;
     const text = `${r.title}\n${r.content}\n${r.status}\n${r.kind}`.toLowerCase();
     return want.words.every((w) => text.includes(w));
   };
   /** [heading, records] in reading order: what is kept close first, then by month or by kind, newest first. */
   function groups() {
     const shown = records.filter(passes).sort((a, b) => time(b) - time(a));
+    if (want.clue && want.words.length) {
+      const hits = rankMoments(shown, want.words.join(' '), want.keepsakes);
+      clueMatches = new Map(hits.map((h) => [h.record.id, h.matched]));
+      return hits.length ? [['Closest moments', hits.map((h) => h.record)]] : [];
+    }
+    if (want.clue) return [];
     const pinned = shown.filter((r) => r.pinned);
     const rest = shown.filter((r) => !r.pinned);
     const out = pinned.length ? [['Kept close', pinned]] : [];
@@ -100,6 +112,9 @@ export function createReadingPath(root, { snapshot, read, closeable = true, bann
       `<span class="dot" style="background:${CSS[r.pinned ? 'pinned' : r.kind]}"></span>${esc(KIND[r.kind])}`,
       `Recorded ${day(r.createdAt)}`,
       esc(capture(r)),
+      ...(r.eventDate?.value ? ['Event ' + esc(r.eventDate.value)] : []),
+      ...(r.keepsake ? ['Keepsake'] : []),
+      ...(want.clue && clueMatches.has(r.id) ? ['Matched ' + esc(clueMatches.get(r.id).join(', '))] : []),
       ...(mediaMemories.has(r.id) ? ['Has media'] : []),
       ...(n ? [`${n} ${n === 1 ? 'reflection' : 'reflections'}`] : []),
       ...(retired ? [`<span class="rpoff">${retired}, kept as history</span>`] : []),
@@ -120,6 +135,7 @@ export function createReadingPath(root, { snapshot, read, closeable = true, bann
     const count = gs.reduce((n, [, rs]) => n + rs.length, 0);
     root.querySelector('.rpcount').textContent = !records.length
       ? 'No records yet.'
+      : want.clue ? (want.words.length ? count + ' matching moments in this view.' : 'Enter a clue to find a moment.')
       : count === records.length
         ? `${count} ${count === 1 ? 'record' : 'records'}, newest first.`
         : `${count} of ${records.length} records shown.`;
@@ -152,8 +168,11 @@ export function createReadingPath(root, { snapshot, read, closeable = true, bann
         ${banner}
         ${partial}
         <div class="rpcontrols">
+          <details class="rpwalks"></details>
           <label class="rpfind"><span>Search</span><input id="rp-q" type="search" autocomplete="off" spellcheck="false" placeholder="Words in a title or its text" /></label>
           <div class="rprow">
+            <label class="check"><input type="checkbox" id="rp-clue" ${want.clue ? 'checked' : ''} /> Find a moment from a clue</label>
+            <label class="check" id="rp-keepsake-label" ${want.clue ? '' : 'hidden'}><input type="checkbox" id="rp-keepsakes" ${want.keepsakes ? 'checked' : ''} /> Include keepsakes</label>
             <div class="rpseg" role="group" aria-label="Arrange the path">
               <button data-arrange="date" aria-pressed="${want.arrange === 'date'}">By month</button>
               <button data-arrange="kind" aria-pressed="${want.arrange === 'kind'}">By kind</button>
@@ -171,6 +190,7 @@ export function createReadingPath(root, { snapshot, read, closeable = true, bann
         </div>
       </div>`;
     illustrateWisteria(root.querySelector('.plate'));
+    walks.mount(root.querySelector('.rpwalks'));
     root.querySelector('#rp-q').value = want.words.join(' ');
     list();
   }
@@ -180,6 +200,13 @@ export function createReadingPath(root, { snapshot, read, closeable = true, bann
   on('input', (e) => {
     if (e.target.id === 'rp-q') {
       want.words = e.target.value.trim().toLowerCase().split(/\s+/).filter(Boolean);
+      list();
+    } else if (e.target.id === 'rp-clue') {
+      want.clue = e.target.checked;
+      root.querySelector('#rp-keepsake-label').hidden = !want.clue;
+      list();
+    } else if (e.target.id === 'rp-keepsakes') {
+      want.keepsakes = e.target.checked;
       list();
     } else if (e.target.id === 'rp-media') {
       want.media = e.target.checked;
@@ -243,6 +270,8 @@ export function createReadingPath(root, { snapshot, read, closeable = true, bann
     draw();
     root.hidden = false;
     void attachmentListing().then(({ images = [] }) => {
+      photos = images;
+      walks.update(records, photos);
       mediaMemories = new Set(images.flatMap(item => (item.memoryLinks ?? []).map(link => link.memoryId)));
       if (!root.hidden) list();
     });
@@ -257,6 +286,7 @@ export function createReadingPath(root, { snapshot, read, closeable = true, bann
   function close() {
     if (root.hidden || !closeable) return;
     root.hidden = true;
+    walks.unmount();
     root.innerHTML = '';
     for (const el of behind) el.inert = false;
     behind = [];

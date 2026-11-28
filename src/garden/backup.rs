@@ -151,6 +151,7 @@ fn known_tables() -> BTreeSet<String> {
         .chain(
             [
                 "garden_principals",
+                "garden_project_visits",
                 // Trust policies follow grants: never exported, never restored.
                 "garden_trust_policies",
                 "garden_replacement_incoming",
@@ -980,4 +981,65 @@ fn validate_blobs(tx: &ReadTransaction) -> Result<()> {
         artifact_refs(&decode::<Value>(bytes.value())?, tx)?;
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod recall_restore_tests {
+    use super::GardenStore;
+    use crate::access::ClientAccess;
+    use serde_json::json;
+    #[test]
+    fn full_restore_preserves_owner_recall_settings() {
+        let dir = tempfile::tempdir().unwrap();
+        let workspace = uuid::Uuid::new_v4().to_string();
+        let generation = uuid::Uuid::new_v4().to_string();
+        let store =
+            GardenStore::initialize(dir.path().join("source.redb"), &workspace, &generation)
+                .unwrap();
+        store.v1_initialize("Synthetic workspace").unwrap();
+        let writer = store
+            .v1_grant(
+                "writer",
+                &["read", "memory:write"].map(String::from),
+                &ClientAccess::default(),
+                None,
+            )
+            .unwrap();
+        let response=store.v1_call(&writer,"mother_write_record",json!({"workspaceId":workspace,"generation":generation,"operationId":uuid::Uuid::new_v4().to_string(),"expectedRevision":0,"record":{"kind":"memory","status":"active","basis":"source","title":"Bluebird kite","content":"Synthetic account"}})).unwrap();
+        let r = &response["record"];
+        let id = r["id"].as_str().unwrap();
+        store.project_alias("Aviary", "Bluebird", false).unwrap();
+        store.set_event_date(id, Some("2026-03-14")).unwrap();
+        store.set_keepsake(id, true).unwrap();
+        let bundle = dir.path().join("backup");
+        store.backup_to(&bundle).unwrap();
+        let (restored, _) =
+            super::restore_staging(&bundle, &dir.path().join("restored.redb"), &mut |_| {})
+                .unwrap();
+        let guest = restored
+            .v1_grant(
+                "restored-visitor",
+                &["read".into()],
+                &ClientAccess::default(),
+                None,
+            )
+            .unwrap();
+        assert_eq!(
+            restored
+                .v1_call(&guest, "mother_get_context", json!({}))
+                .unwrap()["records"],
+            json!([])
+        );
+        assert_eq!(
+            restored.v1_garden_reader(id).unwrap()["eventDate"]["value"],
+            "2026-03-14"
+        );
+        restored.set_keepsake(id, false).unwrap();
+        assert_eq!(
+            restored
+                .v1_call(&guest, "mother_project_resume", json!({"project":"Aviary"}))
+                .unwrap()["matchingRecords"],
+            1
+        );
+    }
 }

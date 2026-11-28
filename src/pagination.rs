@@ -16,6 +16,12 @@ use serde_json::{Value, json};
 pub const DEFAULT_PREVIEW_CHARS: usize = 400;
 /// Largest excerpt a caller may request; full records come from `mother_get_record`.
 pub const MAX_PREVIEW_CHARS: usize = 2000;
+/// Parse the caller's optional limit for the serialized MCP tool result.
+pub fn response_budget(args: &Value) -> Result<Option<usize>> {
+    args.get("maxResponseBytes")
+        .map(|_| contracts::integer(args, "maxResponseBytes", 4096, 12_288).map(|n| n as usize))
+        .transpose()
+}
 /// Records revised behind a cursor that one page may report before a restart is needed.
 pub const MAX_CHANGED: usize = 10;
 const MAX_CURSOR_CHARS: usize = 2048;
@@ -224,6 +230,10 @@ pub struct Cursor {
     /// Matching record IDs whose `updatedAt` equals `w`.
     #[serde(default)]
     wi: Vec<String>,
+    /// For a byte-limited page with many tied timestamps, carry a digest of the
+    /// complete tie group. Changing its membership requires restarting that page chain.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    wh: Option<String>,
     /// Search only: result offset and the ranking stamp it is valid for.
     #[serde(default)]
     off: usize,
@@ -342,13 +352,42 @@ pub(crate) fn keyset(
         .max()
         .unwrap_or_default()
         .to_owned();
-    let mut at_watermark: Vec<String> = matching
-        .iter()
-        .filter(|r| r["updatedAt"].as_str() == Some(watermark.as_str()))
-        .filter_map(|r| r["id"].as_str().map(str::to_owned))
-        .collect();
-    at_watermark.sort();
-    at_watermark.truncate(MAX_WATERMARK_IDS);
+    let ids_at = |stamp: &str| {
+        let mut ids: Vec<&str> = matching
+            .iter()
+            .filter(|r| r["updatedAt"].as_str() == Some(stamp))
+            .filter_map(|r| r["id"].as_str())
+            .collect();
+        ids.sort_unstable();
+        ids
+    };
+    let tied = ids_at(&watermark);
+    let digest = |ids: &[&str]| contracts::hash(&ids.join(","));
+    let mut watermark_hash = None;
+    let mut at_watermark = Vec::new();
+    if args.get("maxResponseBytes").is_some() && tied.len() > 4 {
+        watermark_hash = Some(digest(&tied));
+    } else {
+        at_watermark.extend(
+            tied.iter()
+                .take(MAX_WATERMARK_IDS)
+                .map(|id| (*id).to_owned()),
+        );
+    }
+    if let Some(c) = &cursor
+        && let Some(previous) = &c.wh
+    {
+        let current = if c.w == watermark {
+            digest(&tied)
+        } else {
+            digest(&ids_at(&c.w))
+        };
+        if *previous != current {
+            return Err(stale(
+                "Records sharing a timestamp changed during pagination. Restart without a cursor.",
+            ));
+        }
+    }
     // An empty position is the start of the order: nothing is behind it.
     let position = cursor
         .as_ref()
@@ -365,7 +404,9 @@ pub(crate) fn keyset(
         for r in matching.iter().filter(|r| behind(r)) {
             let updated = r["updatedAt"].as_str().unwrap_or_default();
             let id = r["id"].as_str().unwrap_or_default();
-            if updated > c.w.as_str() || (updated == c.w && !c.wi.iter().any(|w| w == id)) {
+            if updated > c.w.as_str()
+                || (updated == c.w && c.wh.is_none() && !c.wi.iter().any(|w| w == id))
+            {
                 changed.push(json!({"id":r["id"],"kind":r["kind"],"title":r["title"],"status":r["status"],"revision":r["revision"],"updatedAt":r["updatedAt"]}));
             }
         }
@@ -395,6 +436,7 @@ pub(crate) fn keyset(
         pi: position.1,
         w: watermark,
         wi: at_watermark,
+        wh: watermark_hash,
         off: 0,
         st: String::new(),
     };
@@ -437,6 +479,7 @@ pub(crate) fn search_cursor(binding: &str, stamp: &str, offset: usize) -> String
         pi: String::new(),
         w: String::new(),
         wi: Vec::new(),
+        wh: None,
         off: offset,
         st: stamp.into(),
     }
@@ -450,4 +493,43 @@ pub(crate) fn kind(v: &Value) -> Result<Option<String>> {
         Kind::parse(k)?;
     }
     Ok(kind.map(str::to_owned))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn small_budget_cursor_can_cross_a_large_group_with_one_timestamp() {
+        let records = (0..80u128)
+            .map(|i| {
+                json!({
+                    "id": uuid::Uuid::from_u128(i+1).to_string(),
+                    "updatedAt":"2026-01-02T03:04:05.000Z"
+                })
+            })
+            .collect::<Vec<_>>();
+        let mut args = json!({"maxResponseBytes":4096});
+        let mut seen = Vec::new();
+        for _ in 0..records.len() {
+            let page = keyset(records.clone(), Order::Recent, 3, &args, "same-query").unwrap();
+            seen.extend(page.records);
+            if page.pagination["hasMore"] == false {
+                break;
+            }
+            let cursor = page.pagination["nextCursor"].as_str().unwrap();
+            assert!(cursor.len() < 650);
+            args["cursor"] = json!(cursor);
+        }
+        assert_eq!(seen, records);
+        let mut changed = records;
+        changed.remove(0);
+        assert_eq!(
+            keyset(changed, Order::Recent, 3, &args, "same-query")
+                .err()
+                .unwrap()
+                .code(),
+            "CURSOR_STALE"
+        );
+    }
 }

@@ -11,6 +11,30 @@ The native direct MCP server and local-owner stdio bridge apply the same output 
 
 These limits belong to the transport adapter. Each harness owns its query planning, ranking, intelligence, native memory and selected sharing.
 
+## Request a smaller reply
+
+When the connected server advertises `maxResponseBytes` on `mother_get_context` or `mother_search_context`, a client can choose a limit from 4096 to 12288 bytes. This ceiling covers the serialized MCP tool result, including both the text and structured representations. Leave additional room for the host's own message envelope.
+
+For example, this `mother_get_context` request looks for a project's current decision.
+
+```json
+{"query":"Orchard","kind":"decision","status":"confirmed","limit":20,"maxResponseBytes":4096}
+```
+
+Keep the same query or recall profile on subsequent calls. While `pagination.hasMore` is true, pass `pagination.nextCursor` back as the tool's `cursor` argument. Context uses recent order by default for these calls, and also accepts created order. Search preserves its ranking. If the server returns `CURSOR_STALE`, restart from the first page. In particular, a large group of records saved at the same timestamp has a compact cursor that detects changes to that group.
+
+The returned previews identify their records and authors. Check `responseBudget`, the pagination counts and individual truncation flags before interpreting a page as complete. A smaller response can shorten excerpts and omit optional sections, including persona text and pinned content. The original Garden records remain available subject to the current grant.
+
+### Read a complete original in smaller pieces
+
+Use `mother_get_record` when the full record fits. If a client needs a hard byte ceiling for the original as well, discover `mother_read_original` and request a record by ID. To read the persona, use `"source":"persona"` and omit `id`. Shared clients are limited to their granted records.
+
+```json
+{"source":"record","id":"<id returned in a preview>","maxResponseBytes":4096}
+```
+
+Append each returned `fragment` in order and pass `nextCursor` as `cursor` with the same source until the cursor is null. Parse the concatenated string as JSON once, after the final fragment. The digest identifies the serialized source across pages. If the source changes, discard the partial result and read it again from the beginning.
+
 ## Pinned-context regression qualification, 17 November 2026
 
 Synthetic presentation tests cover three and twelve pins with escaped multilingual text, stable metadata and attribution, deterministic UTF-8 prefixes, unchanged small responses, filtered reads with no previews, and explicit failure when required non-content fields cannot fit. A real stdio subprocess test creates and pins twelve synthetic memories, checks the context and wire budgets after three and twelve pins, and reads every complete canonical record back. Twelve is a pin-count limit, not a guarantee that an arbitrary persona plus all required metadata fits the response budget.

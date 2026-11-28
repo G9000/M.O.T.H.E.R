@@ -1,0 +1,18 @@
+{
+  "name": "mother_read_original",
+  "description": "Read the complete authorized current record by ID or the stored persona in bounded pages. Append fragment strings in page order, then parse the resulting JSON. Repeat the same source and record ID with nextCursor until it is null. Restart from the first page if the original changes. Shared clients may read only their granted records.",
+  "inputSchema": {
+    "type": "object",
+    "additionalProperties": false,
+    "required": ["source"],
+    "properties": {
+      "source": {"type": "string", "enum": ["record", "persona"]},
+      "id": {"type": "string", "format": "uuid"},
+      "maxResponseBytes": {"type": "integer", "minimum": 4096, "maximum": 12288, "default": 12288},
+      "cursor": {"type": "string", "minLength": 1, "maxLength": 100}
+    },
+    "if": {"properties": {"source": {"const": "record"}}},
+    "then": {"required": ["id"]},
+    "else": {"not": {"required": ["id"]}}
+  }
+}

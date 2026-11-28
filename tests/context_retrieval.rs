@@ -90,6 +90,232 @@ fn ids(page: &Value) -> Vec<String> {
         .collect()
 }
 
+#[test]
+fn explicit_budget_requires_valid_size_and_pageable_order() {
+    let f = Fixture::new();
+    let auth = &f.codex;
+    assert_eq!(
+        f.context(auth, json!({})).unwrap()["pagination"]["order"],
+        "balanced"
+    );
+    assert_eq!(
+        f.context(auth, json!({"maxResponseBytes":4096})).unwrap()["pagination"]["order"],
+        "recent"
+    );
+    assert_eq!(
+        f.context(auth, json!({"maxResponseBytes":12288,"order":"created"}))
+            .unwrap()["pagination"]["order"],
+        "created"
+    );
+    assert_eq!(
+        f.context(auth, json!({"maxResponseBytes":4096,"order":"balanced"}))
+            .unwrap_err()
+            .code(),
+        "INVALID_INPUT"
+    );
+    for invalid in [
+        json!(4095),
+        json!(12289),
+        json!(4096.5),
+        json!("6000"),
+        Value::Null,
+    ] {
+        for (tool, mut args) in [
+            ("mother_get_context", json!({})),
+            (
+                "mother_search_context",
+                json!({"query":"sample","mode":"literal"}),
+            ),
+        ] {
+            args["maxResponseBytes"] = invalid.clone();
+            assert_eq!(
+                f.store.v1_call(auth, tool, args).unwrap_err().code(),
+                "INVALID_INPUT"
+            );
+        }
+    }
+}
+
+#[test]
+fn project_visits_compare_exact_seen_revisions_and_respect_current_grants() {
+    let f = Fixture::new();
+    let writer = f
+        .store
+        .v1_grant(
+            "work-writer",
+            &["read", "decision:write", "task:write", "checkpoint:write"].map(String::from),
+            &ClientAccess::default(),
+            None,
+        )
+        .unwrap();
+    let create = |record| {
+        f.store.v1_call(&writer,"mother_write_record",json!({
+        "workspaceId":f.workspace,"generation":f.generation,"operationId":Uuid::new_v4().to_string(),
+        "expectedRevision":0,"record":record})).unwrap()["record"].clone()
+    };
+    let decision = create(
+        json!({"kind":"decision","title":"North Star launch","content":"Use a local build","status":"confirmed"}),
+    );
+    create(
+        json!({"kind":"decision","title":"North Star idea","content":"Switch the build","status":"proposed"}),
+    );
+    let checkpoint = create(
+        json!({"kind":"checkpoint","title":"North-Star progress","content":"Build completed","status":"active","nextStep":"Test installation"}),
+    );
+    let task = create(
+        json!({"kind":"task","title":"Inspect delivery","content":"North Star packaging","status":"blocked"}),
+    );
+    f.write(&f.codex, "North Starling excluded", "source");
+    let memory = f.write(&f.chatgpt, "North Star meeting", "source");
+    let resume = |auth| {
+        f.store
+            .v1_call(
+                auth,
+                "mother_project_resume",
+                json!({"project":"NORTH star"}),
+            )
+            .unwrap()
+    };
+    let mark = |auth, seen| {
+        f.store.v1_call(auth,"mother_mark_project_seen",json!({"project":"north-star","workspaceId":f.workspace,"generation":f.generation,"seen":seen}))
+    };
+    let first = resume(&f.codex);
+    assert_eq!(first["matchingRecords"], 5);
+    assert_eq!(first["confirmedDecision"]["id"], decision["id"]);
+    assert_eq!(first["checkpoint"]["id"], checkpoint["id"]);
+    assert_eq!(first["openTask"]["id"], task["id"]);
+    assert_eq!(first["remaining"], 2);
+    let ack = |page: &Value| {
+        Value::Array(
+            page["changes"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .map(|r| r["seen"].clone())
+                .collect(),
+        )
+    };
+    mark(&f.codex, ack(&first)).unwrap();
+    mark(&f.codex, ack(&resume(&f.codex))).unwrap();
+    assert_eq!(resume(&f.codex)["changes"], json!([]));
+    assert_eq!(resume(&f.chatgpt)["hasPreviousVisit"], false);
+    let second = f.revise(&f.chatgpt, &memory, "Intermediate wording", "active");
+    f.revise(&f.chatgpt, &second, "Corrected account", "active");
+    let diff = &resume(&f.codex)["changes"][0];
+    assert_eq!(diff["before"]["revision"], 1);
+    assert_eq!(diff["current"]["revision"], 3);
+    assert_eq!(diff["wording"]["after"], "Corrected account");
+    mark(&f.codex, json!([diff["seen"]])).unwrap();
+    mark(&f.codex, json!([{"id":memory["id"],"revision":1}])).unwrap();
+    assert_eq!(resume(&f.codex)["changes"], json!([]));
+    let guest = f
+        .store
+        .v1_grant(
+            "shared-visitor",
+            &["read".into()],
+            &ClientAccess {
+                mode: AccessMode::Shared,
+                subject: Some("sample-reader".into()),
+                records: vec![memory["id"].as_str().unwrap().into()],
+            },
+            None,
+        )
+        .unwrap();
+    let restricted = resume(&guest);
+    assert_eq!(restricted["matchingRecords"], 1);
+    assert!(restricted["changes"][0]["before"].is_null());
+    assert!(!restricted.to_string().contains("Intermediate wording"));
+    assert!(
+        mark(
+            &guest,
+            json!([{"id":memory["id"],"revision":3},{"id":task["id"],"revision":1}])
+        )
+        .is_err()
+    );
+    assert_eq!(resume(&guest)["hasPreviousVisit"], false);
+}
+
+#[test]
+fn aliases_keepsakes_and_clues_follow_grants_and_saved_positions() {
+    let f = Fixture::new();
+    let r = f.write(&f.chatgpt, "Hearth lantern rehearsal", "owner_statement");
+    let other = f.write(&f.chatgpt, "Paperweight rehearsal", "source");
+    let id = r["id"].as_str().unwrap();
+    let resume = |project| {
+        f.store
+            .v1_call(
+                &f.codex,
+                "mother_project_resume",
+                json!({"project":project}),
+            )
+            .unwrap()
+    };
+    let seen = resume("hearth")["changes"][0]["seen"].clone();
+    f.store.v1_call(&f.codex,"mother_mark_project_seen",json!({"workspaceId":f.workspace,"generation":f.generation,"project":"hearth","seen":[seen]})).unwrap();
+    f.store.project_alias("Ember", "Hearth", false).unwrap();
+    assert!(f.store.project_alias("Hearth", "Ember", false).is_err());
+    assert_eq!(resume("ember")["changes"], json!([]));
+    assert_eq!(resume("ember")["matchingRecords"], 1);
+    let search = || {
+        f.store
+            .v1_call(
+                &f.codex,
+                "mother_search_context",
+                json!({"query":"Ember","mode":"literal"}),
+            )
+            .unwrap()
+    };
+    assert_eq!(
+        search()["records"][0]["recallReason"]["lexical"]["projectName"],
+        "hearth"
+    );
+    assert_eq!(
+        f.context(&f.codex, json!({"query":"Ember"})).unwrap()["records"][0]["id"],
+        id
+    );
+    let guest = f
+        .store
+        .v1_grant(
+            "visitor",
+            &["read".into()],
+            &ClientAccess {
+                mode: AccessMode::Shared,
+                subject: Some("visitor".into()),
+                records: vec![other["id"].as_str().unwrap().into()],
+            },
+            None,
+        )
+        .unwrap();
+    let find = |auth: &Auth, include| {
+        f.store.v1_call(auth,"mother_find_moment",json!({"clue":"show me the day of the lantern rehearsal","includeKeepsakes":include})).unwrap()
+    };
+    assert!(find(&f.codex, false)["records"][0]["eventDate"].is_null());
+    f.store.set_event_date(id, Some("2024-02-29")).unwrap();
+    assert!(f.store.set_event_date(id, Some("2023-02-29")).is_err());
+    f.store.set_keepsake(id, true).unwrap();
+    for auth in [&f.chatgpt, &f.codex] {
+        assert!(!ids(&f.context(auth, json!({})).unwrap()).contains(&id.to_string()));
+        assert!(!ids(&find(auth, false)).contains(&id.to_string()));
+        let moment = &find(auth, true)["records"][0];
+        assert_eq!(moment["id"], id);
+        assert_eq!(moment["recordedAt"], r["createdAt"]);
+        assert_eq!(moment["eventDate"]["value"], "2024-02-29");
+    }
+    assert!(!ids(&find(&guest, true)).contains(&id.to_string()));
+    assert_eq!(resume("hearth")["matchingRecords"], 0);
+    assert_eq!(search()["records"], json!([]));
+    assert_eq!(f.store.v1_garden_reader(id).unwrap()["keepsake"], true);
+    assert_eq!(
+        f.store.v1_export().unwrap_err().code(),
+        "FULL_BACKUP_REQUIRED"
+    );
+    f.store.set_keepsake(id, false).unwrap();
+    assert_eq!(resume("ember")["matchingRecords"], 1);
+    f.store.project_alias("Ember", "Hearth", true).unwrap();
+    assert_eq!(resume("ember")["matchingRecords"], 0);
+    assert_eq!(resume("hearth")["changes"], json!([]));
+}
+
 /// Follow `nextCursor` until `hasMore` is false, collecting every returned ID.
 fn enumerate(f: &Fixture, auth: &Auth, mut args: Value) -> Vec<String> {
     let mut seen = Vec::new();
@@ -461,6 +687,19 @@ fn search_pages_share_one_ranking_and_refuse_stale_cursors() {
     }
     let search = NativeSearch::new(f.dir.path().join("missing-local-model"));
     let args = json!({"query":"harbor","mode":"literal","limit":4,"actor":"synthetic-chatgpt","previewMaxChars":40});
+    let mut budgeted = args.clone();
+    budgeted["maxResponseBytes"] = json!(4096);
+    let first = search
+        .search(&f.store, &f.chatgpt, budgeted.clone())
+        .unwrap();
+    budgeted["cursor"] = first["pagination"]["nextCursor"].clone();
+    assert_eq!(
+        search
+            .search(&f.store, &f.codex, budgeted)
+            .unwrap_err()
+            .code(),
+        "CURSOR_STALE"
+    );
     let mut seen = Vec::new();
     let mut next = args.clone();
     loop {

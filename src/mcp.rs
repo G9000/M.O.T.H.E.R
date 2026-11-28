@@ -19,10 +19,28 @@ fn input_error() -> Error {
     )
 }
 
+fn is_budgeted_recall(name: &str) -> bool {
+    matches!(name, "mother_get_context" | "mother_search_context")
+}
+
+fn read_budget(name: &str, args: &Value) -> Result<Option<usize>> {
+    if is_budgeted_recall(name) {
+        mother::pagination::response_budget(args)
+    } else {
+        Ok(None)
+    }
+}
+
 // Preserve the v1 catalog through the native compatibility view while
 // advertising the current MCP schema dialect.
 fn advertised_tools() -> Result<Vec<Tool>> {
     let mut tools: Vec<Value> = serde_json::from_str(include_str!("../contracts/mcp-tools.json"))?;
+    tools.extend(serde_json::from_str::<Vec<Value>>(include_str!(
+        "../contracts/project-tools.json"
+    ))?);
+    tools.push(serde_json::from_str(include_str!(
+        "../contracts/read-original-tool.json"
+    ))?);
     tools.push(serde_json::from_str(include_str!(
         "../contracts/capabilities-tool.json"
     ))?);

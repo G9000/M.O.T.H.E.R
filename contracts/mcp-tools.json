@@ -1,7 +1,7 @@
 [
   {
     "name": "mother_get_context",
-    "description": "Read M.O.T.H.E.R shared context across all record categories, including memories, decisions, tasks and checkpoints. Returns workspace-wide category counts, explicit query/kind selection counts, bounded previews and task/action unsettled-work totals. Zero memory-category records does not mean the workspace is empty. Without a query or kind filter, previews are balanced: categories take turns for the limit, newest first within each, so recent checkpoints do not displace older memories and decisions, and selection.omittedByKind reports what was left out. updatedSince and updatedBefore limit previews to records last updated in that window. With any filter, previews are the newest matches. Retrieve full records by ID before relying on details. pinned always lists the owner's pinned core memories and decisions, independent of filters and limit. Content excerpts may be shortened to fit the response budget, with truncated flags and responseBudget details; use mother_get_record for complete records. assignedToYou lists open tasks another harness handed to this one; harnesses names the harnesses a task can be handed to with mother_assign_task. Pagination: with filters or an explicit order of recent or created, pagination reports matchingRecords, returnedRecords, remainingAfterPage, hasMore and nextCursor; follow nextCursor until hasMore is false to enumerate every authorized match, and filter server-side by actor, status and basis. pagination.changed lists records revised or added behind the cursor since the previous page, so concurrent changes are reported rather than skipped. Response budget: the persona, pinned excerpts and previews share one budget; previews degrade to compact metadata (compact: true) before the page shrinks, at least three matching records are kept when they exist, and the persona text is replaced by an explicit omitted marker only when nothing else fits. responseBudget reports every omission; use includePersona and includePinned false on repeated calls.",
+    "description": "Read M.O.T.H.E.R shared context across all record categories, including memories, decisions, tasks and checkpoints. Returns workspace-wide category counts, explicit query/kind selection counts, bounded previews and task/action unsettled-work totals. Zero memory-category records does not mean the workspace is empty. Without a query or kind filter, previews are balanced: categories take turns for the limit, newest first within each, so recent checkpoints do not displace older memories and decisions, and selection.omittedByKind reports what was left out. updatedSince and updatedBefore limit previews to records last updated in that window. With any filter, previews are the newest matches. Retrieve full records by ID before relying on details. The default overview lists under pinned the owner's pinned core memories and decisions, independent of filters and limit. Content excerpts may be shortened to fit the response budget, with truncated flags and responseBudget details; use mother_get_record for complete records. assignedToYou lists open tasks another harness handed to this one; harnesses names the harnesses a task can be handed to with mother_assign_task. Pagination: with filters or an explicit order of recent or created, pagination reports matchingRecords, returnedRecords, remainingAfterPage, hasMore and nextCursor; follow nextCursor until hasMore is false to enumerate every authorized match, and filter server-side by actor, status and basis. pagination.changed lists records revised or added behind the cursor since the previous page, so concurrent changes are reported rather than skipped. Response budget: the persona, pinned excerpts and previews share one budget; previews degrade to compact metadata (compact: true) before the page shrinks, the default allocation aims to retain three matching records, and the persona text is replaced by an explicit omitted marker only when nothing else fits. responseBudget reports every omission; use includePersona and includePinned false on repeated calls.",
     "inputSchema": {
       "type": "object",
       "properties": {
@@ -106,6 +106,12 @@
             "created"
           ],
           "description": "balanced (the default without filters) is a single overview page. recent (the default with filters) is newest updatedAt first; created is oldest createdAt first and never moves a record when it is revised. Both return pagination.nextCursor."
+        },
+        "maxResponseBytes": {
+          "type": "integer",
+          "minimum": 4096,
+          "maximum": 12288,
+          "description": "Optional byte ceiling for the serialized MCP tool result (content and structuredContent together). Repeat the budget and original query with pagination.nextCursor to continue. Fetch originals by record ID. Budgeted reads default to recent. Use recent or created for pagination. Explicit balanced ordering is incompatible with a byte ceiling."
         }
       },
       "$schema": "http://json-schema.org/draft-07/schema#",
@@ -222,6 +228,12 @@
           "maximum": 2000,
           "default": 400,
           "description": "Excerpt length per record in UTF-16 units; 0 returns compact metadata only. Use mother_get_record for complete records."
+        },
+        "maxResponseBytes": {
+          "type": "integer",
+          "minimum": 4096,
+          "maximum": 12288,
+          "description": "Optional byte ceiling for the serialized MCP tool result (content and structuredContent together). Repeat the budget and original query with pagination.nextCursor to continue. Fetch originals by record ID."
         }
       },
       "required": [

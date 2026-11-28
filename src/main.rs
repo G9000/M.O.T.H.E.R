@@ -1,6 +1,7 @@
 mod capture_cli;
 #[path = "native_cli.rs"]
 mod cli;
+mod connection_check;
 mod cutover_cli;
 mod explorer;
 mod garden_cli;

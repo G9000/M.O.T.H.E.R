@@ -272,6 +272,15 @@ fn capture_in(tx: &impl View, store: &GardenStore, auth: &Auth, query: &Query) -
     };
     let mut fingerprint =
         workspace.to_string() + &persona.to_string() + &serde_json::to_string(&access)?;
+    // Equal grants can see the same ranking. A budgeted continuation still
+    // belongs to the client whose previous page ended at that position.
+    if query.args.get("maxResponseBytes").is_some() {
+        fingerprint.push_str(&serde_json::to_string(&auth.client_id)?);
+    }
+    let settings = super::settings::Settings::load(tx)?;
+    let query_name = super::settings::words(&query.text);
+    let names = settings.names(&query_name);
+    fingerprint.push_str(&serde_json::to_string(&names)?);
     let mut records = Vec::new();
     for value in visible_records(tx, &access)?.into_iter().filter(recallable) {
         fingerprint.push_str(&value.to_string());
@@ -287,13 +296,18 @@ fn capture_in(tx: &impl View, store: &GardenStore, auth: &Auth, query: &Query) -
         )
         .to_ascii_lowercase()
         .contains(&query.text.to_ascii_lowercase());
+        let alias = (!literal && names.len() > 1)
+            .then(|| super::settings::project_match(&value, &names))
+            .flatten()
+            .map(str::to_owned);
         records.push(Record {
             id: contracts::string(&value, "id")?.into(),
             revision: contracts::integer(&value, "revision", 1, 9007199254740991)?,
             digest: contracts::hash(&text),
             text,
             value,
-            literal,
+            literal: literal || alias.is_some(),
+            alias,
         });
     }
     let mut work = records
@@ -596,9 +610,10 @@ fn eligible_record(value: &Value) -> Result<Eligible> {
 }
 
 fn eligible(tx: &impl View) -> Result<Vec<Eligible>> {
+    let settings = super::settings::Settings::load(tx)?;
     tx.values(super::RECORDS)?
         .iter()
-        .filter(|r| recallable(r))
+        .filter(|r| recallable(r) && !settings.hidden(r["id"].as_str().unwrap_or_default()))
         .map(eligible_record)
         .collect()
 }
@@ -777,9 +792,10 @@ pub fn index_with(
         tx.set_durability(Durability::Immediate)
             .map_err(unavailable)?;
         // Publish only for the exact canonical revision and text that were embedded.
+        let settings = super::settings::Settings::load(&tx)?;
         let current = tx
             .get(super::RECORDS, &record.id)?
-            .filter(recallable)
+            .filter(|v| recallable(v) && !settings.hidden(&record.id))
             .map(|v| eligible_record(&v))
             .transpose()?;
         if current.is_none_or(|c| c.revision != record.revision || c.digest != record.digest) {

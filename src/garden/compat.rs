@@ -1,8 +1,16 @@
 //! Native v1 compatibility records, credentials and receipts in the Garden transaction.
 #[path = "compat_search.rs"]
 pub(crate) mod learned;
+#[path = "moments.rs"]
+mod moments;
+#[path = "original.rs"]
+mod original;
+#[path = "project.rs"]
+mod project;
 #[path = "compat_reader.rs"]
 pub(crate) mod reader;
+#[path = "recall_settings.rs"]
+mod settings;
 #[path = "compat_view.rs"]
 pub(crate) mod view;
 use super::{
@@ -530,6 +538,9 @@ impl GardenStore {
     }
     /// Dispatch v1 tools against native canonical tables without an owner profile policy.
     pub fn v1_call(&self, auth: &Auth, tool: &str, args: Value) -> Result<Value> {
+        if tool == "mother_mark_project_seen" {
+            return project::mark(self, auth, &args);
+        }
         if tool == "mother_get_context" {
             return self.v1_context(
                 auth,
@@ -575,6 +586,9 @@ impl GardenStore {
         metadata(&tx, "workspace")?;
         let p = principal(&tx, auth, "read")?;
         let mut result = match tool {
+            "mother_read_original" => original::read(&tx, auth, &p.access, &args)?,
+            "mother_find_moment" => moments::find(&tx, auth, &p.access, &args)?,
+            "mother_project_resume" => project::resume(&tx, auth, &p.access, &args)?,
             "mother_get_record" => {
                 let id = required_id(&args, "id")?;
                 p.access.require(id)?;
@@ -644,10 +658,10 @@ impl GardenStore {
     /// Credential-free small portable export; incompatible graph state requires a full backup.
     pub fn v1_export(&self) -> Result<Value> {
         let tx = self.db.begin_read().map_err(unavailable)?;
-        if graph_state_exists(&tx)? {
+        if graph_state_exists(&tx)? || settings::Settings::load(&tx)? != Default::default() {
             return Err(Error::domain(
                 "FULL_BACKUP_REQUIRED",
-                "Graph state cannot be represented by a v1 export; use a full backup.",
+                "This workspace contains data that requires a full Garden backup.",
             ));
         }
         preflight_small_export(&tx)?;
@@ -1283,7 +1297,16 @@ fn audit_native(tx: &redb::ReadTransaction) -> Result<()> {
             has_workspace = meta.get("workspace").map_err(unavailable)?.is_some();
             for entry in meta.iter().map_err(unavailable)? {
                 let (k, _) = entry.map_err(unavailable)?;
-                if !["workspace", "persona", "inbox", "pins", "assignments"].contains(&k.value()) {
+                if ![
+                    "workspace",
+                    "persona",
+                    "inbox",
+                    "pins",
+                    "assignments",
+                    "recallSettings",
+                ]
+                .contains(&k.value())
+                {
                     return Err(invalid("Unknown native metadata"));
                 }
             }
@@ -1304,6 +1327,7 @@ fn audit_native(tx: &redb::ReadTransaction) -> Result<()> {
         return Ok(());
     }
     let w = metadata(tx, "workspace")?;
+    settings::Settings::load(tx)?.validate(tx)?;
     contracts::validate_workspace(&w)?;
     contracts::validate_persona(&metadata(tx, "persona")?)?;
     let state = super::state_read(tx).map_err(graph)?;
@@ -1435,10 +1459,15 @@ fn increment(counts: &mut Value, kind: &str, amount: i64) {
     counts[kind] = json!(counts[kind].as_i64().unwrap_or_default() + amount);
 }
 fn visible_records(tx: &impl View, access: &ClientAccess) -> Result<Vec<Value>> {
+    let settings = settings::Settings::load(tx)?;
     Ok(tx
         .values(RECORDS)?
         .into_iter()
-        .filter(|r| r["id"].as_str().is_some_and(|id| access.allows(id)))
+        .filter(|r| {
+            r["id"]
+                .as_str()
+                .is_some_and(|id| access.allows(id) && !settings.hidden(id))
+        })
         .collect())
 }
 fn context(
@@ -1467,10 +1496,12 @@ fn context(
             "includePersona",
             "includePinned",
             "previewMaxChars",
+            "maxResponseBytes",
         ],
     )?;
     let filters = crate::pagination::Filters::parse(&query)?;
     let view = crate::pagination::View::parse(&query)?;
+    let budget = crate::pagination::response_budget(&query)?;
     let profile = query
         .get("profile")
         .map(|_| string(&query, "profile"))
@@ -1478,10 +1509,12 @@ fn context(
     let eligible = profile
         .map(|name| profiles.pins(name, string(&workspace, "id")?))
         .transpose()?;
+    let settings = settings::Settings::load(tx)?;
+    let ordinary = |id: &str| access.allows(id) && !settings.hidden(id);
     let mut pins = tx
         .values(PINS)?
         .into_iter()
-        .filter(|p| p["recordId"].as_str().is_some_and(|id| access.allows(id)))
+        .filter(|p| p["recordId"].as_str().is_some_and(ordinary))
         .collect::<Vec<_>>();
     let mut excluded_pins = std::collections::HashSet::new();
     if let Some(eligible) = eligible {
@@ -1494,7 +1527,7 @@ fn context(
             false
         });
     }
-    let visible = |id: &str| access.allows(id) && !excluded_pins.contains(id);
+    let visible = |id: &str| ordinary(id) && !excluded_pins.contains(id);
     let (since, before) = contracts::time_window(&query)?;
     let q = query
         .get("query")
@@ -1519,9 +1552,14 @@ fn context(
                 .order()
                 .ok_or_else(|| invalid("Invalid cursor. Restart pagination without a cursor."))?
         }
-        None if filtered => crate::pagination::Order::Recent,
+        None if filtered || budget.is_some() => crate::pagination::Order::Recent,
         None => crate::pagination::Order::Balanced,
     };
+    if order == crate::pagination::Order::Balanced && budget.is_some() {
+        return Err(invalid(
+            "An explicit response budget needs a pageable order. Use recent or created, or omit order.",
+        ));
+    }
     if order == crate::pagination::Order::Balanced && query.get("cursor").is_some() {
         return Err(invalid(
             "The balanced overview is a single page. Use order \"recent\" or \"created\" to paginate.",
@@ -1544,6 +1582,13 @@ fn context(
         }
     }
     let inventory = json!({"totalRecords":all.len(),"byKind":by_kind,"recallableRecords":recallable_total,"recallableByKind":recallable_kind,"excludedRecords":all.len()-recallable_total});
+    let query_name = q.map(settings::words).unwrap_or_default();
+    let names = settings.names(&query_name);
+    let alias_match = |r: &Value| {
+        (names.len() > 1)
+            .then(|| settings::project_match(r, &names))
+            .flatten()
+    };
     let mut matching = all
         .iter()
         .filter(|r| {
@@ -1558,6 +1603,7 @@ fn context(
                     )
                     .to_ascii_lowercase()
                     .contains(&q.to_ascii_lowercase())
+                        || alias_match(r).is_some()
                 })
                 && since
                     .as_deref()
@@ -1628,7 +1674,8 @@ fn context(
             since,
             before,
             order.name(),
-            profile
+            profile,
+            contracts::hash(&serde_json::to_string(&settings)?)
         ]));
         let page = crate::pagination::keyset(matching, order, limit, &query, &binding)?;
         matching = page.records;
@@ -1637,7 +1684,18 @@ fn context(
     pagination["matchingRecords"] = json!(total);
     let records = matching
         .iter()
-        .map(|r| preview(r, view.preview_chars))
+        .map(|r| {
+            let mut card = preview(r, view.preview_chars);
+            card["recallReason"] = if q.is_some() {
+                match alias_match(r) {
+                    Some(n) if n != query_name => json!({"projectName":n}),
+                    _ => json!("query phrase"),
+                }
+            } else {
+                json!(order.name())
+            };
+            card
+        })
         .collect::<Vec<_>>();
     let mut work = all
         .iter()
@@ -1694,7 +1752,7 @@ fn context(
         }
         let content = string(&r, "content")?;
         let text = excerpt(content, 2000);
-        pinned.push(json!({"id":r["id"],"kind":r["kind"],"title":r["title"],"status":r["status"],"revision":r["revision"],"updatedAt":r["updatedAt"],"content":text,"truncated":text.len()<content.len(),"pinnedBy":pin["actor"],"pinnedAt":pin["pinnedAt"]}));
+        pinned.push(json!({"id":r["id"],"kind":r["kind"],"title":r["title"],"status":r["status"],"revision":r["revision"],"updatedAt":r["updatedAt"],"content":text,"truncated":text.len()<content.len(),"recallReason":"pinned","pinnedBy":pin["actor"],"pinnedAt":pin["pinnedAt"]}));
     }
     result["pinnedSummary"] = json!({"total":pins_total,"shown":pinned.len(),"inactive":pins_total-pinned.len(),"limit":crate::pins::MAX_PINS});
     result["pinned"] = json!(pinned);
@@ -1731,7 +1789,7 @@ fn context(
         }
         let content = string(&r, "content")?;
         let text = content.chars().take(600).collect::<String>();
-        assigned.push(json!({"id":r["id"],"title":r["title"],"status":r["status"],"revision":r["revision"],"updatedAt":r["updatedAt"],"content":text,"truncated":text.len()<content.len(),"assignedBy":a["assignedBy"],"assignedAt":a["assignedAt"]}));
+        assigned.push(json!({"id":r["id"],"title":r["title"],"status":r["status"],"revision":r["revision"],"updatedAt":r["updatedAt"],"content":text,"truncated":text.len()<content.len(),"recallReason":"assigned to you","assignedBy":a["assignedBy"],"assignedAt":a["assignedAt"]}));
     }
     result["assignedToYouSummary"] = json!({"total":total_assigned,"shown":assigned.len()});
     result["assignedToYou"] = json!(assigned);

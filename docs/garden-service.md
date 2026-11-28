@@ -66,6 +66,15 @@ Repeat with a separate owner-issued grant and output file for each harness. `ser
 
 The service configuration has exactly `version: 3`, `backend: "garden_service"`, `endpointPath`, `workspaceId`, `generation`, `clientId` and `token`. Unknown fields and other formats fail closed. The endpoint descriptor contains public identity and address only. Keep both credential files private; debug formatting redacts their tokens.
 
+## Upgrade an existing owner and verify recall
+
+1. Build the release executable while the existing owner is running. Identify the executable used by the owner and by each harness bridge, the existing database and endpoint, and the launch options you need to preserve. Keep the previous executable available until a connected host verifies the upgrade.
+2. Stop the existing owner from its service manager or foreground terminal. Point its launcher at the release executable and start it with the same database, endpoint and options (including `--explore` if previously enabled). Reuse the existing service credentials. A binary upgrade needs neither initialization nor a new grant.
+3. Restart each harness bridge with the release executable and its current service config. From the connected host, run `mother_get_capabilities`. For size-limited recall, verify that `v1.explicitReadBudget` and `v1.readOriginal` both equal `1`.
+4. In that host, call `mother_get_context` with a known, authorized query, `limit: 1` and `maxResponseBytes: 4096`. Open a returned ID with `mother_read_original` at the same budget. Follow its cursor until the host has the original. Repeat from each host you intend to use. Record the host, result and time without copying the memory contents.
+
+If capabilities still show an older version, check the executable paths used by the running owner and bridge, then refresh the host's tool catalog. See the [bounded recall examples](bounded-mcp-reads.md) and [connection diagnostics](health.md).
+
 ## Authority and recovery
 
 Before sending a bearer token, the client sends a fresh challenge. The owner proves possession of that client's current stored key using HMAC-SHA256, bound to the challenge, client, service, address and workspace generation. The client verifies the proof in constant time. A redirected endpoint or replayed proof receives no bearer token. Current credentials, workspace generation and the actual tool's scope are checked again for each domain call; a successful transport handshake grants no additional scope.

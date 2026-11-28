@@ -55,6 +55,7 @@ impl GardenStore {
         let tx = self.db.begin_read().map_err(unavailable)?;
         let workspace = metadata(&tx, "workspace")?;
         let generation = string(&workspace, "generation")?;
+        let settings = super::settings::Settings::load(&tx)?;
         let pins = keyed(tx.values(PINS)?);
         let assignments = keyed(tx.values(ASSIGNMENTS)?);
         let mut records = tx.values(RECORDS)?;
@@ -81,6 +82,7 @@ impl GardenStore {
                     "truncated": content.encode_utf16().count() > MAX_VIEW_CONTENT,
                     "revision": r["revision"],
                     "actor": r["actor"],
+                    "eventDate":settings.date(id), "keepsake":settings.hidden(id),
                     "createdAt": r["createdAt"],
                     "updatedAt": r["updatedAt"],
                     "references": r.get("references").cloned().unwrap_or_else(|| json!([])),
@@ -109,6 +111,7 @@ impl GardenStore {
             .collect::<Result<Vec<_>>>()?;
         Ok(json!({
             "workspaceId": workspace["id"],
+            "generation": generation,
             "generatedAt": self.clock.now().to_rfc3339_opts(SecondsFormat::Millis, true),
             "total": total,
             "shown": shown.len(),

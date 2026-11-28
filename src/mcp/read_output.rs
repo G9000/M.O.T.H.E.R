@@ -1,6 +1,8 @@
 //! MCP read presentation. Canonical values and mutation receipts are not rewritten.
 use rmcp::model::CallToolResult;
 use serde_json::{Value, json};
+#[path = "budgeted_page.rs"]
+mod budgeted_page;
 
 // Leaves room for the receiving harness's 16 KiB result envelope. A structured
 // reply can also contain the same JSON as escaped text on the MCP wire.
@@ -332,7 +334,9 @@ fn repaginate(value: &mut Value, dropped: usize) -> Option<()> {
 fn is_read(name: &str) -> bool {
     matches!(
         name,
-        "mother_get_context"
+        "mother_find_moment"
+            | "mother_project_resume"
+            | "mother_get_context"
             | "mother_search_context"
             | "mother_get_record"
             | "mother_get_record_history"
@@ -348,7 +352,85 @@ fn is_read(name: &str) -> bool {
     )
 }
 
+fn project_reply(mut value: Value) -> CallToolResult {
+    // Check the complete MCP envelope, including the SDK's second, textual representation.
+    loop {
+        let reply = CallToolResult::structured(value.clone());
+        if fits(&reply, PREVIEW_BYTES) {
+            return reply;
+        }
+        let Some(changes) = value["changes"].as_array_mut() else {
+            return size_error();
+        };
+        if changes.len() > 1 {
+            changes.pop();
+            if increment(&mut value, "remaining").is_none() {
+                return size_error();
+            }
+            continue;
+        }
+        if value["compact"] == true {
+            return size_error();
+        }
+        value["compact"] = json!(true);
+        fn compact(card: &mut Value) {
+            if let Some(obj) = card.as_object_mut() {
+                obj.remove("nextStep");
+                obj.remove("excerpt");
+                obj.insert("truncated".into(), json!(true));
+                if let Some(title) = obj["title"].as_str() {
+                    obj.insert(
+                        "title".into(),
+                        json!(title.chars().take(64).collect::<String>()),
+                    );
+                }
+            }
+        }
+        for key in ["confirmedDecision", "checkpoint", "openTask"] {
+            compact(&mut value[key]);
+        }
+        if let Some(change) = value["changes"].as_array_mut().and_then(|a| a.first_mut()) {
+            compact(&mut change["current"]);
+            compact(&mut change["before"]);
+        }
+    }
+}
+
+pub(super) fn result_with_budget(
+    name: &str,
+    value: Value,
+    budget: Option<usize>,
+) -> CallToolResult {
+    if let Some(bytes) = budget
+        && matches!(name, "mother_get_context" | "mother_search_context")
+    {
+        return budgeted_page::reply(value, bytes).unwrap_or_else(size_error);
+    }
+    result(name, value)
+}
+
 pub(super) fn result(name: &str, mut value: Value) -> CallToolResult {
+    if name == "mother_find_moment" {
+        loop {
+            let reply = CallToolResult::structured(value.clone());
+            if fits(&reply, PREVIEW_BYTES) {
+                return reply;
+            }
+            let Some(records) = value["records"].as_array_mut() else {
+                return size_error();
+            };
+            if records.len() <= 1 {
+                return size_error();
+            }
+            records.pop();
+            if increment(&mut value, "otherMatches").is_none() {
+                return size_error();
+            }
+        }
+    }
+    if name == "mother_project_resume" {
+        return project_reply(value);
+    }
     if name == "mother_garden_media_get" {
         let (Some(data), Some(kind)) = (
             value
@@ -399,7 +481,71 @@ mod tests {
     use super::*;
     use serde_json::json;
 
+    #[test]
+    fn large_project_reply_keeps_a_resolvable_change_and_counts_deferred_items() {
+        let card = json!({"id":"synthetic","revision":2,"title":"桜".repeat(240),"excerpt":"桜".repeat(200),"nextStep":"桜".repeat(200)});
+        let change = json!({"current":card,"before":card,"seen":{"id":"synthetic","revision":2}});
+        let value = json!({"changes":[change,change,change],"remaining":9,"confirmedDecision":card,"checkpoint":card,"openTask":card});
+        let reply = result("mother_project_resume", value);
+        assert!(fits(&reply, PREVIEW_BYTES));
+        let v = reply.structured_content.unwrap();
+        let shown = v["changes"].as_array().unwrap().len();
+        assert!(shown > 0);
+        assert_eq!(shown as u64 + v["remaining"].as_u64().unwrap(), 12);
+        assert_eq!(v["changes"][0]["seen"]["revision"], 2);
+    }
+
     const BUDGET: usize = 12 * 1024;
+
+    #[test]
+    fn explicit_budget_counts_both_copies_and_keeps_real_excerpts() {
+        let mut source = context();
+        source["records"] = json!([{"id":"sample","actor":"writer","kind":"memory","basis":"source","title":"A museum visit","excerpt":"記憶\n\"\\".repeat(500),"revision":1,"updatedAt":"2026-01-02T00:00:00Z"}]);
+        source["pinned"] = json!([{"id":"p","pinnedBy":"owner","content":"雪\\\"".repeat(1500)}]);
+        source["pinnedSummary"] = json!({"total":1,"shown":1});
+        source["persona"] = json!({"hash":"digest","content":"庭".repeat(4000)});
+        source["pagination"] = json!({"order":"recent","returnedRecords":1,"remainingAfterPage":0,"matchingRecords":1,"hasMore":false,"nextCursor":null});
+        for bytes in [4096, 6144, 12288] {
+            let reply = result_with_budget("mother_get_context", source.clone(), Some(bytes));
+            assert!(fits(&reply, bytes));
+            let body = data(&reply);
+            assert_eq!(body["responseBudget"]["maxBytes"], bytes);
+            let first = &body["records"][0];
+            assert_eq!(first["id"], "sample");
+            assert_eq!(first["basis"], "source");
+            assert_eq!(first["actor"], "writer");
+            assert!(!first["excerpt"].as_str().unwrap().is_empty());
+            assert_eq!(first["truncated"], true);
+            let wire = serde_json::to_value(reply).unwrap();
+            let text_body: Value =
+                serde_json::from_str(wire["content"][0]["text"].as_str().unwrap()).unwrap();
+            assert_eq!(text_body, body);
+        }
+    }
+
+    #[test]
+    fn smallest_page_reports_how_to_recover_omitted_revision_notices() {
+        let mut source = context();
+        source["records"] = json!([{"id":"last","actor":"writer","title":"Current decision","excerpt":"Use the signed plan."}]);
+        let changes=(0..32).map(|revision|json!({"id":uuid::Uuid::new_v4().to_string(),"revision":revision,"title":"Earlier decision"})).collect::<Vec<_>>();
+        source["pagination"] = json!({"order":"recent","returnedRecords":1,"remainingAfterPage":1,"hasMore":true,"nextCursor":"A".repeat(540),"changed":changes});
+        source["access"] =
+            json!({"mode":"shared","subject":format!("agent{}","\u{0001}".repeat(240))});
+        let reply = result_with_budget("mother_get_context", source, Some(4096));
+        assert!(fits(&reply, 4096));
+        let page = data(&reply);
+        assert_eq!(page["records"][0]["id"], "last");
+        assert_eq!(page["records"][0]["actor"], "writer");
+        assert_eq!(page["pagination"]["nextCursor"], "A".repeat(540));
+        assert_eq!(page["pagination"]["changedOmittedForBudget"], 32);
+        assert!(
+            page["pagination"]["changesRecovery"]
+                .as_str()
+                .unwrap()
+                .contains("without cursor")
+        );
+        assert_eq!(page["access"]["mode"], "shared");
+    }
 
     fn context() -> Value {
         let counts =

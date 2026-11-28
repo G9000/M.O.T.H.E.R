@@ -41,6 +41,42 @@ impl clap::Subcommand for DeferredGardenCommand {
 }
 #[derive(Debug, Subcommand)]
 pub(crate) enum GardenCommand {
+    /// Register an explicit former name for a project.
+    ProjectAlias {
+        #[arg(long)]
+        db: PathBuf,
+        #[arg(long)]
+        project: String,
+        #[arg(long)]
+        alias: String,
+        #[arg(long)]
+        remove: bool,
+    },
+    /// Keep a record out of ordinary recall, or release it.
+    Keepsake {
+        #[arg(long)]
+        db: PathBuf,
+        #[arg(long)]
+        record: String,
+        #[arg(long)]
+        release: bool,
+    },
+    /// Set the event date separately from the time a record was written.
+    MomentDate {
+        #[arg(long)]
+        db: PathBuf,
+        #[arg(long)]
+        record: String,
+        #[arg(long, required_unless_present = "clear", conflicts_with = "clear")]
+        date: Option<String>,
+        #[arg(long)]
+        clear: bool,
+    },
+    /// Probe a service credential and report observed requests from its host bridge.
+    ConnectionCheck {
+        #[arg(long)]
+        config: PathBuf,
+    },
     /// Browse a bounded, authorized graph neighborhood.
     Relationships(crate::relationships::Browse),
     /// Browse dated claims and compare what the authorized garden knew.
@@ -350,7 +386,10 @@ pub(crate) fn execute_garden(command: GardenCommand) -> Result<()> {
         store::GardenStore,
     };
     let bound_database = match &command {
-        GardenCommand::Review { db, .. }
+        GardenCommand::ProjectAlias { db, .. }
+        | GardenCommand::Keepsake { db, .. }
+        | GardenCommand::MomentDate { db, .. }
+        | GardenCommand::Review { db, .. }
         | GardenCommand::CompatInit { db, .. }
         | GardenCommand::GrantV1 { db, .. }
         | GardenCommand::Grant { db, .. }
@@ -370,6 +409,25 @@ pub(crate) fn execute_garden(command: GardenCommand) -> Result<()> {
         mother::garden::migrate::check_destination(&absolute(path)?)?;
     }
     match command {
+        GardenCommand::ProjectAlias {
+            db,
+            project,
+            alias,
+            remove,
+        } => print_json(
+            GardenStore::open_active(absolute(&db)?)?.project_alias(&project, &alias, remove)?,
+        ),
+        GardenCommand::Keepsake {
+            db,
+            record,
+            release,
+        } => print_json(GardenStore::open_active(absolute(&db)?)?.set_keepsake(&record, !release)?),
+        GardenCommand::MomentDate {
+            db, record, date, ..
+        } => print_json(
+            GardenStore::open_active(absolute(&db)?)?.set_event_date(&record, date.as_deref())?,
+        ),
+        GardenCommand::ConnectionCheck { config } => crate::connection_check::run(&config),
         GardenCommand::Relationships(args) => crate::relationships::browse(args),
         GardenCommand::Timeline(args) => crate::timeline::run(args),
         GardenCommand::SuggestLink(args) => crate::relationships::suggest(args),

@@ -266,6 +266,58 @@ fn owner_backfill_binds_reviewed_video_and_replays_after_reopen() {
     assert_eq!(reopened.media_owner_bytes(&plan.sha256).unwrap(), clip);
 }
 
+#[test]
+fn clue_lookup_returns_only_current_links_and_authorized_photos() {
+    use mother::garden::access::GardenAccess;
+    let dir = tempfile::tempdir().unwrap();
+    let garden = Garden::new(&dir.path().join("garden.redb"));
+    let account = garden.write(memory(
+        "Museum lantern",
+        "A synthetic account",
+        "owner_statement",
+    ));
+    let mut draft = memory("Witness letter", "A separate account", "source");
+    draft["references"] = json!([account["id"]]);
+    let letter = garden.write(draft);
+    let viewer = garden
+        .store
+        .v1_grant(
+            "photo-viewer",
+            &["read", "garden:read", "media:meta"].map(String::from),
+            &ClientAccess::default(),
+            Some(&GardenAccess::All {}),
+        )
+        .unwrap();
+    let lookup = |auth: &Auth| {
+        garden
+            .store
+            .v1_call(auth, "mother_find_moment", json!({"clue":"museum lantern"}))
+            .unwrap()
+    };
+    let image=base64::decode("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/6e8AAAAASUVORK5CYII=").unwrap();
+    std::fs::write(dir.path().join("pixel.png"), image).unwrap();
+    let plan = garden
+        .store
+        .plan_attachment(dir.path(), "pixel.png", id(&account), None, false)
+        .unwrap();
+    assert_eq!(lookup(&viewer)["records"][0]["photos"], json!([]));
+    garden
+        .store
+        .apply_attachment(dir.path(), &plan, &plan.operation_id)
+        .unwrap();
+    let moment = lookup(&viewer);
+    assert_eq!(moment["records"][0]["photos"][0]["sha256"], plan.sha256);
+    assert_eq!(moment["records"][0]["linkedRecords"][0]["id"], letter["id"]);
+    assert!(!lookup(&garden.writer).to_string().contains(&plan.sha256));
+    garden.store.set_keepsake(id(&letter), true).unwrap();
+    assert_eq!(lookup(&viewer)["records"][0]["linkedRecords"], json!([]));
+    garden
+        .store
+        .revoke_attachment(&plan, &plan.operation_id)
+        .unwrap();
+    assert_eq!(lookup(&viewer)["records"][0]["photos"], json!([]));
+}
+
 fn memory(title: &str, content: &str, basis: &str) -> Value {
     json!({"kind":"memory","title":title,"content":content,"status":"active","basis":basis})
 }

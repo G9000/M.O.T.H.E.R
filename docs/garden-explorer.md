@@ -90,6 +90,16 @@ The Reading Path lists every record of the snapshot as text, newest first, so yo
 
 When the browser doesn't offer WebGL 2, the page opens as the Reading Path alone and says why. To choose that page on purpose, add `?view=read` before the `#` in the Garden link, or to the address of an open Garden tab, then reload. The page then draws no 3D garden at all. On its own, the Reading Path of a live Garden checks for changes every five seconds while the page is visible and no record is open, keeping your search and place. Over the garden it shows the snapshot it opened with, and the garden waits to refresh until it is closed.
 
+## Find a moment
+
+In the Reading Path, select **Find a moment from a clue** and type words you remember. Results show the matching words and open in the reader with their accounts, explicit links and available media. The search covers records and text loaded in this view. Select **Include keepsakes** to search those as well. The reader shows an owner-supplied event date separately from the time the account was first saved.
+
+## Curated walks
+
+Open **Reading Path → Curated walks**. Enter a name, choose a record or photo, and select **Add stop**. The picker includes approved letters stored as records and available images from the media gallery. Select a stop in **Walking order** and use **Move up** or **Move down**. **Start walk** opens the first stop. Use **Next stop**, **Previous stop**, or **Open full record** while reading.
+
+**Save walk file** downloads a named `.walk.json` file. Reopen it with **Open walk file**, including after an owner restart changes the browser address. The file contains the walk name, workspace and generation, and ordered references. The Garden resolves the contents each time. Missing stops keep their place and appear as unavailable. Save before reloading or leaving the page.
+
 ## Reading a memory
 
 The reader opens one record over the garden, which stays exactly where it was. It shows three lenses over the same stored record. Switching lenses fetches nothing new and writes nothing.

@@ -212,10 +212,27 @@ fn two_stdio_harnesses_share_one_local_owner_and_reconcile_the_same_write() {
     let other_config = dir.path().join("attachment.service.json");
     configure(&direct, &config);
     configure(&other_direct, &other_config);
+    let connection_check = |path: &Path| {
+        let result = Command::new(env!("CARGO_BIN_EXE_mother"))
+            .args(["garden", "connection-check", "--config"])
+            .arg(path)
+            .output()
+            .unwrap();
+        assert!(
+            result.status.success(),
+            "{}",
+            String::from_utf8_lossy(&result.stdout)
+        );
+        serde_json::from_slice::<Value>(&result.stdout).unwrap()
+    };
+    let initial = connection_check(&config);
+    assert_eq!(initial["probe"], "empty");
+    assert_eq!(initial["hostActivity"], json!({}));
     let mut first = Harness::new(&config);
     let mut second = Harness::new(&config);
     let tools = discovery::collect(|params| first.rpc("tools/list", params));
-    assert_eq!(tools.len(), 19);
+    assert_eq!(tools.len(), 23);
+    assert!(connection_check(&config)["hostActivity"]["lastHostRequestAt"].is_string());
     let legacy: Value = serde_json::from_str(include_str!("../contracts/mcp-tools.json")).unwrap();
     for expected in legacy.as_array().unwrap() {
         let actual = tools
@@ -240,6 +257,15 @@ fn two_stdio_harnesses_share_one_local_owner_and_reconcile_the_same_write() {
         1
     );
     use mother::service::attachment::{CHUNK, PREPARE, STATUS, SUBMIT, UPLOAD};
+    assert_eq!(
+        second.call("mother_project_resume", json!({"project":"IPC continuity"}))["changes"][0]["current"]
+            ["id"],
+        receipt["record"]["id"]
+    );
+    let report = connection_check(&config);
+    assert_eq!(report["hostActivity"]["lastRead"]["outcome"], "record");
+    assert!(report["hostActivity"]["lastRecordReadAt"].is_string());
+    assert_eq!(connection_check(&other_config)["hostActivity"], json!({}));
     use sha2::{Digest, Sha256};
     assert!(tools.iter().all(|tool| tool["name"] != PREPARE));
     let mut transfer = Harness::new(&other_config);
@@ -261,7 +287,7 @@ fn two_stdio_harnesses_share_one_local_owner_and_reconcile_the_same_write() {
         .unwrap();
     assert_eq!(import["inputSchema"], host_file[0]["inputSchema"]);
     assert_eq!(import["_meta"]["openai/fileParams"], json!(["file"]));
-    assert_eq!(catalog.len(), 18);
+    assert_eq!(catalog.len(), 22);
     let mut bytes = include_bytes!("fixtures/attachment-sample.mp4").to_vec();
     let size = CHUNK + 1024;
     bytes.extend_from_slice(&((size - bytes.len()) as u32).to_be_bytes());
